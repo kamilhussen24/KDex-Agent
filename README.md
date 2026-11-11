@@ -115,3 +115,8 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - Token usage page: tokens only. Today, this month, last 7 days. Prices removed. Days older than 14 are deleted.
 - Model lists: up to 8 popular models are shown; search shows up to 10; any other model id can be typed. Non-chat models (embedding, image, audio) are hidden.
 - Terminal: the model is told to read stdout, stderr and the exit code, report the real result, and retry a failed command at most twice. Results now say "Command succeeded" or "Command FAILED". An empty final reply after tool work gets a fallback message.
+
+## v1.7.0
+- Always allow: a terminal command card has "Always allow <command> in this chat". Later commands that use only allowed commands run without asking. Dangerous commands, `rm`, `sudo`, `curl`/`wget`, `ssh`, shells, `git push`/`reset`/`rebase`, and anything with `$( )` or backticks always ask. The list belongs to the chat.
+- Task checklist: the model keeps one live "Plan" card up to date for tasks with three or more steps.
+- Background jobs: `start_job`, `check_job`, `stop_job`, `list_jobs` run servers and watchers in Termux with logs in `~/.kdex/jobs`. Starting a job asks for approval. Checking, listing and stopping do not.

@@ -6,13 +6,22 @@ import { stream, complete } from './providers.js';
 import { TOOLS, WRITE_TOOLS, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo } from './git.js';
-import { TERMUX_TOOLS, TERMUX_ACTIONS, previewTermux, runTermux, getTermuxPath } from './termux.js';
+import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction } from './gittools.js';
 
 export const BUDGETS = { economy: 3000, balanced: 9000, full: 60000 };
 
 // ------------------------------------------------------------------ settings & models
+const PLAN_TOOL = {
+  name: 'update_plan',
+  description: 'Show the user a short checklist of the steps of a multi-step task and keep it up to date. Call it at the start of any task with 3 or more steps, then again each time a step starts or finishes. Send the full list every time.',
+  parameters: {
+    type: 'object',
+    properties: { steps: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string', enum: ['todo', 'doing', 'done'] } }, required: ['text', 'status'] } } },
+    required: ['steps'],
+  },
+};
 export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false };
 
 export async function getSettings() {
@@ -63,9 +72,10 @@ const ABOUT =
   'The user gives the app one project folder; you can work only inside that folder. ' +
   'What the app can do: chat in any language; read, search, create, edit and delete files in the project with approval, automatic backups and Undo; unzip and zip archives; ' +
   'full Git (status, diff, commit, push, pull, branches, clone, publish to GitHub or GitLab) with approval for every action; run shell commands through Termux when the user turns Terminal on; ' +
-  'optional thinking levels (Off, Low, Medium, High) from the bulb button; attach images and text files; remember short notes about the user; show token usage in Settings. ' +
+  'a live task checklist; background jobs such as local web servers (through Termux); optional thinking levels (Off, Low, Medium, High) from the bulb button; attach images and text files; remember short notes about the user; show token usage in Settings. ' +
   'Where things are: Settings from the menu (providers, models, token saving, thinking, terminal, git identity), Projects from the folder button, Files, Git and Changes chips above the chat. ' +
   'If asked who you are or what you can do, answer from this description in the user\'s language. Do not claim to be a specific underlying model unless the user asks which model is selected; then say it depends on the model they chose in the top bar. ' +
+  'For any task with 3 or more steps, first call update_plan with the steps, then call it again as each step starts and finishes, so the user can follow progress. Skip it for quick one-step answers. ' +
   'Never invent abilities: if something is not listed here, say you cannot do it in this app.\n\n' +
   'HOW TO WORK WELL\n' +
   'Understand the request first. For anything with several steps, think it through, then act. Be concise: no filler, no repeating the question, no pasting whole files. ' +
@@ -83,6 +93,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
         ? 'TERMINAL: run_command runs a bash command in Termux (Linux on this phone) with the project at ' + termuxPath + '. Use it like a computer shell: unzip, installs (pkg/pip/npm), scripts, builds, tests, git. ' +
           'Each command must finish on its own (no prompts, editors or servers that never exit; add -y flags). The user approves every command. ' +
           'After a command you receive stdout, stderr and the exit code. Exit code 0 means success; anything else means it failed. Read the output carefully, then tell the user the real result in plain words (what ran, what happened, what the output means). ' +
+          'SERVERS AND LONG-RUNNING COMMANDS: never run them with run_command (it would hang). Use start_job with a short name, then check_job to confirm it is running and read the log, and stop_job when done. To serve a website use for example start_job python3 -m http.server 8080 --bind 0.0.0.0 (or the project\'s own dev command), then give the user the link http://localhost:8080 (same phone) and mention that other devices on the same Wi-Fi can use the phone\'s IP address. ' +
           'If it failed, fix the cause (a missing package, a wrong path, a typo) and retry at most twice before explaining. Check results with a quick command (ls, cat, a test) instead of assuming. '
         : 'You cannot run shell commands. You do have built-in unzip and zip tools; use them instead of telling the user to run a command. If the user wants scripts, installs or builds run, tell them to open the Terminal chip and turn it on (needs the Termux app). ') +
       'When finished, summarize what you changed in a few lines. ' +
@@ -274,7 +285,7 @@ export async function runTurn(ctx) {
 
   const hasGit = folder ? await isRepo(folder).catch(() => false) : false;
   const termuxPath = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
-  const base = TOOLS.concat(ARCHIVE_TOOLS, termuxPath ? TERMUX_TOOLS : []);
+  const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL], termuxPath ? TERMUX_TOOLS : []);
   const tools = folder ? (hasGit ? base.concat(GIT_TOOLS) : base) : null;
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
@@ -362,20 +373,34 @@ export async function runTurn(ctx) {
       try {
         if (call.bad) throw new Error('The tool arguments were not valid JSON. Try again with valid arguments.');
         if (!folder) throw new Error('No project folder is open.');
-        if (TERMUX_ACTIONS.has(call.name)) {
-          const lines = await previewTermux(call.args || {}, folder);
-          tm.plan = { path: 'terminal', op: 'runs in Termux', added: 0, removed: 0, diff: lines, more: 0 };
-          tm.status = 'pending';
-          await db.put('messages', tm);
-          ui.onTool(tm);
-          const decision = await ui.requestApproval(tm, signal); // commands always ask, even in auto-apply mode
+        if (call.name === 'update_plan') {
+          const steps = (Array.isArray(call.args && call.args.steps) ? call.args.steps : []).slice(0, 20).map((x) => ({ text: String((x && x.text) || '').slice(0, 160), status: ['todo', 'doing', 'done'].includes(x && x.status) ? x.status : 'todo' })).filter((x) => x.text);
+          tm.steps = steps; tm.args = steps.filter((x) => x.status === 'done').length + '/' + steps.length + ' done';
+          tm.content = 'Plan updated.'; tm.status = 'done';
+        } else if (TERMUX_READS.has(call.name)) {
+          tm.content = await runJob(call.name, call.args || {}, folder);
+          tm.status = 'done';
+        } else if (TERMUX_ACTIONS.has(call.name)) {
+          const isJob = call.name === 'start_job';
+          const lines = isJob ? await previewJob(call.args || {}, folder) : await previewTermux(call.args || {}, folder);
+          const keys = allowKeys((call.args || {}).command);
+          const auto = isAllowed((call.args || {}).command, chat.allow);
+          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : 'runs in Termux', added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto };
+          let decision = 'apply';
+          if (!auto) {
+            tm.status = 'pending';
+            await db.put('messages', tm);
+            ui.onTool(tm);
+            decision = await ui.requestApproval(tm, signal); // commands ask unless the user allowed them for this chat
+          }
+          if (decision === 'always' && keys.length) { chat.allow = [...new Set([...(chat.allow || []), ...keys])]; await db.put('chats', chat); decision = 'apply'; }
           if (decision !== 'apply') {
             tm.status = 'rejected';
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this command. Do not retry it; ask what they want instead.';
           } else {
-            tm.content = await runTermux(call.args || {}, folder);
-            readSeen.clear();
+            tm.content = isJob ? await runJob(call.name, call.args || {}, folder) : await runTermux(call.args || {}, folder);
             tm.status = 'applied';
+            readSeen.clear();
           }
         } else if (ARCHIVE_ACTIONS.has(call.name)) {
           const lines = await previewArchive(call.name, call.args || {}, folder);
@@ -450,7 +475,9 @@ export async function runTurn(ctx) {
 
 function previewArgs(call) {
   const a = call.args || {};
-  if (a.command != null) return String(a.command).slice(0, 80);
+  if (a.command != null) return (a.name ? a.name + ': ' : '') + String(a.command).slice(0, 80);
+  if (a.steps != null) return (Array.isArray(a.steps) ? a.steps.length : 0) + ' steps';
+  if (a.name != null && !a.path) return String(a.name);
   if (a.path != null) return String(a.path);
   if (a.dest != null) return String(a.dest);
   if (a.query != null) return String(a.query);
