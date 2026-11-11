@@ -6,7 +6,7 @@ import { stream, complete } from './providers.js';
 import { TOOLS, WRITE_TOOLS, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo } from './git.js';
-import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed } from './termux.js';
+import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction } from './gittools.js';
 
@@ -22,7 +22,7 @@ const PLAN_TOOL = {
     required: ['steps'],
   },
 };
-export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false };
+export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false };
 
 export async function getSettings() {
   return { ...defaults, ...(await kvGet('settings', {})) };
@@ -77,6 +77,15 @@ const ABOUT =
   'If asked who you are or what you can do, answer from this description in the user\'s language. Do not claim to be a specific underlying model unless the user asks which model is selected; then say it depends on the model they chose in the top bar. ' +
   'For any task with 3 or more steps, first call update_plan with the steps, then call it again as each step starts and finishes, so the user can follow progress. Skip it for quick one-step answers. ' +
   'Never invent abilities: if something is not listed here, say you cannot do it in this app.\n\n' +
+  'APP GUIDE (use it to help the user set things up; give the steps in the user\'s language and keep them short)\n' +
+  '- Connect a model: Settings > Add provider, pick the service, paste the API key, choose models (a few popular ones are listed; any other model id can be typed). Thinking: bulb button (Off, Low, Medium, High). Token usage: Settings > Token usage.\n' +
+  '- Open a project: folder button > Open a folder, then pick the folder. Only that folder is accessible.\n' +
+  '- Approvals: the chip above the chat switches Ask first and Auto. Auto runs everyday actions and still asks for risky ones (rm, sudo, force push, publishing). File changes keep backups and Undo.\n' +
+  '- Git: the Git chip. Folder without Git: Clone, New repo (publishes to GitHub or GitLab) or Local only. Pushing needs a name, email and access token: Settings > Git > Identity and access tokens.\n' +
+  '- TERMINAL SETUP, needed once before commands work: (1) Install the Termux app from F-Droid or GitHub, not Google Play. (2) Open Termux and run: mkdir -p ~/.termux && echo "allow-external-apps=true" >> ~/.termux/termux.properties, then close and reopen Termux. ' +
+  '(3) In this app tap the Terminal chip, switch it On, tap Grant permission, then Test connection. (4) For a folder in shared storage run termux-setup-storage once in Termux; if the project path shows unknown, use Change path. Keep Termux open and exempt from battery limits.\n' +
+  '- If the user asks to run a command, install something or start a server and the terminal is off, do not pretend: tell them these steps, starting with whichever are missing. ' +
+  'If a command fails with "Could not reach Termux" or "not found", Termux is not installed or step 2 is missing. A permission error means tap Grant permission. Exit code 127 means the program is missing (pkg install it). Permission denied on files means run termux-setup-storage.\n\n' +
   'HOW TO WORK WELL\n' +
   'Understand the request first. For anything with several steps, think it through, then act. Be concise: no filler, no repeating the question, no pasting whole files. ' +
   'Keep tokens low: read only what you need, read each file once, use search to find lines, prefer small edits. ' +
@@ -93,9 +102,12 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
         ? 'TERMINAL: run_command runs a bash command in Termux (Linux on this phone) with the project at ' + termuxPath + '. Use it like a computer shell: unzip, installs (pkg/pip/npm), scripts, builds, tests, git. ' +
           'Each command must finish on its own (no prompts, editors or servers that never exit; add -y flags). The user approves every command. ' +
           'After a command you receive stdout, stderr and the exit code. Exit code 0 means success; anything else means it failed. Read the output carefully, then tell the user the real result in plain words (what ran, what happened, what the output means). ' +
+          'PHONE LIMITS (important): Termux runs on an Android phone: ARM processor, limited RAM, limited storage, battery, no root. There is no sudo, no systemd, no Docker or virtual machines, and no apt-get; install with pkg install (for example pkg install nodejs python git). Use $HOME and $PREFIX, not /usr or /etc, and ports above 1024. ' +
+          'Install only what the task needs, prefer small tools (SQLite, python3 -m http.server, plain Node), and never install or run heavy things: Docker, Android Studio or Gradle builds, PyTorch, TensorFlow or large AI models, full IDEs, big databases, browsers. If a request needs something that heavy, say so plainly and suggest a lighter way or doing that part on a PC or server. ' +
+          'Before installing, check with command -v tool, df -h . (free space) and free -m (memory). If pip or npm fails building native code, try the pkg version (for example pkg install python-numpy) or a pure Python or JavaScript alternative. Tell the user roughly how big an install is before a large one. ' +
           'SERVERS AND LONG-RUNNING COMMANDS: never run them with run_command (it would hang). Use start_job with a short name, then check_job to confirm it is running and read the log, and stop_job when done. To serve a website use for example start_job python3 -m http.server 8080 --bind 0.0.0.0 (or the project\'s own dev command), then give the user the link http://localhost:8080 (same phone) and mention that other devices on the same Wi-Fi can use the phone\'s IP address. ' +
           'If it failed, fix the cause (a missing package, a wrong path, a typo) and retry at most twice before explaining. Check results with a quick command (ls, cat, a test) instead of assuming. '
-        : 'You cannot run shell commands. You do have built-in unzip and zip tools; use them instead of telling the user to run a command. If the user wants scripts, installs or builds run, tell them to open the Terminal chip and turn it on (needs the Termux app). ') +
+        : 'You cannot run shell commands. You do have built-in unzip and zip tools; use them instead of telling the user to run a command. If the user wants scripts, installs or builds run, give them the TERMINAL SETUP steps from the app guide. ') +
       'When finished, summarize what you changed in a few lines. ' +
       'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval).'
     );
@@ -384,8 +396,9 @@ export async function runTurn(ctx) {
           const isJob = call.name === 'start_job';
           const lines = isJob ? await previewJob(call.args || {}, folder) : await previewTermux(call.args || {}, folder);
           const keys = allowKeys((call.args || {}).command);
-          const auto = isAllowed((call.args || {}).command, chat.allow);
-          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : 'runs in Termux', added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto };
+          const risky = isRiskyCommand((call.args || {}).command);
+          const auto = (chat.auto && !risky) || (!risky && isAllowed((call.args || {}).command, chat.allow));
+          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : 'runs in Termux', added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky };
           let decision = 'apply';
           if (!auto) {
             tm.status = 'pending';
@@ -404,11 +417,14 @@ export async function runTurn(ctx) {
           }
         } else if (ARCHIVE_ACTIONS.has(call.name)) {
           const lines = await previewArchive(call.name, call.args || {}, folder);
-          tm.plan = { path: call.name === 'zip' ? 'zip' : 'unzip', op: call.name, added: 0, removed: 0, diff: lines, more: 0 };
-          tm.status = 'pending';
-          await db.put('messages', tm);
-          ui.onTool(tm);
-          const decision = await ui.requestApproval(tm, signal); // always asks, even in auto-apply mode
+          tm.plan = { path: call.name === 'zip' ? 'zip' : 'unzip', op: call.name, added: 0, removed: 0, diff: lines, more: 0, risky: false, auto: !!chat.auto };
+          let decision = 'apply';
+          if (!chat.auto) {
+            tm.status = 'pending';
+            await db.put('messages', tm);
+            ui.onTool(tm);
+            decision = await ui.requestApproval(tm, signal);
+          }
           if (decision !== 'apply') {
             tm.status = 'rejected';
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this. Do not retry it; ask what they want instead.';
@@ -419,11 +435,15 @@ export async function runTurn(ctx) {
           }
         } else if (GIT_ACTIONS.has(call.name)) {
           const lines = await previewGitAction(call.name, call.args || {}, folder);
-          tm.plan = { path: 'git', op: call.name, added: 0, removed: 0, diff: lines, more: 0 };
-          tm.status = 'pending';
-          await db.put('messages', tm);
-          ui.onTool(tm);
-          const decision = await ui.requestApproval(tm, signal); // git actions always ask, even in auto-apply mode
+          const riskyGit = call.name === 'git_push' && !!(call.args && (call.args.force || call.args.force_push));
+          tm.plan = { path: 'git', op: call.name, added: 0, removed: 0, diff: lines, more: 0, risky: riskyGit, auto: !!chat.auto && !riskyGit };
+          let decision = 'apply';
+          if (!(chat.auto && !riskyGit)) {
+            tm.status = 'pending';
+            await db.put('messages', tm);
+            ui.onTool(tm);
+            decision = await ui.requestApproval(tm, signal);
+          }
           if (decision !== 'apply') {
             tm.status = 'rejected';
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this. Do not retry it; ask what they want instead.';
@@ -439,7 +459,7 @@ export async function runTurn(ctx) {
           const plan = await planWrite(call.name, call.args, folder);
           tm.plan = { path: plan.path, op: plan.op, added: plan.added, removed: plan.removed, diff: plan.diff.lines, more: plan.diff.more };
           let decision = 'apply';
-          if (!settings.autoApply) {
+          if (!(settings.autoApply || chat.auto)) {
             tm.status = 'pending';
             await db.put('messages', tm);
             ui.onTool(tm);

@@ -120,3 +120,19 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - Always allow: a terminal command card has "Always allow <command> in this chat". Later commands that use only allowed commands run without asking. Dangerous commands, `rm`, `sudo`, `curl`/`wget`, `ssh`, shells, `git push`/`reset`/`rebase`, and anything with `$( )` or backticks always ask. The list belongs to the chat.
 - Task checklist: the model keeps one live "Plan" card up to date for tasks with three or more steps.
 - Background jobs: `start_job`, `check_job`, `stop_job`, `list_jobs` run servers and watchers in Termux with logs in `~/.kdex/jobs`. Starting a job asks for approval. Checking, listing and stopping do not.
+
+## v1.8.0
+- Auto mode per chat: a chip above the messages switches between "Ask first" and "Auto". In Auto, file changes, deleting files (backed up, Undo works), zip/unzip, commits, pulls and everyday commands run without asking. Risky actions still ask: `rm`, `sudo`, `dd`, `chmod`/`chown`, `kill`, `ssh`, `git push`/`reset`/`clean`/`rebase`, publishing, and `curl | sh`.
+- Turning Auto on approves the actions that are already waiting, except risky ones.
+- Settings > Approvals in new chats sets the default for new chats.
+
+## v1.8.1
+- The assistant now knows Termux runs on a phone (ARM, limited memory and storage, no root, no sudo/Docker/apt) and keeps installs small: it checks space and memory first, prefers `pkg` packages and light tools, and says so when a task is too heavy for a phone.
+
+## v1.9.0
+
+- New logo everywhere: launcher icon (square and round), splash screen, setup screen, empty chat, drawer header, favicon and store icon.
+- Full light and dark review of every screen. No layout or contrast bugs found; setup, drawer, projects, files, Git, thinking menu, Terminal, Settings, usage, approvals, plan card and Changes all checked in both modes with no page or console errors.
+
+## v1.8.2
+- The assistant now carries a short guide to the whole app: connecting a model, opening a project, Auto/Ask approvals, Git setup, and the one-time Termux setup (install, `allow-external-apps`, permission, storage). When someone asks for commands while the terminal is off, or a command fails because Termux is missing, it walks them through the missing steps.

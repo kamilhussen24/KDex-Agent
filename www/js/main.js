@@ -12,7 +12,7 @@ import { SUPPORT_EMAIL, APP_VERSION } from './config.js';
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
   chat: null, folder: null, think: 'off', running: false, abort: null,
-  approvals: new Map(), els: new Map(), attach: [], sheetStack: [],
+  approvals: new Map(), approvalTm: new Map(), els: new Map(), attach: [], sheetStack: [],
 };
 const ICON = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
 
@@ -115,7 +115,7 @@ function showSetup(first, title) {
   let preset = PRESETS[0]; let keep = { name: '', url: '', key: '' };
   let getPicked = () => [];
   const draw = () => {
-    box.innerHTML = '<div class="wrap"><svg class="logo"><use href="#i-logo"/></svg><h1>' + (first ? 'Welcome to KDex Agent' : (title || 'Add a provider')) + '</h1>' +
+    box.innerHTML = '<div class="wrap"><img class="logo" src="img/logo.png" alt="" width="72" height="72"><h1>' + (first ? 'Welcome to KDex Agent' : (title || 'Add a provider')) + '</h1>' +
       '<p class="sub">Use your own API key. It is stored encrypted on this phone and sent only to the provider you choose.</p>' +
       '<div class="pgrid">' + PRESETS.map((p) => '<button type="button" class="btn sm' + (p.key === preset.key ? ' on' : '') + '" data-p="' + p.key + '"><span class="lbl">' + p.name + '</span></button>').join('') + '</div>' +
       '<label class="field"><span>Name</span><input id="sName" value="' + esc(keep.name || preset.name) + '"></label>' +
@@ -187,7 +187,7 @@ function drawChatList() {
 }
 async function newChat(folder) {
   if (S.running) stopRun();
-  S.chat = { id: uid(), title: '', model: currentModelId(), think: S.settings.defaultThink || 'off', folderId: folder ? folder.id : null, updated: Date.now() };
+  S.chat = { id: uid(), title: '', model: currentModelId(), think: S.settings.defaultThink || 'off', auto: !!S.settings.autoDefault, folderId: folder ? folder.id : null, updated: Date.now() };
   S.folder = folder || null; S.think = S.chat.think; S.chat.fresh = true;
   S.els.clear(); S.approvals.clear();
   fillModels(S.chat.model); drawCtx(); drawThink(); $('#messages').innerHTML = ''; renderEmpty(); updateApproveBar(); closeDrawer();
@@ -207,7 +207,7 @@ async function openChat(id) {
   scrollEnd(true); closeDrawer(); drawChatList(); updateApproveBar();
 }
 function renderEmpty() {
-  $('#messages').innerHTML = '<div class="empty"><svg><use href="#i-logo"/></svg><h2>How can I help?</h2><div>' +
+  $('#messages').innerHTML = '<div class="empty"><img src="img/logo.png" alt="" width="64" height="64"><h2>How can I help?</h2><div>' +
     (S.folder ? 'Working in <b>' + esc(S.folder.name) + '</b>. Ask me to read, search or change files.' : 'Open a folder from Projects to let me work on your files.') + '</div></div>';
 }
 async function persistChat() {
@@ -292,7 +292,7 @@ function toolCard(m) {
   if (m.plan) {
     h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') +
       (m.plan.more ? '<span class="dl c">... ' + m.plan.more + ' more lines</span>' : '') + '</div>';
-    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + ((m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
+    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + ((m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
     if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : 'Apply') + '</span></button>' +
       (m.plan.path === 'terminal' && m.plan.allowKeys && m.plan.allowKeys.length ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.join(', ')) + ' in this chat</button>' : '');
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
@@ -313,7 +313,7 @@ function updateApproveBar() {
 }
 function decide(id, v) {
   const r = S.approvals.get(Number(id)); if (!r) return;
-  S.approvals.delete(Number(id)); r(v); updateApproveBar();
+  S.approvals.delete(Number(id)); S.approvalTm.delete(Number(id)); r(v); updateApproveBar();
 }
 
 // ------------------------------------------------------------ sending
@@ -352,7 +352,7 @@ async function send(regenerate) {
     onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); },
     onNotice: (t) => toast(t), onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
-      S.approvals.set(tm.id, resolve); updateApproveBar();
+      S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
       signal.addEventListener('abort', () => decide(tm.id, 'reject'), { once: true });
     }),
   };
@@ -520,7 +520,7 @@ function openSettings() {
     '<label class="field"><span>Max steps per message</span><input id="setSteps" type="number" min="1" max="60" value="' + st.maxSteps + '"><small>Stops runaway tool loops.</small></label>' +
     '<label class="field"><span>Custom instructions</span><textarea id="setInstr" placeholder="Tone, language, rules...">' + esc(st.instructions) + '</textarea></label>' +
     '<div class="h3">Files</div>' +
-    '<div class="field"><span>Apply changes</span>' + seg('setAuto', [['0', 'Ask me first'], ['1', 'Apply automatically']], st.autoApply ? '1' : '0') + '<small>Backups and Undo work in both modes.</small></div>' +
+    '<div class="field"><span>Approvals in new chats</span>' + seg('setAutoDef', [['0', 'Ask first'], ['1', 'Auto']], st.autoDefault ? '1' : '0') + '<small>Auto runs file changes, zip, commits and everyday commands without asking. Deleting data, sudo, force push, publishing and similar risky actions still ask. You can switch any chat with the chip above the messages. Backups and Undo always work.</small></div>' +
     '<div class="h3">Appearance</div>' + '<div class="field">' + seg('setTheme', [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], st.theme) + '</div>' +
     '<div class="h3">Memory</div><div class="field">' + seg('setLearn', [['1', 'Learn about me'], ['0', 'Off']], st.autoLearn ? '1' : '0') + '<small>Short notes saved on this phone and shared with the model so it knows you.</small></div><div id="memList"></div>' +
     '<button id="memAdd" class="btn" style="width:100%">' + ICON('plus') + '<span class="lbl">Add a note</span></button>' +
@@ -534,7 +534,7 @@ function openSettings() {
     '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
-  bindSeg('setAuto', (v) => save({ autoApply: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
+  bindSeg('setAutoDef', (v) => save({ autoDefault: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
   const rdTerm = () => drawTerm(rdTerm);
   bindSeg('setTerm', async (v) => { await save({ termux: v === '1' }); rdTerm(); updateTermChip(); });
   bindSeg('setTheme', (v) => { save({ theme: v }); applyTheme(); });
@@ -603,7 +603,16 @@ async function openTerminal() {
   };
   draw();
 }
-function updateTermChip() { const l = $('#chipTermLbl'); if (l) l.textContent = S.settings.termux ? 'Terminal on' : 'Terminal'; }
+function updateTermChip() {
+  const l = $('#chipTermLbl'); if (l) l.textContent = S.settings.termux ? 'Terminal on' : 'Terminal';
+  const a = $('#chipAuto'); if (a) { const on = !!(S.chat && S.chat.auto); a.classList.toggle('on', on); $('#chipAutoLbl').textContent = on ? 'Auto' : 'Ask first'; a.title = on ? 'Auto: safe actions run without asking' : 'Ask before every action'; }
+}
+async function toggleAuto() {
+  if (!S.chat) return;
+  S.chat.auto = !S.chat.auto; await db.put('chats', S.chat); updateTermChip();
+  if (S.chat.auto) { toast('Auto: risky actions still ask'); for (const [id, tm] of [...S.approvalTm.entries()]) { if (!(tm.plan && tm.plan.risky) && S.approvals.has(id)) decide(id, 'apply'); } }
+  else toast('Asking before every action');
+}
 let saveChain = Promise.resolve();
 /** Applies the change at once (so the UI never lags a tap behind), then writes it to storage in order. */
 function save(p) {
@@ -948,7 +957,7 @@ function wire() {
   $('#dNew').onclick = () => newChat(S.folder); $('#topNewBtn').onclick = () => newChat(S.folder);
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
-  $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal;
+  $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal; $('#chipAuto').onclick = toggleAuto;
   $('#sheetClose').onclick = closeSheet;
   $('#chatSearch').oninput = drawChatList;
   $('#chatList').onclick = async (e) => {

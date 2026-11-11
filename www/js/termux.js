@@ -178,3 +178,7 @@ export async function runJob(name, args, folder) {
   }
   throw new Error('Unknown job tool');
 }
+
+/** Commands that can destroy data, change the system or publish work. They always ask, even in Auto mode. */
+const RISKY = /(^|[;&|\n]\s*|\s)(sudo|su|rm|rmdir|dd|mkfs\S*|chmod|chown|kill|pkill|killall|shutdown|reboot|ssh|scp|sftp|mkfs)(\s|$)|\bgit\s+(push|reset|clean|rebase)\b|\b(npm|pnpm|yarn|cargo)\s+publish\b|>\s*\/dev\/|\b(curl|wget)\b[^|;]*\|\s*(ba|z)?sh\b|:\(\)\s*\{/i;
+export function isRiskyCommand(command) { const c = String(command || ''); return DANGER.test(c) || RISKY.test(c); }
