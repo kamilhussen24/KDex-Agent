@@ -6,13 +6,14 @@ import { stream, complete } from './providers.js';
 import { TOOLS, WRITE_TOOLS, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo } from './git.js';
+import { TERMUX_TOOLS, TERMUX_ACTIONS, previewTermux, runTermux, getTermuxPath } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction } from './gittools.js';
 
 export const BUDGETS = { economy: 4000, balanced: 12000, full: 60000 };
 
 // ------------------------------------------------------------------ settings & models
-export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off' };
+export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false };
 
 export async function getSettings() {
   return { ...defaults, ...(await kvGet('settings', {})) };
@@ -68,7 +69,7 @@ async function recordUsage(kind, rt, u) {
 }
 
 // ------------------------------------------------------------------ system prompt
-function systemPrompt(folder, memory, summary, custom) {
+function systemPrompt(folder, memory, summary, custom, termuxPath) {
   const parts = [
     'You are KDex Agent, an AI assistant inside an Android app. Answer in the language the user writes in. Be clear, practical and brief.',
   ];
@@ -78,7 +79,9 @@ function systemPrompt(folder, memory, summary, custom) {
       'All paths are relative to this folder.\n' +
       'Rules: look before you change (list_dir, find_files or search, then read_file). Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
       'Do what the user asked and nothing else. The user approves every change and can undo it. ' +
-      'You cannot run code or commands, but you do have built-in unzip and zip tools for archives; use them instead of telling the user to run a command. For anything else you cannot do, say so and tell the user what to run. ' +
+      (termuxPath
+        ? 'You can run shell commands with run_command in Termux (Linux on this phone); the project is at ' + termuxPath + '. Use it for unzip, installs, scripts, tests and git. Commands must exit on their own (no prompts, editors or endless servers). Check the exit code and fix failures yourself. Prefer the file tools for reading and editing files. '
+        : 'You cannot run code or commands, but you do have built-in unzip and zip tools for archives; use them instead of telling the user to run a command. For anything else you cannot do, say so and tell the user what to run. ') +
       'When finished, summarize what you changed in a few lines. Do not paste file contents into the reply unless asked. ' +
       'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval). ' +
       'Read each file once; for large files use search to locate lines before reading a range. Do not repeat a read you already have.'
@@ -168,6 +171,7 @@ async function summarize(chat, rt, dropped) {
 }
 
 async function buildContext(chat, rt, folder, settings, memory) {
+  const termuxPathCtx = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
   const all = (await db.byIndex('messages', 'chatId', chat.id)).sort((a, b) => a.id - b.id)
     .filter((m) => !(m.role === 'assistant' && m.status === 'error'));
   const budget = BUDGETS[settings.mode] || BUDGETS.balanced;
@@ -193,7 +197,7 @@ async function buildContext(chat, rt, folder, settings, memory) {
     const i = start + k;
     return toNeutral(m, { compact: i < lastUser, keepImages: i >= keepImgFrom });
   });
-  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions), messages: msgs };
+  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx), messages: msgs };
 }
 
 // ------------------------------------------------------------------ memory learning
@@ -267,7 +271,8 @@ export async function runTurn(ctx) {
   await db.put('chats', chat);
 
   const hasGit = folder ? await isRepo(folder).catch(() => false) : false;
-  const base = TOOLS.concat(ARCHIVE_TOOLS);
+  const termuxPath = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
+  const base = TOOLS.concat(ARCHIVE_TOOLS, termuxPath ? TERMUX_TOOLS : []);
   const tools = folder ? (hasGit ? base.concat(GIT_TOOLS) : base) : null;
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
@@ -349,7 +354,21 @@ export async function runTurn(ctx) {
       try {
         if (call.bad) throw new Error('The tool arguments were not valid JSON. Try again with valid arguments.');
         if (!folder) throw new Error('No project folder is open.');
-        if (ARCHIVE_ACTIONS.has(call.name)) {
+        if (TERMUX_ACTIONS.has(call.name)) {
+          const lines = await previewTermux(call.args || {}, folder);
+          tm.plan = { path: 'terminal', op: 'runs in Termux', added: 0, removed: 0, diff: lines, more: 0 };
+          tm.status = 'pending';
+          await db.put('messages', tm);
+          ui.onTool(tm);
+          const decision = await ui.requestApproval(tm, signal); // commands always ask, even in auto-apply mode
+          if (decision !== 'apply') {
+            tm.status = 'rejected';
+            tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this command. Do not retry it; ask what they want instead.';
+          } else {
+            tm.content = await runTermux(call.args || {}, folder);
+            tm.status = 'applied';
+          }
+        } else if (ARCHIVE_ACTIONS.has(call.name)) {
           const lines = await previewArchive(call.name, call.args || {}, folder);
           tm.plan = { path: call.name === 'zip' ? 'zip' : 'unzip', op: call.name, added: 0, removed: 0, diff: lines, more: 0 };
           tm.status = 'pending';
@@ -417,6 +436,7 @@ export async function runTurn(ctx) {
 
 function previewArgs(call) {
   const a = call.args || {};
+  if (a.command != null) return String(a.command).slice(0, 80);
   if (a.path != null) return String(a.path);
   if (a.dest != null) return String(a.dest);
   if (a.query != null) return String(a.query);

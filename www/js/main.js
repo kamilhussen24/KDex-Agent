@@ -1,8 +1,9 @@
 // KDex Agent (Android) - UI layer. All data stays on this phone.
 import { $, $$, esc, uid, fmtBytes, fmtTok, fmtUsd, ago, dayKey } from './util.js';
 import { db } from './db.js';
-import { secure, fs, App, isNative } from './native.js';
+import { secure, fs, App, isNative, Termux } from './native.js';
 import { PRESETS, listModels } from './providers.js';
+import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
 import * as G from './git.js';
@@ -265,17 +266,18 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
 function toolCard(m) {
   const st = m.status || 'running';
   let h = '<div class="tool"><div class="th">' + ICON(TOOL_ICON[m.name] || 'file') + '<span class="nm">' + esc(m.name) + '</span><span class="pa">' + esc(m.args || '') + '</span><span class="st ' + st + '">' + esc(st === 'running' ? 'working' : st) + '</span></div>';
   if (m.plan) {
     h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') +
       (m.plan.more ? '<span class="dl c">... ' + m.plan.more + ' more lines</span>' : '') + '</div>';
-    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + ((m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
-    if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">Apply</span></button>';
+    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + ((m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
+    if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : 'Apply') + '</span></button>';
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
     h += '</div>';
+    if (m.plan.path === 'terminal' && m.content && st !== 'pending') h += '<pre class="out">' + esc(m.content.slice(-3000)) + '</pre>';
   } else if (m.status === 'error' || m.status === 'cancelled') {
     h += '<pre class="out">' + esc((m.content || '').slice(0, 400)) + '</pre>';
   }
@@ -497,11 +499,13 @@ function openSettings() {
     '<button id="expBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Export this chat as text</span></button>' +
     '<button id="bkOut" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Back up all data to a folder</span></button>' +
     '<button id="bkIn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Restore from a backup</span></button>' +
+    '<div class="h3">Terminal (Termux)</div><div class="field">' + seg('setTerm', [['0', 'Off'], ['1', 'On']], st.termux ? '1' : '0') + '<small>Lets the agent run shell commands in Termux after you approve each one. Advanced.</small></div><div id="termBox"></div>' +
     '<div class="h3">Git</div><button id="gitId" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Identity and access tokens</span></button>' +
     '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
   bindSeg('setAuto', (v) => save({ autoApply: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
+  bindSeg('setTerm', async (v) => { await save({ termux: v === '1' }); drawTerm(); });
   bindSeg('setTheme', (v) => { save({ theme: v }); applyTheme(); });
   $('#setModel').onchange = (e) => save({ defaultModel: e.target.value });
   $('#setSteps').onchange = (e) => save({ maxSteps: Math.max(1, Math.min(60, Number(e.target.value) || 20)) });
@@ -529,6 +533,28 @@ function openSettings() {
     $('#memList').innerHTML = list.map((m) => '<div class="row-item"><div class="grow s" style="white-space:normal;color:var(--fg)">' + esc(m.text) + '</div><button class="icon-btn" data-dm="' + m.id + '">' + ICON('x') + '</button></div>').join('') || '<div class="note">No notes yet.</div>';
     $$('[data-dm]', body).forEach((b) => b.onclick = async () => { await A.saveMemory((await A.getMemory()).filter((x) => x.id !== b.dataset.dm)); mem(); });
   };
+  const drawTerm = async () => {
+    const box = $('#termBox'); if (!box) return;
+    if (!S.settings.termux) { box.innerHTML = ''; return; }
+    const stt = await Termux.status().catch(() => ({}));
+    const path = S.folder ? await getTermuxPath(S.folder) : null;
+    box.innerHTML =
+      '<div class="kv"><span>Termux app</span><span>' + (stt.installed ? 'installed' : (stt.web ? 'Android only' : 'not found')) + '</span></div>' +
+      '<div class="kv"><span>Permission</span><span>' + (stt.granted ? 'granted' : 'not granted') + '</span></div>' +
+      (S.folder ? '<div class="kv"><span>Path of "' + esc(S.folder.name) + '"</span><span style="word-break:break-all;text-align:right">' + esc(path || 'unknown') + '</span></div>' : '<div class="note">Open a project to see its Termux path.</div>') +
+      '<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">' + (stt.granted ? '' : '<button id="tmPerm" class="btn sm"><span class="lbl">Grant permission</span></button>') +
+      '<button id="tmTest" class="btn sm"><span class="lbl">Test connection</span></button>' + (S.folder ? '<button id="tmPath" class="btn sm"><span class="lbl">Change path</span></button>' : '') + '</div><div id="tmMsg"></div>' +
+      '<div class="card"><div class="t">One-time setup</div><p>1. Install Termux from F-Droid or GitHub (not Google Play).<br>2. In Termux run: <code>mkdir -p ~/.termux &amp;&amp; echo "allow-external-apps=true" &gt;&gt; ~/.termux/termux.properties</code>, then restart Termux.<br>3. Tap Grant permission here (Run commands in Termux environment).<br>4. Pick your project folder through Termux\'s own storage entry, or run <code>termux-setup-storage</code> and pick a folder in shared storage.</p></div>';
+    const msg = (h) => { $('#tmMsg').innerHTML = h; };
+    if ($('#tmPerm')) $('#tmPerm').onclick = async () => { try { await Termux.permission(); } catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); } drawTerm(); };
+    if ($('#tmTest')) $('#tmTest').onclick = async () => {
+      msg('<div class="busy"><span class="spin"></span>Running a test command...</div>');
+      try { const r = await Termux.run('echo ok; uname -m', undefined, 20000); msg('<div class="ok">Works (exit ' + r.exitCode + '): ' + esc((r.stdout || '').trim().replace(/\n/g, ', ')) + '</div>'); }
+      catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); }
+    };
+    if ($('#tmPath')) $('#tmPath').onclick = async () => { const v = await askText('Path in Termux', '/data/data/com.termux/files/home/project', path || ''); if (v !== null) { await setTermuxPath(S.folder, v); drawTerm(); } };
+  };
+  drawTerm();
   mem();
   $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
   $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;

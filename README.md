@@ -81,3 +81,10 @@ cd android && ./gradlew assembleDebug
 ## v1.3.1
 - Built-in `unzip` and `zip` tools (vendor/fflate.js, MIT). The model cannot run commands, so it now extracts and creates .zip files itself after your approval. Existing files are never overwritten; unsafe paths are rejected; limits: 60 MB zip, 200 MB extracted, 3000 files.
 - Fixed the layout of code blocks (language label and Copy button now form a proper header).
+
+## v1.4.0 — Termux terminal (optional, advanced)
+Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) in the Termux app: unzip, npm/pip, scripts, tests, git, curl. Off by default; **every command needs your approval** (Run button), with a warning for destructive commands.
+- Build adds the `com.termux.permission.RUN_COMMAND` permission and a `<queries>` entry for `com.termux` (see scripts/prepare-android.mjs). This makes the app unsuitable for Google Play; it is meant for personal and open-source use.
+- Setup: install Termux (F-Droid/GitHub), add `allow-external-apps=true` to `~/.termux/termux.properties`, restart Termux, tap Grant permission in Settings.
+- The project's Termux path is derived from the picked folder (Termux's own storage provider, or shared storage). It can be changed in Settings.
+- Not verified on a device yet: the native call follows Termux's documented RUN_COMMAND intent (mutable PendingIntent returns stdout/stderr/exit code).

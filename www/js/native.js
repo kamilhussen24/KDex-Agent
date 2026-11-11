@@ -216,3 +216,18 @@ export const fs = {
 
 // ---------------------------------------------------------------- misc
 export const App = isNative ? cap.registerPlugin('App') : null;
+
+/** Optional bridge to the Termux app (Android only). Lets the agent run shell commands after the user approves. */
+export const Termux = {
+  async status() {
+    if (window.__kdexTermux) return { installed: true, granted: true };
+    if (plugin) return plugin.termuxStatus();
+    return { installed: false, granted: false, web: true };
+  },
+  async permission() { if (plugin) return plugin.termuxPermission(); return this.status(); },
+  async run(command, cwd, timeoutMs) {
+    if (window.__kdexTermux) return window.__kdexTermux({ command, cwd, timeoutMs });
+    if (!plugin) throw new Error('The terminal works only in the Android app.');
+    return plugin.termuxRun({ command, cwd, timeoutMs });
+  },
+};

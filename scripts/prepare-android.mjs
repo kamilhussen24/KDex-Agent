@@ -55,6 +55,10 @@ for (const dir of fs.readdirSync(res)) {
 const mf = path.join(android, 'app/src/main/AndroidManifest.xml');
 let m = read(mf);
 m = m.replace('android:allowBackup="true"', 'android:allowBackup="false"');
+// Optional Termux bridge: permission + package visibility (Android 11+)
+if (!m.includes('com.termux.permission.RUN_COMMAND')) {
+  m = m.replace('<application', '<uses-permission android:name="com.termux.permission.RUN_COMMAND" />\n    <queries>\n        <package android:name="com.termux" />\n    </queries>\n    <application');
+}
 write(mf, m);
 
 // 5. gradle: version + optional release signing

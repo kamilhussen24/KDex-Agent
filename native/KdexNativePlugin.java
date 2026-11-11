@@ -1,9 +1,16 @@
 package com.kdex.agent;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.app.PendingIntent;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
@@ -18,9 +25,12 @@ import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import org.json.JSONException;
 
@@ -53,7 +63,9 @@ import javax.crypto.spec.GCMParameterSpec;
  *  - streaming HTTP (no CORS, works for server-sent events)
  *  - folder access through the Storage Access Framework (the user picks a folder; nothing else is reachable)
  */
-@CapacitorPlugin(name = "KdexNative")
+@CapacitorPlugin(name = "KdexNative", permissions = {
+        @Permission(strings = {"com.termux.permission.RUN_COMMAND"}, alias = "termux")
+})
 public class KdexNativePlugin extends Plugin {
 
     private static final String KEY_ALIAS = "kdex_chat_key";
@@ -65,6 +77,98 @@ public class KdexNativePlugin extends Plugin {
 
     private final ExecutorService pool = Executors.newCachedThreadPool();
     private final Map<String, HttpURLConnection> connections = new ConcurrentHashMap<>();
+
+    // ------------------------------------------------------------------ Termux bridge (optional, off by default)
+
+    private static final String TERMUX_PKG = "com.termux";
+    private static final String TERMUX_HOME = "/data/data/com.termux/files/home";
+    private static final String TERMUX_BIN = "/data/data/com.termux/files/usr/bin";
+
+    private JSObject termuxState() {
+        JSObject o = new JSObject();
+        boolean installed = false;
+        try { getContext().getPackageManager().getPackageInfo(TERMUX_PKG, 0); installed = true; } catch (Exception e) { /* not installed */ }
+        o.put("installed", installed);
+        o.put("granted", getPermissionState("termux") == PermissionState.GRANTED);
+        return o;
+    }
+
+    @PluginMethod
+    public void termuxStatus(PluginCall call) { call.resolve(termuxState()); }
+
+    @PluginMethod
+    public void termuxPermission(PluginCall call) {
+        if (getPermissionState("termux") == PermissionState.GRANTED) { call.resolve(termuxState()); return; }
+        requestPermissionForAlias("termux", call, "termuxPermResult");
+    }
+
+    @PermissionCallback
+    private void termuxPermResult(PluginCall call) { call.resolve(termuxState()); }
+
+    /** Runs one command in Termux (background mode) and returns { stdout, stderr, exitCode }. */
+    @PluginMethod
+    public void termuxRun(PluginCall call) {
+        final String command = call.getString("command", "");
+        final String cwd = call.getString("cwd", TERMUX_HOME);
+        Long t = call.getLong("timeoutMs", 120000L);
+        final long timeout = Math.max(1000L, Math.min(t == null ? 120000L : t, 600000L));
+        if (command.trim().isEmpty()) { call.reject("No command."); return; }
+        if (getPermissionState("termux") != PermissionState.GRANTED) { call.reject("Permission \"Run commands in Termux\" is not granted."); return; }
+
+        final Context ctx = getContext();
+        final String action = "com.kdex.agent.TERMUX_RESULT." + System.nanoTime();
+        final Handler handler = new Handler(Looper.getMainLooper());
+        final boolean[] done = {false};
+
+        final BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context c, Intent in) {
+                if (done[0]) return;
+                done[0] = true;
+                handler.removeCallbacksAndMessages(null);
+                try { ctx.unregisterReceiver(this); } catch (Exception e) { /* already gone */ }
+                Bundle b = in.getBundleExtra("result");
+                if (b == null) { call.reject("Termux returned no result. In Termux set allow-external-apps=true in ~/.termux/termux.properties and restart it."); return; }
+                JSObject o = new JSObject();
+                o.put("stdout", b.getString("stdout", ""));
+                o.put("stderr", b.getString("stderr", ""));
+                o.put("exitCode", b.getInt("exitCode", -1));
+                String em = b.getString("errmsg", "");
+                if (em != null && !em.isEmpty()) o.put("errmsg", em);
+                call.resolve(o);
+            }
+        };
+        IntentFilter filter = new IntentFilter(action);
+        if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else ctx.registerReceiver(receiver, filter);
+
+        try {
+            Intent back = new Intent(action).setPackage(ctx.getPackageName());
+            int flags = PendingIntent.FLAG_ONE_SHOT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+            PendingIntent pi = PendingIntent.getBroadcast(ctx, (int) (System.nanoTime() & 0x7fffffff), back, flags);
+
+            String script = "export HOME=" + TERMUX_HOME + "; export PATH=" + TERMUX_BIN + ":$PATH; " + command;
+            Intent run = new Intent("com.termux.RUN_COMMAND");
+            run.setClassName(TERMUX_PKG, "com.termux.app.RunCommandService");
+            run.putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_BIN + "/bash");
+            run.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-c", script});
+            run.putExtra("com.termux.RUN_COMMAND_WORKDIR", cwd);
+            run.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
+            run.putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pi);
+            if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(run); else ctx.startService(run);
+        } catch (Exception e) {
+            done[0] = true;
+            try { ctx.unregisterReceiver(receiver); } catch (Exception ignore) { /* ignore */ }
+            call.reject("Could not reach Termux: " + e.getMessage() + ". Check that Termux is installed, allow-external-apps=true is set, and the permission is granted.");
+            return;
+        }
+        handler.postDelayed(() -> {
+            if (done[0]) return;
+            done[0] = true;
+            try { ctx.unregisterReceiver(receiver); } catch (Exception e) { /* ignore */ }
+            call.reject("The command did not finish within " + (timeout / 1000) + " seconds. It may still be running in Termux.");
+        }, timeout);
+    }
 
     // ------------------------------------------------------------------ secure storage
 
