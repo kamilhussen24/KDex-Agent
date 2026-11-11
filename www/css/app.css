@@ -4,6 +4,7 @@
 --sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);--vh:100dvh}
 html[data-theme=dark]{--bg:#121214;--bg2:#1b1b1f;--card:#1b1b1f;--fg:#ececf0;--mut:#9a9aa5;--line:#2c2c32;--user:#26262c;
 --addbg:#16301f;--delbg:#3a1b1b;--code:#0e0e10}
+html{color-scheme:light}html[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Roboto,sans-serif;overscroll-behavior:none}
 button,input,select,textarea{font:inherit;color:inherit}

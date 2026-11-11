@@ -4,13 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff">
 <title>KDex Agent</title>
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
 <div id="fatal" style="display:none;position:fixed;inset:0;z-index:9999;background:#fff;color:#b00020;padding:calc(env(safe-area-inset-top,0px) + 24px) 16px 16px;font:13px/1.5 monospace;white-space:pre-wrap;overflow:auto"></div>
 <script>
-(function(){var f=document.getElementById('fatal');window.__stage='html';
+(function(){try{var t=localStorage.getItem('kdex-theme')||'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}
+var f=document.getElementById('fatal');window.__stage='html';
 function show(t){f.style.display='block';f.textContent+=t+'\n\n';}
 window.addEventListener('error',function(e){var t=e.target;if(t&&(t.src||t.href)){show('Failed to load: '+(t.src||t.href));}else{show('Error: '+(e.message||'')+' ('+(e.filename||'')+':'+(e.lineno||'')+')\nstage='+window.__stage);}},true);
 window.addEventListener('unhandledrejection',function(e){show('Promise error: '+(e.reason&&(e.reason.stack||e.reason.message)||e.reason)+'\nstage='+window.__stage);});

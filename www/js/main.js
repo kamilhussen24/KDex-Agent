@@ -1,13 +1,13 @@
 // KDex Agent (Android) - UI layer. All data stays on this phone.
 import { $, $$, esc, uid, fmtBytes, fmtTok, fmtUsd, ago, dayKey, copyText } from './util.js';
 import { db, kvGet, kvSet } from './db.js';
-import { secure, fs, App, isNative, Termux } from './native.js';
+import { secure, fs, App, Termux, setBars } from './native.js';
 import { PRESETS, QUICK_FILL, listModels } from './providers.js';
 import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
 import * as G from './git.js';
-import { SUPPORT_EMAIL, APP_NAME, APP_VERSION } from './config.js';
+import { SUPPORT_EMAIL, APP_VERSION } from './config.js';
 
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
@@ -34,6 +34,10 @@ function applyTheme() {
   const t = S.settings.theme;
   const dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  try { localStorage.setItem('kdex-theme', t); } catch (e) { /* ignore */ }
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  const mt = document.querySelector('meta[name=theme-color]'); if (mt && bg) mt.setAttribute('content', bg);
+  setBars(dark, bg || undefined);
 }
 function fitViewport() {
   const set = () => document.documentElement.style.setProperty('--vh', (window.visualViewport ? window.visualViewport.height : innerHeight) + 'px');
@@ -589,7 +593,13 @@ async function openTerminal() {
   draw();
 }
 function updateTermChip() { const l = $('#chipTermLbl'); if (l) l.textContent = S.settings.termux ? 'Terminal on' : 'Terminal'; }
-async function save(p) { S.settings = await A.saveSettings(p); }
+let saveChain = Promise.resolve();
+/** Applies the change at once (so the UI never lags a tap behind), then writes it to storage in order. */
+function save(p) {
+  S.settings = { ...S.settings, ...p };
+  saveChain = saveChain.then(() => A.saveSettings(p)).catch(() => {});
+  return saveChain;
+}
 
 async function openUsage() {
   const body = sheet('Usage and cost', { back: openSettings });
@@ -783,7 +793,7 @@ async function openGitDiff(folder, path) {
 /** Start screen for a folder without Git: clone, publish as a new repository, or keep it local. */
 async function openGitStart(folder, mode) {
   const body = sheet('Git for ' + folder.name);
-  const gsett = await G.getGitSettings(); const hosts = await G.listTokenHosts();
+  const hosts = await G.listTokenHosts();
   let empty = true; try { empty = !(await fs.list(folder.uri, '')).length; } catch (e) { /* ignore */ }
   let m = mode || (empty ? 'clone' : 'new');
   const draw = () => {

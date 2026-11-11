@@ -52,6 +52,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import android.graphics.Color;
+import android.view.Window;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
+
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -91,6 +96,27 @@ public class KdexNativePlugin extends Plugin {
         o.put("installed", installed);
         o.put("granted", getPermissionState("termux") == PermissionState.GRANTED);
         return o;
+    }
+
+    /** Colours the system status and navigation bars to match the app theme. */
+    @PluginMethod
+    public void setBars(final PluginCall call) {
+        final boolean dark = Boolean.TRUE.equals(call.getBoolean("dark", false));
+        final String hex = call.getString("color", dark ? "#121214" : "#FFFFFF");
+        getActivity().runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    int c = Color.parseColor(hex);
+                    Window w = getActivity().getWindow();
+                    w.setStatusBarColor(c);
+                    w.setNavigationBarColor(c);
+                    WindowInsetsControllerCompat ctl = WindowCompat.getInsetsController(w, w.getDecorView());
+                    ctl.setAppearanceLightStatusBars(!dark);
+                    ctl.setAppearanceLightNavigationBars(!dark);
+                    call.resolve();
+                } catch (Exception e) { call.reject(String.valueOf(e.getMessage())); }
+            }
+        });
     }
 
     @PluginMethod

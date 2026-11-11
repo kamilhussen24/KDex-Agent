@@ -224,6 +224,9 @@ export const fs = {
 // ---------------------------------------------------------------- misc
 export const App = isNative ? cap.registerPlugin('App') : null;
 
+/** Colours the Android status and navigation bars to match the theme. */
+export async function setBars(dark, color) { if (plugin) { try { await plugin.setBars({ dark, color }); } catch (e) { /* older build */ } } }
+
 /** Optional bridge to the Termux app (Android only). Lets the agent run shell commands after the user approves. */
 export const Termux = {
   async status() {

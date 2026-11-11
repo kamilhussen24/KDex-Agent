@@ -99,3 +99,10 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 ## v1.5.1
 - Fixed: after a Git action (fetch, pull, push, commit) the sheet's Close and Back buttons stayed disabled. Only the sheet body is locked while an action runs, and the header is always re-enabled.
 - The Thinking control is now an icon button like Attach, with a small dot when thinking is on.
+
+## v1.5.2
+- Fixed: the theme (System / Light / Dark) was applied one tap late, because it was read before the new choice was saved. Settings now apply at once and are written to storage in order.
+- The theme is remembered at launch, so Dark mode no longer flashes white on start.
+- The Android status and navigation bars now follow the chosen theme (new `setBars` call in the native plugin).
+- Native controls (dropdowns, scrollbars, text fields) follow the chosen theme, not only the phone's.
+- Browser tests added in `tests/` (theme, Git sheet, first run). Removed unused code.
