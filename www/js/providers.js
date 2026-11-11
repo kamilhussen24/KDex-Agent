@@ -320,9 +320,13 @@ export const PRESETS = [
   { key: 'gemini', name: 'Gemini', type: 'openai', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', hint: 'AIza...', models: ['gemini-2.5-pro', 'gemini-2.5-flash'] },
   { key: 'deepseek', name: 'DeepSeek', type: 'openai', baseUrl: 'https://api.deepseek.com', hint: 'sk-...', models: ['deepseek-chat', 'deepseek-reasoner'] },
   { key: 'xai', name: 'xAI', type: 'openai', baseUrl: 'https://api.x.ai/v1', hint: 'xai-...', models: ['grok-4'] },
-  { key: 'mistral', name: 'Mistral', type: 'openai', baseUrl: 'https://api.mistral.ai/v1', hint: 'API key', models: ['mistral-large-latest', 'codestral-latest'] },
-  { key: 'groq', name: 'Groq', type: 'openai', baseUrl: 'https://api.groq.com/openai/v1', hint: 'gsk_...', models: ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b'] },
-  { key: 'together', name: 'Together', type: 'openai', baseUrl: 'https://api.together.xyz/v1', hint: 'API key', models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo'] },
-  { key: 'openrouter', name: 'OpenRouter', type: 'openai', baseUrl: 'https://openrouter.ai/api/v1', hint: 'sk-or-...', models: ['anthropic/claude-sonnet-5-5', 'openai/gpt-5', 'google/gemini-2.5-pro', 'deepseek/deepseek-chat'] },
   { key: 'custom', name: 'Custom', type: 'openai', baseUrl: '', hint: 'API key', models: [] },
+];
+/** One-tap fills for the Custom provider (any OpenAI-compatible service). */
+export const QUICK_FILL = [
+  { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', hint: 'sk-or-...' },
+  { name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', hint: 'gsk_...' },
+  { name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', hint: 'API key' },
+  { name: 'Together', baseUrl: 'https://api.together.xyz/v1', hint: 'API key' },
+  { name: 'Ollama (local)', baseUrl: 'http://127.0.0.1:11434/v1', hint: 'any text' },
 ];

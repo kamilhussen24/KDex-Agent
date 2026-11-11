@@ -1,8 +1,8 @@
 // KDex Agent (Android) - UI layer. All data stays on this phone.
-import { $, $$, esc, uid, fmtBytes, fmtTok, fmtUsd, ago, dayKey } from './util.js';
-import { db } from './db.js';
+import { $, $$, esc, uid, fmtBytes, fmtTok, fmtUsd, ago, dayKey, copyText } from './util.js';
+import { db, kvGet, kvSet } from './db.js';
 import { secure, fs, App, isNative, Termux } from './native.js';
-import { PRESETS, listModels } from './providers.js';
+import { PRESETS, QUICK_FILL, listModels } from './providers.js';
 import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
@@ -52,7 +52,7 @@ async function boot() {
   window.__stage = 'settings-ok';
   S.providers = await A.getProviders(); S.models = await A.getModels(); S.folders = await A.getFolders();
   window.__stage = 'wiring'; wire();
-  if (!S.models.length) { showSetup(true); window.__stage = 'ready'; return; }
+  if (!S.models.length && !(await kvGet('setupSkipped', false))) { showSetup(true); window.__stage = 'ready'; return; }
   await enter(); window.__stage = 'ready';
 }
 async function enter() {
@@ -65,6 +65,7 @@ async function enter() {
 async function kvLast() { const r = await db.get('kv', 'lastChat'); return r && r.value; }
 function fillModels(sel) {
   const el = $('#modelSelect');
+  if (!S.models.length) { el.innerHTML = '<option value="">Connect a model</option>'; return; }
   el.innerHTML = S.models.map((m) => '<option value="' + esc(m.id) + '">' + esc(modelLabel(m)) + '</option>').join('');
   const want = sel || (S.chat && S.chat.model) || S.settings.defaultModel;
   if (want && S.models.find((m) => m.id === want)) el.value = want;
@@ -105,27 +106,30 @@ function modelPicker(box, prov, getKey, suggested, have) {
   return () => { const v = $('#mpMan'); if (v && v.value.trim() && !manual.includes(v.value.trim())) manual.push(v.value.trim()); return [...picked, ...manual]; };
 }
 
-function showSetup(first) {
+function showSetup(first, title) {
   const box = $('#setup'); box.classList.remove('hidden');
   let preset = PRESETS[0]; let keep = { name: '', url: '', key: '' };
   let getPicked = () => [];
   const draw = () => {
-    box.innerHTML = '<div class="wrap"><svg class="logo"><use href="#i-logo"/></svg><h1>' + (first ? 'Welcome to KDex Agent' : 'Add a provider') + '</h1>' +
+    box.innerHTML = '<div class="wrap"><svg class="logo"><use href="#i-logo"/></svg><h1>' + (first ? 'Welcome to KDex Agent' : (title || 'Add a provider')) + '</h1>' +
       '<p class="sub">Use your own API key. It is stored encrypted on this phone and sent only to the provider you choose.</p>' +
       '<div class="pgrid">' + PRESETS.map((p) => '<button type="button" class="btn sm' + (p.key === preset.key ? ' on' : '') + '" data-p="' + p.key + '"><span class="lbl">' + p.name + '</span></button>').join('') + '</div>' +
       '<label class="field"><span>Name</span><input id="sName" value="' + esc(keep.name || preset.name) + '"></label>' +
-      '<label class="field ' + (preset.key === 'custom' ? '' : 'hidden') + '" id="sUrlF"><span>Base URL (OpenAI-compatible)</span><input id="sUrl" placeholder="https://example.com/v1" value="' + esc(keep.url || preset.baseUrl) + '" autocapitalize="off"><small>Works with any OpenAI-compatible server, including one on your own network.</small></label>' +
+      '<label class="field ' + (preset.key === 'custom' ? '' : 'hidden') + '" id="sUrlF"><span>Base URL (OpenAI-compatible)</span><input id="sUrl" placeholder="https://example.com/v1" value="' + esc(keep.url || preset.baseUrl) + '" autocapitalize="off"><small>Works with any OpenAI-compatible service or server on your own network. Tap one to fill it in:</small><div class="qf">' + QUICK_FILL.map((q, i) => '<button type="button" class="btn sm" data-qf="' + i + '"><span class="lbl">' + esc(q.name) + '</span></button>').join('') + '</div></label>' +
       '<label class="field"><span>API key</span><input id="sKey" type="password" placeholder="' + esc(preset.hint) + '" autocomplete="off" autocapitalize="off" value="' + esc(keep.key) + '"></label>' +
       '<div id="sPick"></div><div id="sMsg"></div>' +
       '<button id="sGo" class="btn primary" type="button" style="width:100%"><span class="lbl">Save provider</span></button>' +
       '<div class="safe">' + ICON('lock') + '<span>No account, no server. Chats and files never leave your phone except to your provider.</span></div>' +
-      (first ? '' : '<button id="sCancel" class="btn" type="button" style="width:100%"><span class="lbl">Cancel</span></button>') + '</div>';
+      (first ? '<button id="sSkip" class="btn" type="button" style="width:100%"><span class="lbl">Skip for now</span></button><div class="note">Files, Git and Settings work without a model. You can connect one later in Settings, or when you start a chat.</div>'
+        : '<button id="sCancel" class="btn" type="button" style="width:100%"><span class="lbl">Cancel</span></button>') + '</div>';
     $$('[data-p]', box).forEach((b) => b.onclick = () => { keep = { name: '', url: '', key: $('#sKey').value }; preset = PRESETS.find((p) => p.key === b.dataset.p); draw(); });
     const prov = () => ({ id: 'tmp', name: '', type: preset.type, baseUrl: (preset.key === 'custom' ? $('#sUrl').value : preset.baseUrl).trim() });
     getPicked = modelPicker($('#sPick'), { get baseUrl() { return prov().baseUrl; }, type: preset.type }, async () => $('#sKey').value.trim(), preset.models.map((x) => x), []);
     if (preset.models.length) { /* preselect the first two suggestions */ $$('[data-id]', box).slice(0, 2).forEach((c) => { c.checked = true; c.dispatchEvent(new Event('change')); }); }
     $('#sGo').onclick = go;
     if ($('#sCancel')) $('#sCancel').onclick = () => box.classList.add('hidden');
+    if ($('#sSkip')) $('#sSkip').onclick = async () => { await kvSet('setupSkipped', true); await enter(); };
+    $$('[data-qf]', box).forEach((b) => b.onclick = () => { const q = QUICK_FILL[Number(b.dataset.qf)]; $('#sName').value = q.name.replace(/ \(.*\)/, ''); $('#sUrl').value = q.baseUrl; $('#sKey').placeholder = q.hint; });
   };
   const go = async () => {
     const msg = $('#sMsg'); msg.innerHTML = '';
@@ -214,6 +218,7 @@ function drawCtx() {
   const bar = $('#ctxBar');
   if (S.folder) { bar.classList.remove('hidden'); $('#chipFolderName').textContent = S.folder.name; updateChangesChip(); updateGitChip(); }
   else bar.classList.add('hidden');
+  updateTermChip();
 }
 async function updateGitChip() {
   if (!S.folder) return;
@@ -306,11 +311,19 @@ function stopRun() {
   if (S.abort) S.abort.abort();
   [...S.approvals.keys()].forEach((id) => decide(id, 'reject'));
 }
+function noModelNotice() {
+  const box = $('#messages'); const empty = $('.empty', box); if (empty) empty.remove();
+  if ($('#nmNotice')) { $('#nmNotice').scrollIntoView(); return; }
+  const d = document.createElement('div'); d.className = 'msg'; d.id = 'nmNotice';
+  d.innerHTML = '<div class="card"><div class="t">Connect a model to chat</div><p>Files, Git and Settings work without one. To get replies, add a provider and your API key.</p><button class="btn primary sm" id="nmGo"><span class="lbl">Connect a model</span></button></div>';
+  box.appendChild(d); d.scrollIntoView();
+  $('#nmGo').onclick = () => { d.remove(); showSetup(false, 'Connect a model'); };
+}
 async function send(regenerate) {
   if (S.running) { stopRun(); return; }
   const input = $('#input'); const text = regenerate ? '' : input.value.trim();
   if (!regenerate && !text && !S.attach.length) return;
-  if (!S.models.length) { showSetup(true); return; }
+  if (!S.models.length) { noModelNotice(); return; }
   const attach = regenerate ? [] : S.attach;
   const images = attach.filter((a) => a.img).map((a) => ({ mime: a.mime, data: a.data }));
   const files = attach.filter((a) => !a.img);
@@ -377,7 +390,8 @@ function autoGrow() { const t = $('#input'); t.style.height = 'auto'; t.style.he
 
 // ------------------------------------------------------------ thinking pill
 function drawThink() {
-  $('#thinkLbl').textContent = 'Thinking: ' + S.think[0].toUpperCase() + S.think.slice(1);
+  const tl = 'Thinking: ' + S.think[0].toUpperCase() + S.think.slice(1);
+  $('#thinkBtn').setAttribute('aria-label', tl); $('#thinkBtn').title = tl; $('#thinkBtn').classList.toggle('on', S.think !== 'off');
   $$('#thinkMenu .it').forEach((b) => b.classList.toggle('on', b.dataset.think === S.think));
 }
 
@@ -388,6 +402,7 @@ function closeDrawer() { $('#drawer').classList.remove('open'); $('#scrim').clas
 // ------------------------------------------------------------ sheets
 function sheet(title, opts = {}) {
   S.sheetStack.push(title);
+  $$('#sheet .sheet-head button').forEach((b) => { b.disabled = false; });
   $('#sheetTitle').textContent = title; $('#sheet').classList.remove('hidden');
   $('#sheetBack').classList.toggle('hidden', !opts.back); $('#sheetBack').onclick = opts.back || null;
   const tabs = $('#sheetTabs'); tabs.classList.add('hidden'); tabs.innerHTML = '';
@@ -505,7 +520,8 @@ function openSettings() {
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
   bindSeg('setAuto', (v) => save({ autoApply: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
-  bindSeg('setTerm', async (v) => { await save({ termux: v === '1' }); drawTerm(); });
+  const rdTerm = () => drawTerm(rdTerm);
+  bindSeg('setTerm', async (v) => { await save({ termux: v === '1' }); rdTerm(); updateTermChip(); });
   bindSeg('setTheme', (v) => { save({ theme: v }); applyTheme(); });
   $('#setModel').onchange = (e) => save({ defaultModel: e.target.value });
   $('#setSteps').onchange = (e) => save({ maxSteps: Math.max(1, Math.min(60, Number(e.target.value) || 20)) });
@@ -513,16 +529,14 @@ function openSettings() {
   $('#addProv').onclick = () => showSetup(false);
   $$('[data-am]', body).forEach((b) => b.onclick = () => openAddModels(S.providers.find((x) => x.id === b.dataset.am)));
   $$('[data-rmm]', body).forEach((b) => b.onclick = async () => {
-    if (S.models.length === 1) { toast('Keep at least one model.'); return; }
     S.models = S.models.filter((m) => m.id !== b.dataset.rmm); await A.saveModels(S.models);
-    if (S.settings.defaultModel === b.dataset.rmm) await save({ defaultModel: S.models[0].id });
+    if (S.settings.defaultModel === b.dataset.rmm) await save({ defaultModel: S.models[0] ? S.models[0].id : '' });
     fillModels(); openSettings();
   });
   $$('[data-key]', body).forEach((b) => b.onclick = async () => {
     const v = await askText('New API key', 'Paste the key'); if (v) { await secure.set(A.keyName(b.dataset.key), v); toast('Key updated'); }
   });
   $$('[data-rp]', body).forEach((b) => b.onclick = async () => {
-    if (S.providers.length === 1) { toast('Add another provider before removing the last one.'); return; }
     if (!await confirmBox('Remove provider?', 'Its key and models are deleted from this phone.', 'Remove')) return;
     await secure.remove(A.keyName(b.dataset.rp));
     S.providers = S.providers.filter((p) => p.id !== b.dataset.rp); S.models = S.models.filter((m) => m.providerId !== b.dataset.rp);
@@ -533,7 +547,15 @@ function openSettings() {
     $('#memList').innerHTML = list.map((m) => '<div class="row-item"><div class="grow s" style="white-space:normal;color:var(--fg)">' + esc(m.text) + '</div><button class="icon-btn" data-dm="' + m.id + '">' + ICON('x') + '</button></div>').join('') || '<div class="note">No notes yet.</div>';
     $$('[data-dm]', body).forEach((b) => b.onclick = async () => { await A.saveMemory((await A.getMemory()).filter((x) => x.id !== b.dataset.dm)); mem(); });
   };
-  const drawTerm = async () => {
+  rdTerm();
+  mem();
+  $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
+  $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
+  $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message)); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message));
+  $('#gitId').onclick = () => openGitIdentity(openSettings);
+}
+async function drawTerm(redraw) {
+  {
     const box = $('#termBox'); if (!box) return;
     if (!S.settings.termux) { box.innerHTML = ''; return; }
     const stt = await Termux.status().catch(() => ({}));
@@ -546,21 +568,27 @@ function openSettings() {
       '<button id="tmTest" class="btn sm"><span class="lbl">Test connection</span></button>' + (S.folder ? '<button id="tmPath" class="btn sm"><span class="lbl">Change path</span></button>' : '') + '</div><div id="tmMsg"></div>' +
       '<div class="card"><div class="t">One-time setup</div><p>1. Install Termux from F-Droid or GitHub (not Google Play).<br>2. In Termux run: <code>mkdir -p ~/.termux &amp;&amp; echo "allow-external-apps=true" &gt;&gt; ~/.termux/termux.properties</code>, then restart Termux.<br>3. Tap Grant permission here (Run commands in Termux environment).<br>4. Pick your project folder through Termux\'s own storage entry, or run <code>termux-setup-storage</code> and pick a folder in shared storage.</p></div>';
     const msg = (h) => { $('#tmMsg').innerHTML = h; };
-    if ($('#tmPerm')) $('#tmPerm').onclick = async () => { try { await Termux.permission(); } catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); } drawTerm(); };
+    if ($('#tmPerm')) $('#tmPerm').onclick = async () => { try { await Termux.permission(); } catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); } redraw(); };
     if ($('#tmTest')) $('#tmTest').onclick = async () => {
       msg('<div class="busy"><span class="spin"></span>Running a test command...</div>');
       try { const r = await Termux.run('echo ok; uname -m', undefined, 20000); msg('<div class="ok">Works (exit ' + r.exitCode + '): ' + esc((r.stdout || '').trim().replace(/\n/g, ', ')) + '</div>'); }
       catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); }
     };
-    if ($('#tmPath')) $('#tmPath').onclick = async () => { const v = await askText('Path in Termux', '/data/data/com.termux/files/home/project', path || ''); if (v !== null) { await setTermuxPath(S.folder, v); drawTerm(); } };
-  };
-  drawTerm();
-  mem();
-  $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
-  $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
-  $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message)); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message));
-  $('#gitId').onclick = () => openGitIdentity(openSettings);
+    if ($('#tmPath')) $('#tmPath').onclick = async () => { const v = await askText('Path in Termux', '/data/data/com.termux/files/home/project', path || ''); if (v !== null) { await setTermuxPath(S.folder, v); redraw(); } };
+  }
 }
+async function openTerminal() {
+  const body = sheet('Terminal');
+  const seg = (v) => '<div class="seg" id="tSeg">' + [['0', 'Off'], ['1', 'On']].map(([k, l]) => '<button type="button" class="btn sm' + (k === v ? ' on' : '') + '" data-v="' + k + '"><span class="lbl">' + l + '</span></button>').join('') + '</div>';
+  const draw = () => {
+    body.innerHTML = '<p class="note" style="text-align:left;margin-top:0">Let the agent run commands in Termux, inside this project, like on a computer. Every command asks for your approval first.</p>' +
+      '<div class="field"><span>Terminal for the agent</span>' + seg(S.settings.termux ? '1' : '0') + '</div><div id="termBox"></div>';
+    $$('#tSeg .btn', body).forEach((b) => b.onclick = async () => { await save({ termux: b.dataset.v === '1' }); updateTermChip(); draw(); });
+    drawTerm(draw);
+  };
+  draw();
+}
+function updateTermChip() { const l = $('#chipTermLbl'); if (l) l.textContent = S.settings.termux ? 'Terminal on' : 'Terminal'; }
 async function save(p) { S.settings = await A.saveSettings(p); }
 
 async function openUsage() {
@@ -578,7 +606,7 @@ async function openUsage() {
 async function exportChat() {
   const msgs = (await db.byIndex('messages', 'chatId', S.chat.id)).sort((a, b) => a.id - b.id);
   const t = msgs.filter((m) => m.role === 'user' || m.role === 'assistant').map((m) => (m.role === 'user' ? 'You' : 'KDex') + ':\n' + (m.text || '')).join('\n\n');
-  try { await navigator.clipboard.writeText(t); toast('Chat copied to clipboard'); } catch (e) { toast('Could not copy'); }
+  toast(await copyText(t) ? 'Chat copied to clipboard' : 'Could not copy');
 }
 
 // ------------------------------------------------------------ git UI
@@ -591,7 +619,7 @@ function busyLine(text) { const el = $('#gMsg'); if (el) el.innerHTML = text ? '
 function errLine(text) { const el = $('#gMsg'); if (el) el.innerHTML = text ? '<div class="err">' + esc(text) + '</div>' : ''; }
 const DONE = { Fetching: 'Fetched', Pulling: 'Pulled', Pushing: 'Pushed', 'Force pushing': 'Force pushed', Committing: 'Committed', Discarding: 'Discarded', 'Creating branch': 'Branch created', 'Switching branch': 'Switched branch', Merging: 'Merged', 'Deleting branch': 'Branch deleted', 'Undoing commit': 'Commit undone', 'Saving remote': 'Remote saved' };
 async function gitRun(label, fn, after) {
-  $$('#sheet .btn, #sheet .linkbtn, #sheet .icon-btn').forEach((b) => { b.disabled = true; });
+  $$('#sheetBody .btn, #sheetBody .linkbtn, #sheetBody .icon-btn, #sheetBody .stg').forEach((b) => { b.disabled = true; });
   busyLine(label + '...');
   try {
     await fn((p) => busyLine(label + ' ' + pct(p)));
@@ -607,11 +635,12 @@ async function gitRun(label, fn, after) {
 async function loadGitState(folder) {
   const [branch, changes, branches, history, remote] = await Promise.all([G.currentBranch(folder), G.status(folder), G.branches(folder), G.log(folder, GS.hist), G.remoteInfo(folder)]);
   const ab = remote ? await G.aheadBehind(folder) : null;
+  const needToken = remote ? !(await G.getToken(remote.host).catch(() => null)) : false;
   const cur = new Set(changes.map((c) => c.path));
   const prevKnown = GS.keepSel ? GS.known : new Set();
   GS.sel = new Set([...cur].filter((p) => !prevKnown.has(p) || GS.sel.has(p)));
   GS.known = cur; GS.keepSel = true;
-  return { branch, changes, branches, history, remote, ab };
+  return { branch, changes, branches, history, remote, ab, needToken };
 }
 
 async function openGit(tab, keepMsg) {
@@ -639,7 +668,8 @@ function gitHead(st) {
   return (
     '<div class="gsum"><div class="top2">' + ICON('branch') + '<div class="nm">' + esc(st.branch || '') + '</div>' + (abTxt ? '<span class="ab">' + abTxt + '</span>' : (st.remote && st.ab && st.ab.noRemoteBranch ? '<span class="ab">not pushed</span>' : '')) + '</div>' +
     '<div class="rm">' + (st.remote ? esc(st.remote.host + '/' + st.remote.path) : 'No remote yet') + '</div>' +
-    '<div class="seg"><button id="gFetch" class="btn sm"><span class="lbl">Fetch</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button></div></div><div id="gMsg"></div>');
+    '<div class="seg"><button id="gFetch" class="btn sm"><span class="lbl">Fetch</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button></div></div><div id="gMsg"></div>' +
+    (st.needToken ? '<div class="warnbar"><span>No access token saved for ' + esc(st.remote.host) + '. You need one to push or to use a private repository.</span><button id="gTok" class="btn sm"><span class="lbl">Add token</span></button></div>' : ''));
 }
 
 function renderGitTab(folder, st, head, body) {
@@ -708,6 +738,7 @@ function bindGit(folder, st, body) {
     };
     $('#gCommit').onclick = () => { const paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p)); run('Committing', () => G.commit(folder, ta.value, paths)); };
   }
+  if ($('#gTok')) $('#gTok').onclick = async () => { const t = await askText('Access token for ' + st.remote.host, 'Paste the token'); if (t) { await G.saveToken(st.remote.host, t); await G.rememberHost(st.remote.host); toast('Token saved'); openGit(GS.tab); } };
   if ($('#gNew')) $('#gNew').onclick = async () => { const n = await askText('New branch', 'Branch name', 'feature/my-change'); if (n) run('Creating branch', () => G.createBranch(folder, n.replace(/\s+/g, '-'))); };
   $$('[data-sw]', body).forEach((b) => b.onclick = () => run('Switching branch', () => G.checkout(folder, b.dataset.sw)));
   $$('[data-mg]', body).forEach((b) => b.onclick = async () => { if (await confirmBox('Merge branch?', 'Merge "' + b.dataset.mg + '" into "' + st.branch + '"?', 'Merge')) run('Merging', () => G.mergeBranch(folder, b.dataset.mg)); });
@@ -722,7 +753,7 @@ function bindGit(folder, st, body) {
     run('Force pushing', (pr) => G.push(folder, { force: true, onProgress: pr }));
   };
   if ($('#gWipe')) $('#gWipe').onclick = async () => {
-    if (!await confirmBox('Remove Git from this folder?', 'Commit history stored in the app is deleted. Your files are not touched.', 'Remove')) return;
+    if (!await confirmBox('Remove Git from this folder?', 'The commit history of this project is deleted. Your files are not touched.', 'Remove')) return;
     await G.remove(folder); toast('Git removed'); updateGitChip(); openGit();
   };
 }
@@ -759,12 +790,8 @@ async function openGitStart(folder, mode) {
     const tabs = [['clone', 'Clone'], ['new', 'New repo'], ['local', 'Local only']];
     let h = '<div class="seg" style="margin-bottom:14px">' + tabs.map(([k, l]) => '<button class="btn sm' + (m === k ? ' on' : '') + '" data-m="' + k + '"><span class="lbl">' + l + '</span></button>').join('') + '</div><div id="gMsg"></div>';
     if (m === 'clone') {
-      h += '<p class="note" style="text-align:left;margin-top:0">Download a repository into this folder, let the agent edit it, then commit and push.</p>' +
-        (empty ? '' : '<div class="err">This folder is not empty. Pick an empty folder to clone into (Projects &gt; Clone a repository).</div>') +
-        '<label class="field"><span>Repository URL</span><input id="cUrl" placeholder="https://github.com/user/repo.git" autocapitalize="off" autocomplete="off"></label>' +
-        '<label class="field"><span>Access token</span><input id="cTok" type="password" autocomplete="off" autocapitalize="off" placeholder="' + (hosts.length ? 'Leave empty to use a saved token' : 'Needed for private repositories and pushing') + '"><small>Stored encrypted on this phone, once per host.</small></label>' +
-        '<label class="gr" style="border:0"><input type="checkbox" class="cb" id="cFull"><span>Download full history (slower)</span></label>' +
-        '<button id="cGo" class="btn primary" style="width:100%;margin-top:8px"' + (empty ? '' : ' disabled') + '><span class="lbl">Clone repository</span></button>';
+      h += '<p class="note" style="text-align:left;margin-top:0">Download a repository into a new folder named after it, inside <b>' + esc(folder.name) + '</b>. The new folder opens as its own project.</p>' + cloneFields(hosts) +
+        '<button id="cGo" class="btn primary" style="width:100%;margin-top:8px"><span class="lbl">Clone repository</span></button>';
     } else if (m === 'new') {
       h += '<p class="note" style="text-align:left;margin-top:0">Create a repository on GitHub or GitLab for the files in this folder and upload them.</p>' +
         '<div class="field"><span>Service</span><div class="seg" id="nProv"><button class="btn sm on" data-v="github"><span class="lbl">GitHub</span></button><button class="btn sm" data-v="gitlab"><span class="lbl">GitLab</span></button></div></div>' +
@@ -783,12 +810,12 @@ async function openGitStart(folder, mode) {
     $$('[data-m]', body).forEach((b) => b.onclick = () => { m = b.dataset.m; draw(); });
     const segVal = (id) => { const on = $('#' + id + ' .on'); return on ? on.dataset.v : ''; };
     ['nProv', 'nVis'].forEach((id) => { $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); if (id === 'nProv') $('#nHostF').classList.toggle('hidden', b.dataset.v !== 'gitlab'); }); });
-    const lock = (on) => $$('#sheet .btn').forEach((b) => b.disabled = on);
-    const fail = (e) => { lock(false); if ($('#cGo')) $('#cGo').disabled = !empty; const msg = (e && e.message) || String(e); if (/^Set your Git name/.test(msg)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGitStart(folder, m)); } else errLine(msg); };
+    const lock = (on) => $$('#sheetBody .btn').forEach((b) => b.disabled = on);
+    const fail = (e) => { lock(false); const msg = (e && e.message) || String(e); if (/^Set your Git name/.test(msg)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGitStart(folder, m)); } else errLine(msg); };
     if ($('#cGo')) $('#cGo').onclick = async () => {
-      const url = $('#cUrl').value.trim(); if (!url) { errLine('Enter the repository URL.'); return; }
-      lock(true); busyLine('Cloning...');
-      try { await G.clone(folder, url, { token: $('#cTok').value.trim(), depth: $('#cFull').checked ? 0 : 1, onProgress: (p) => busyLine('Cloning ' + pct(p)) }); toast('Cloned'); GS.keepSel = false; drawCtx(); openGit('changes'); } catch (e) { fail(e); }
+      const v = readCloneFields(); if (!v.url) { errLine('Enter the repository URL.'); return; }
+      lock(true);
+      try { await runClone(folder, v, (t) => busyLine(t)); } catch (e) { fail(e); }
     };
     if ($('#nGo')) $('#nGo').onclick = async () => {
       const provider = segVal('nProv'); lock(true); busyLine('Starting...');
@@ -825,13 +852,36 @@ async function openGitIdentity(back) {
 }
 
 // ------------------------------------------------------------ clone from Projects
+function cloneFields(hosts) {
+  return '<label class="field"><span>Repository URL</span><input id="cUrl" placeholder="https://github.com/user/repo.git" autocapitalize="off" autocomplete="off"></label>' +
+    '<label class="field"><span>Access token</span><input id="cTok" type="password" autocomplete="off" autocapitalize="off" placeholder="' + (hosts && hosts.length ? 'Leave empty to use a saved token' : 'Private repos and pushing') + '"><small>Stored encrypted on this phone, once per host.</small></label>' +
+    '<label class="field"><span>Folder name (optional)</span><input id="cName" placeholder="Defaults to the repository name" autocapitalize="off" autocomplete="off"></label>' +
+    '<label class="gr" style="border:0"><input type="checkbox" class="cb" id="cFull"><span>Download full history (slower)</span></label>';
+}
+const readCloneFields = () => ({ url: $('#cUrl').value.trim(), token: $('#cTok').value.trim(), name: $('#cName').value.trim(), full: $('#cFull').checked });
+/** Clone into a new sub-folder of `parent` and open it as a project. */
+async function runClone(parent, v, say) {
+  say('Cloning...');
+  const f = await G.cloneInto(parent, v.url, { token: v.token, name: v.name, depth: v.full ? 0 : 1, id: uid(), onProgress: (p) => say('Cloning ' + pct(p)) });
+  S.folders.push(f); await A.saveFolders(S.folders);
+  GS.keepSel = false; closeSheet(); await newChat(f); await persistChat(); loadChats();
+  toast('Cloned into ' + f.name); openGit('changes');
+}
+/** Projects > Clone: ask for the repository, then for the folder it should go into. */
 async function cloneFlow() {
-  try {
-    const r = await fs.pickFolder(); if (!r || !r.uri) return;
-    let f = S.folders.find((x) => x.uri === r.uri);
-    if (!f) { f = { id: uid(), name: r.name || 'Folder', uri: r.uri }; S.folders.push(f); await A.saveFolders(S.folders); }
-    closeSheet(); await newChat(f); await persistChat(); loadChats(); openGit();
-  } catch (e) { if (!/cancel/i.test(e.message || '')) toast(e.message || 'Could not open the folder'); }
+  const body = sheet('Clone a repository', { back: openProjects });
+  const hosts = await G.listTokenHosts();
+  body.innerHTML = '<p class="note" style="text-align:left;margin-top:0">You choose any folder on your phone. A new folder named after the repository is created inside it, so the folder does not need to be empty.</p><div id="gMsg"></div>' + cloneFields(hosts) +
+    '<button id="cGo" class="btn primary" style="width:100%;margin-top:8px"><span class="lbl">Choose folder and clone</span></button>';
+  $('#cGo').onclick = async () => {
+    const v = readCloneFields(); if (!v.url) { errLine('Enter the repository URL.'); return; }
+    let r; try { r = await fs.pickFolder(); } catch (e) { if (!/cancel/i.test(e.message || '')) errLine(e.message || 'Could not open the folder'); return; }
+    if (!r || !r.uri) return;
+    $$('#sheet .btn').forEach((b) => { b.disabled = true; });
+    const parent = { id: uid(), name: r.name || 'Folder', uri: r.uri };
+    try { await runClone(parent, v, (t) => busyLine(t)); }
+    catch (e) { $$('#sheet .btn').forEach((b) => { b.disabled = false; }); const m = (e && e.message) || String(e); if (/^Set your Git name/.test(m)) { toast('Clone does not need a name, but pushing does. Add it in Settings > Git.'); } errLine(m); }
+  };
 }
 
 // ------------------------------------------------------------ report a reply (store policy for AI apps)
@@ -873,7 +923,7 @@ function wire() {
   $('#dNew').onclick = () => newChat(S.folder); $('#topNewBtn').onclick = () => newChat(S.folder);
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
-  $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges;
+  $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal;
   $('#sheetClose').onclick = closeSheet;
   $('#chatSearch').oninput = drawChatList;
   $('#chatList').onclick = async (e) => {
@@ -893,10 +943,15 @@ function wire() {
   $('#thinkMenu').onclick = (e) => { const b = e.target.closest('[data-think]'); if (!b) return; S.think = b.dataset.think; drawThink(); $('#thinkMenu').classList.add('hidden'); persistChat(); };
   document.addEventListener('click', (e) => { if (!e.target.closest('#thinkMenu')) $('#thinkMenu').classList.add('hidden'); });
   $('#modelSelect').onchange = persistChat;
+  $('#modelSelect').addEventListener('pointerdown', (e) => { if (!S.models.length) { e.preventDefault(); showSetup(false, 'Connect a model'); } });
   $('#approveAll').onclick = () => [...S.approvals.keys()].forEach((id) => decide(id, 'apply'));
   $('#messages').addEventListener('click', async (e) => {
     const c = e.target.closest('[data-copy]');
-    if (c) { const code = c.closest('.codeblock').querySelector('code').textContent; try { await navigator.clipboard.writeText(code); c.firstElementChild.textContent = 'Copied'; setTimeout(() => c.firstElementChild.textContent = 'Copy', 1200); } catch (x) { /* ignore */ } return; }
+    if (c) {
+      const box = c.closest('.code'); const code = box && box.querySelector('code');
+      const ok = code ? await copyText(code.textContent) : false;
+      c.firstElementChild.textContent = ok ? 'Copied' : 'Failed'; setTimeout(() => { c.firstElementChild.textContent = 'Copy'; }, 1400); return;
+    }
     const t = e.target.closest('[data-tool]');
     if (t) {
       if (t.dataset.tool === 'undo') { await undoOne(Number(t.dataset.b)); return; }
@@ -906,13 +961,13 @@ function wire() {
     if (a) {
       if (a.dataset.act === 'regen') regenerate();
       else if (a.dataset.act === 'report') reportReply(Number(a.closest('.msg').dataset.id));
-      else { const el = a.closest('.msg'); const m = await db.get('messages', Number(el.dataset.id)); try { await navigator.clipboard.writeText(m.text || ''); toast('Copied'); } catch (x) { /* ignore */ } }
+      else { const el = a.closest('.msg'); const m = await db.get('messages', Number(el.dataset.id)); toast(await copyText(m.text || '') ? 'Copied' : 'Could not copy'); }
     }
   });
   $('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(false); } });
   if (App && App.addListener) Promise.resolve(App.addListener('backButton', () => {
     if (!$('#dialog').classList.contains('hidden')) { $('#dlgNo').click(); return; }
-    if (!$('#setup').classList.contains('hidden') && S.models.length) { $('#setup').classList.add('hidden'); return; }
+    if (!$('#setup').classList.contains('hidden') && $('#sCancel')) { $('#sCancel').click(); return; }
     if (!$('#sheet').classList.contains('hidden')) { const b = $('#sheetBack'); if (!b.classList.contains('hidden')) b.click(); else closeSheet(); return; }
     if ($('#drawer').classList.contains('open')) { closeDrawer(); return; }
     if (S.running) { stopRun(); return; }

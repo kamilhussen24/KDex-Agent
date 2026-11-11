@@ -77,6 +77,7 @@ setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too lo
       <button id="chipFolder" class="chip" type="button"><svg class="ic"><use href="#i-folder"/></svg><span id="chipFolderName" class="lbl"></span></button>
       <button id="chipFiles" class="chip" type="button"><svg class="ic"><use href="#i-file"/></svg><span class="lbl">Files</span></button>
       <button id="chipGit" class="chip" type="button"><svg class="ic"><use href="#i-branch"/></svg><span id="chipGitLbl" class="lbl">Git</span></button>
+      <button id="chipTerm" class="chip" type="button"><svg class="ic"><use href="#i-terminal"/></svg><span id="chipTermLbl" class="lbl">Terminal</span></button>
       <button id="chipChanges" class="chip" type="button"><svg class="ic"><use href="#i-edit"/></svg><span id="chipChangesLbl" class="lbl">Changes</span></button>
     </div>
 
@@ -97,7 +98,7 @@ setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too lo
         <div class="row">
           <button id="attachBtn" class="icon-btn" type="button" aria-label="Attach"><svg class="ic"><use href="#i-clip"/></svg></button>
           <input id="fileInput" type="file" multiple hidden accept="image/*,.txt,.md,.json,.csv,.py,.js,.ts,.jsx,.tsx,.html,.css,.xml,.yml,.yaml,.log,.sh,.java,.kt,.go,.rs,.c,.cpp,.h,.php,.rb,.sql,.ini,.toml,.env">
-          <button id="thinkBtn" class="pill" type="button" aria-haspopup="menu" aria-expanded="false"><svg class="ic"><use href="#i-bulb"/></svg><span id="thinkLbl" class="lbl">Thinking: Off</span></button>
+          <button id="thinkBtn" class="icon-btn tbtn" type="button" aria-haspopup="menu" aria-label="Thinking: Off"><svg class="ic"><use href="#i-bulb"/></svg></button>
           <span class="spacer"></span>
           <button id="sendBtn" class="send" type="submit" aria-label="Send"><svg class="ic"><use href="#i-up"/></svg></button>
         </div>

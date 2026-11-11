@@ -71,7 +71,7 @@ export async function runRead(name, args, folder) {
   args = args || {};
   if (name === 'list_dir') {
     const rel = cleanRel(args.path || '');
-    const entries = await fs.list(folder.uri, rel);
+    const entries = (await fs.list(folder.uri, rel)).filter((e) => e.name !== '.git');
     entries.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
     if (!entries.length) return '(empty folder)';
     const shown = entries.slice(0, 300).map((e) => (e.isDir ? e.name + '/' : e.name + '  (' + fmtBytes(e.size) + ')'));
@@ -184,6 +184,7 @@ export async function planWrite(name, args, folder) {
   args = args || {};
   const rel = cleanRel(args.path);
   if (!rel) throw new Error('path is required');
+  if (rel === '.git' || rel.startsWith('.git/')) throw new Error('The .git folder is managed by Git; use the git tools instead.');
   if (BINARY_EXT.test(rel)) throw new Error('Binary files cannot be changed here.');
 
   let before = null;

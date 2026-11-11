@@ -88,3 +88,14 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - Setup: install Termux (F-Droid/GitHub), add `allow-external-apps=true` to `~/.termux/termux.properties`, restart Termux, tap Grant permission in Settings.
 - The project's Termux path is derived from the picked folder (Termux's own storage provider, or shared storage). It can be changed in Settings.
 - Not verified on a device yet: the native call follows Termux's documented RUN_COMMAND intent (mutable PendingIntent returns stdout/stderr/exit code).
+
+## v1.5.0
+- Git: repositories now keep a real `.git` folder inside the project, so Termux and other tools see the same repository. A folder that already has a `.git` is detected automatically (remote, branch, changes). Repositories made by older versions keep working. A banner appears when the remote host has no saved token.
+- Clone always creates a new folder named after the repository inside the folder you choose (it does not have to be empty) and opens it as a project.
+- Setup shows Anthropic, OpenAI, Gemini, DeepSeek, xAI and Custom (with quick fills for OpenRouter, Groq, Mistral, Together, Ollama). "Skip for now" lets you use files and Git without a model; sending a message then asks you to connect one.
+- Terminal chip in the chat bar opens the Termux setup and switch. The agent is told how to use it like a computer shell.
+- Fixes: Copy button crash and clipboard fallback, spacing of stacked buttons and key/value rows.
+
+## v1.5.1
+- Fixed: after a Git action (fetch, pull, push, commit) the sheet's Close and Back buttons stayed disabled. Only the sheet body is locked while an action runs, and the header is always re-enabled.
+- The Thinking control is now an icon button like Attach, with a small dot when thinking is on.

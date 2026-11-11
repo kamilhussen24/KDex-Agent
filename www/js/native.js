@@ -140,6 +140,13 @@ function memFolder(uri) {
 const memPut = (m, p, data) => m.set(p, { data: typeof data === 'string' ? enc.encode(data) : data, mtime: Date.now() });
 const memText = (e) => new TextDecoder().decode(e.data);
 
+// A project can live in a sub-folder of a picked tree. Its uri is "<tree uri>|<relative path>".
+const treeOf = (uri) => { const i = String(uri).indexOf('|'); return i < 0 ? String(uri) : String(uri).slice(0, i); };
+const baseOf = (uri) => { const i = String(uri).indexOf('|'); return i < 0 ? '' : String(uri).slice(i + 1); };
+const jn = (b, p) => [b, p].filter(Boolean).join('/');
+export const subUri = (uri, name) => treeOf(uri) + '|' + jn(baseOf(uri), name);
+const rel = (uri, entries) => { const b = baseOf(uri); return b ? entries.map((e) => ({ ...e, path: String(e.path).slice(b.length + 1) })) : entries; };
+
 export const fs = {
   async pickFolder() {
     if (plugin) return plugin.pickFolder();
@@ -151,9 +158,9 @@ export const fs = {
     memPut(m, 'app/config.py', 'ADMIN_IDS = [\n]\n');
     return { uri, name: 'demo', path: 'demo' };
   },
-  async releaseFolder(uri) { if (plugin) await plugin.releaseFolder({ uri }); },
+  async releaseFolder(uri) { if (plugin && !baseOf(uri)) await plugin.releaseFolder({ uri }); },
   async list(uri, path = '') {
-    if (plugin) return (await plugin.list({ uri, path })).entries;
+    if (plugin) return rel(uri, (await plugin.list({ uri: treeOf(uri), path: jn(baseOf(uri), path) })).entries);
     const m = memFolder(uri);
     const base = path ? path.replace(/\/+$/, '') + '/' : '';
     const seen = new Map();
@@ -167,7 +174,7 @@ export const fs = {
     return Array.from(seen.values());
   },
   async walk(uri, path = '', max = 3000) {
-    if (plugin) return plugin.walk({ uri, path, max });
+    if (plugin) { const w = await plugin.walk({ uri: treeOf(uri), path: jn(baseOf(uri), path), max }); return { ...w, files: rel(uri, w.files) }; }
     const m = memFolder(uri);
     const base = path ? path.replace(/\/+$/, '') + '/' : '';
     const files = [];
@@ -175,7 +182,7 @@ export const fs = {
     return { files, truncated: false };
   },
   async stat(uri, path) {
-    if (plugin) return plugin.stat({ uri, path });
+    if (plugin) return plugin.stat({ uri: treeOf(uri), path: jn(baseOf(uri), path) });
     const m = memFolder(uri);
     if (m.has(path)) return { exists: true, isDir: false, size: m.get(path).data.length, modified: m.get(path).mtime };
     const base = path.replace(/\/+$/, '') + '/';
@@ -183,29 +190,29 @@ export const fs = {
     return { exists: path === '', isDir: path === '', size: 0, modified: 0 };
   },
   async readText(uri, path, maxBytes = 1048576) {
-    if (plugin) return plugin.readText({ uri, path, maxBytes });
+    if (plugin) return plugin.readText({ uri: treeOf(uri), path: jn(baseOf(uri), path), maxBytes });
     const m = memFolder(uri);
     if (!m.has(path)) throw new Error('Not found: ' + path);
     const e = m.get(path); const t = memText(e);
     return { text: t.slice(0, maxBytes), size: e.data.length, binary: false, truncated: e.data.length > maxBytes };
   },
   async writeText(uri, path, text) {
-    if (plugin) { await plugin.writeText({ uri, path, text }); return; }
+    if (plugin) { await plugin.writeText({ uri: treeOf(uri), path: jn(baseOf(uri), path), text }); return; }
     memPut(memFolder(uri), path, text);
   },
   async readBytes(uri, path) {
-    if (plugin) return b64ToBytes((await plugin.readB64({ uri, path })).b64);
+    if (plugin) return b64ToBytes((await plugin.readB64({ uri: treeOf(uri), path: jn(baseOf(uri), path) })).b64);
     const m = memFolder(uri);
     if (!m.has(path)) throw new Error('ENOENT: ' + path);
     return m.get(path).data;
   },
   async writeBytes(uri, path, data) {
-    if (plugin) { await plugin.writeB64({ uri, path, b64: bytesToB64(data) }); return; }
+    if (plugin) { await plugin.writeB64({ uri: treeOf(uri), path: jn(baseOf(uri), path), b64: bytesToB64(data) }); return; }
     memPut(memFolder(uri), path, data);
   },
-  async mkdir(uri, path) { if (plugin) await plugin.mkdir({ uri, path }); },
+  async mkdir(uri, path) { if (plugin) await plugin.mkdir({ uri: treeOf(uri), path: jn(baseOf(uri), path) }); },
   async remove(uri, path) {
-    if (plugin) { await plugin.remove({ uri, path }); return; }
+    if (plugin) { await plugin.remove({ uri: treeOf(uri), path: jn(baseOf(uri), path) }); return; }
     const m = memFolder(uri);
     if (m.delete(path)) return;
     const base = path.replace(/\/+$/, '') + '/'; let any = false;

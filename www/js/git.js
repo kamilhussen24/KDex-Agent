@@ -1,6 +1,7 @@
 // Git for a project folder. The working tree lives in the folder you picked (through Android's folder
-// access); the .git data lives inside the app, so the folder stays clean and fast.
-import { fs as safFs, httpRaw, secure } from './native.js';
+// access). New repositories keep a real .git folder inside the project, so Termux and other tools see the same
+// repository. Older repositories created by earlier versions keep their data inside the app.
+import { fs as safFs, httpRaw, secure, subUri } from './native.js';
 import { kvGet, kvSet } from './db.js';
 import { lineDiff } from './tools.js';
 
@@ -118,11 +119,15 @@ async function author() {
 }
 
 // ---------------------------------------------------------------- context
-const ctx = (folder) => ({ fs: makeFs(folder), dir: DIR, gitdir: '/g-' + folder.id });
-async function gitdirExists(folder) {
-  try { await lightning().stat('/g-' + folder.id + '/HEAD'); return true; } catch (e) { return false; }
+const modes = new Map(); // folder id -> 'native' (.git inside the project) | 'app' (kept inside the app)
+const ctx = (folder) => ({ fs: makeFs(folder), dir: DIR, gitdir: modes.get(folder.id) === 'native' ? DIR + '/.git' : '/g-' + folder.id });
+/** True when the folder is a Git repository. Detects a .git folder made by Termux or any other tool. */
+export async function isRepo(folder) {
+  try { const st = await safFs.stat(folder.uri, '.git/HEAD'); if (st && st.exists) { modes.set(folder.id, 'native'); return true; } } catch (e) { /* no .git */ }
+  try { await lightning().stat('/g-' + folder.id + '/HEAD'); modes.set(folder.id, 'app'); return true; } catch (e) { /* none */ }
+  modes.delete(folder.id); return false;
 }
-export const isRepo = gitdirExists;
+const gitdirExists = isRepo;
 
 async function remoteUrl(folder) {
   try { return await git().getConfig({ ...ctx(folder), path: 'remote.origin.url' }); } catch (e) { return null; }
@@ -145,17 +150,33 @@ export async function clone(folder, url, { token, depth = 1, branch, onProgress 
   if (entries.length) throw new Error('The folder is not empty. Pick an empty folder to clone into.');
   if (token) { await saveToken(host, token); await rememberHost(host); }
   const t = token || await getToken(host);
+  modes.set(folder.id, 'native');
   try {
     await git().clone({
       ...ctx(folder), http, url, singleBranch: true, ...(depth ? { depth } : {}), ...(branch ? { ref: branch } : {}),
       onAuth: authFor(t), onProgress: (p) => onProgress && onProgress(p),
     });
   } catch (e) {
-    try { await lightning().rmdir('/g-' + folder.id); } catch (x) { /* ignore */ }
+    try { await safFs.remove(folder.uri, '.git'); } catch (x) { /* ignore */ }
+    modes.delete(folder.id);
     throw nice(e);
   }
 }
+/** Clone into a new sub-folder named after the repository. Returns the new project folder. */
+export async function cloneInto(parent, url, opts = {}) {
+  const raw = String(url || '').trim().replace(/\/+$/, '').replace(/\.git$/, '');
+  const base = slug(opts.name || raw.split('/').pop() || 'repo') || 'repo';
+  let name = base; let n = 2;
+  const exists = async (nm) => { try { const st = await safFs.stat(parent.uri, nm); return !!(st && st.exists); } catch (e) { return false; } };
+  while (await exists(name)) { name = base + '-' + n; n++; if (n > 50) throw new Error('Too many folders named ' + base + '.'); }
+  await safFs.mkdir(parent.uri, name);
+  const folder = { id: opts.id || Math.random().toString(36).slice(2, 10), name, uri: subUri(parent.uri, name) };
+  try { await clone(folder, url, opts); }
+  catch (e) { try { await safFs.remove(parent.uri, name); } catch (x) { /* ignore */ } throw e; }
+  return folder;
+}
 export async function init(folder, url) {
+  modes.set(folder.id, 'native');
   await git().init({ ...ctx(folder), defaultBranch: 'main' });
   if (url) await git().addRemote({ ...ctx(folder), remote: 'origin', url, force: true });
 }
@@ -245,6 +266,7 @@ export async function log(folder, depth = 25) {
   try { return await git().log({ ...ctx(folder), depth }); } catch (e) { return []; }
 }
 export async function remove(folder) {
+  if (modes.get(folder.id) === 'native') { await safFs.remove(folder.uri, '.git'); modes.delete(folder.id); return; }
   const id = '/g-' + folder.id;
   const L = lightning();
   const rm = async (p) => {
@@ -346,7 +368,7 @@ export async function publishNew(folder, opts, step = () => {}) {
   const host = opts.provider === 'gitlab' ? (opts.host || 'gitlab.com') : 'github.com';
   if (opts.token) { await saveToken(host, opts.token); await rememberHost(host); }
   const token = opts.token || await getToken(host);
-  if (!(await gitdirExists(folder))) { step('Preparing repository'); await git().init({ ...ctx(folder), defaultBranch: 'main' }); }
+  if (!(await gitdirExists(folder))) { step('Preparing repository'); await init(folder); }
   let hasCommit = true; try { await git().resolveRef({ ...ctx(folder), ref: 'HEAD' }); } catch (e) { hasCommit = false; }
   if (!hasCommit || (await status(folder)).length) { step('Saving files'); await commit(folder, opts.message || (hasCommit ? 'Update' : 'Initial commit')); }
   step('Creating repository');

@@ -21,7 +21,11 @@ export const TERMUX_TOOLS = [
 export const TERMUX_ACTIONS = new Set(['run_command']);
 
 /** Termux path of a folder chosen through the Android picker. */
-export function deriveTermuxPath(uri) {
+export function deriveTermuxPath(full) {
+  const bar = String(full || '').indexOf('|'); const uri = bar < 0 ? String(full || '') : String(full).slice(0, bar); const sub = bar < 0 ? '' : String(full).slice(bar + 1);
+  const p = deriveTree(uri); return p && sub ? p.replace(/\/+$/, '') + '/' + sub : p;
+}
+function deriveTree(uri) {
   const m = /\/tree\/([^/?#]+)/.exec(String(uri || ''));
   if (!m) return null;
   let id; try { id = decodeURIComponent(m[1]); } catch (e) { return null; }
