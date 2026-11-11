@@ -43,13 +43,14 @@ function currentModelId() { return $('#modelSelect').value || (S.models[0] && S.
 
 // ------------------------------------------------------------ boot
 async function boot() {
-  fitViewport();
+  window.__stage = 'boot'; fitViewport();
   S.settings = await A.getSettings(); applyTheme();
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+  window.__stage = 'settings-ok';
   S.providers = await A.getProviders(); S.models = await A.getModels(); S.folders = await A.getFolders();
-  wire();
-  if (!S.models.length) { showSetup(true); return; }
-  await enter();
+  window.__stage = 'wiring'; wire();
+  if (!S.models.length) { showSetup(true); window.__stage = 'ready'; return; }
+  await enter(); window.__stage = 'ready';
 }
 async function enter() {
   $('#setup').classList.add('hidden');
@@ -441,7 +442,7 @@ function openSettings() {
     '<div class="h3">Data</div>' +
     '<button id="usageBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Usage and cost</span></button>' +
     '<button id="expBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Export this chat as text</span></button>' +
-    '<div class="h3">About</div><div class="kv"><span>Version</span><span>1.0.1</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
+    '<div class="h3">About</div><div class="kv"><span>Version</span><span>1.0.2</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
   bindSeg('setAuto', (v) => save({ autoApply: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
@@ -541,4 +542,4 @@ function wire() {
   });
 }
 
-boot().catch((e) => { document.body.insertAdjacentHTML('beforeend', '<pre style="padding:20px;color:#d64545;white-space:pre-wrap">Startup error: ' + esc(e.message) + '</pre>'); });
+boot().catch((e) => { const f = document.getElementById('fatal'); f.style.display = 'block'; f.textContent = 'Startup error: ' + (e && (e.stack || e.message)) + '\nstage=' + window.__stage; });
