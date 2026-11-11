@@ -77,3 +77,7 @@ cd android && ./gradlew assembleDebug
 - Providers: Gemini, xAI, Mistral, Groq, Together added. Setup shows a short suggested model list; the full list loads only on request, with search. Any model id can be typed. Models can be added or removed later in Settings.
 - Git: explicit Stage / Unstage (Staged and Changes sections), history shows the last 10 commits with a "Show 10 more" button (max 50).
 - Native dialogs replaced by in-app dialogs (API key change, memory notes).
+
+## v1.3.1
+- Built-in `unzip` and `zip` tools (vendor/fflate.js, MIT). The model cannot run commands, so it now extracts and creates .zip files itself after your approval. Existing files are never overwritten; unsafe paths are rejected; limits: 60 MB zip, 200 MB extracted, 3000 files.
+- Fixed the layout of code blocks (language label and Copy button now form a proper header).
