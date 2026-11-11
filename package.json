@@ -1,6 +1,6 @@
 {
   "name": "kdex-chat-android",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "KDex Chat for Android: a private AI chat that works inside a folder you choose. Bring your own API key; no server.",
   "scripts": {
