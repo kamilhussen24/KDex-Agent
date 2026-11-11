@@ -442,7 +442,7 @@ function openSettings() {
     '<div class="h3">Data</div>' +
     '<button id="usageBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Usage and cost</span></button>' +
     '<button id="expBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Export this chat as text</span></button>' +
-    '<div class="h3">About</div><div class="kv"><span>Version</span><span>1.0.2</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
+    '<div class="h3">About</div><div class="kv"><span>Version</span><span>1.0.3</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
   bindSeg('setAuto', (v) => save({ autoApply: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
@@ -532,14 +532,14 @@ function wire() {
     }
   });
   $('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(false); } });
-  if (App && App.addListener) App.addListener('backButton', () => {
+  if (App && App.addListener) Promise.resolve(App.addListener('backButton', () => {
     if (!$('#dialog').classList.contains('hidden')) { $('#dlgNo').click(); return; }
     if (!$('#setup').classList.contains('hidden') && S.models.length) { $('#setup').classList.add('hidden'); return; }
     if (!$('#sheet').classList.contains('hidden')) { const b = $('#sheetBack'); if (!b.classList.contains('hidden')) b.click(); else closeSheet(); return; }
     if ($('#drawer').classList.contains('open')) { closeDrawer(); return; }
     if (S.running) { stopRun(); return; }
     App.exitApp();
-  });
+  })).catch(() => {});
 }
 
 boot().catch((e) => { const f = document.getElementById('fatal'); f.style.display = 'block'; f.textContent = 'Startup error: ' + (e && (e.stack || e.message)) + '\nstage=' + window.__stage; });

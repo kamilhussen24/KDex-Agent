@@ -177,4 +177,4 @@ export const fs = {
 };
 
 // ---------------------------------------------------------------- misc
-export const App = cap && cap.Plugins && cap.Plugins.App ? cap.Plugins.App : null;
+export const App = isNative ? cap.registerPlugin('App') : null;
