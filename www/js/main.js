@@ -70,56 +70,96 @@ function fillModels(sel) {
 }
 
 // ------------------------------------------------------------ setup / add provider
+/** Model chooser shared by setup and Settings: suggested models, on-demand full list with search, manual id. */
+function modelPicker(box, prov, getKey, suggested, have) {
+  const picked = new Set(); const manual = []; let all = null; let q = '';
+  const present = new Set(have || []);
+  const draw = () => {
+    const base = all || suggested;
+    let ids = base.filter((id) => !present.has(id) && (!q || id.toLowerCase().includes(q)));
+    const total = ids.length; ids = ids.slice(0, 60);
+    box.innerHTML =
+      '<div class="h3">Models</div>' +
+      (all ? '<input id="mpQ" class="inp" placeholder="Search ' + all.length + ' models" value="' + esc(q) + '" autocapitalize="off" autocomplete="off">' : '') +
+      '<div id="mpList" style="max-height:230px;overflow:auto;margin:8px 0">' +
+      (ids.map((id) => '<label class="row-item" style="padding:8px 12px"><input type="checkbox" class="cb" data-id="' + esc(id) + '"' + (picked.has(id) ? ' checked' : '') + '><span class="grow t">' + esc(id) + '</span></label>').join('') ||
+        '<div class="note">' + (all ? 'No match. Type the model id below.' : 'No suggestions for this provider. Type a model id below or load the list.') + '</div>') +
+      (total > ids.length ? '<div class="note">Showing 60 of ' + total + '. Search to narrow down.</div>' : '') + '</div>' +
+      manual.map((m) => '<div class="row-item"><div class="grow t">' + esc(m) + '</div><button class="icon-btn" data-rm="' + esc(m) + '" aria-label="Remove ' + esc(m) + '">' + ICON('x') + '</button></div>').join('') +
+      '<div class="row" style="display:flex;gap:8px;margin-bottom:8px"><input id="mpMan" class="inp" style="flex:1" placeholder="Type a model id" autocapitalize="off" autocomplete="off"><button id="mpAdd" class="btn sm"><span class="lbl">Add</span></button></div>' +
+      (all ? '' : '<button id="mpLoad" class="btn" style="width:100%"><span class="lbl">Load full list from provider</span></button>') + '<div id="mpMsg"></div>';
+    $$('[data-id]', box).forEach((c) => c.onchange = () => { c.checked ? picked.add(c.dataset.id) : picked.delete(c.dataset.id); });
+    $$('[data-rm]', box).forEach((b) => b.onclick = () => { manual.splice(manual.indexOf(b.dataset.rm), 1); draw(); });
+    const add = () => { const v = $('#mpMan').value.trim(); if (v && !manual.includes(v) && !present.has(v)) manual.push(v); draw(); };
+    $('#mpAdd').onclick = add; $('#mpMan').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+    if ($('#mpQ')) { $('#mpQ').oninput = (e) => { q = e.target.value.trim().toLowerCase(); const pos = e.target.selectionStart; draw(); const n = $('#mpQ'); n.focus(); n.setSelectionRange(pos, pos); }; }
+    if ($('#mpLoad')) $('#mpLoad').onclick = async () => {
+      const key = await getKey(); if (!key) { $('#mpMsg').innerHTML = '<div class="err">Enter your API key first.</div>'; return; }
+      const b = $('#mpLoad'); b.disabled = true; b.firstElementChild.textContent = 'Loading...';
+      try { all = await listModels(prov, key); if (!all.length) throw new Error('The provider returned no models.'); draw(); }
+      catch (e) { b.disabled = false; b.firstElementChild.textContent = 'Load full list from provider'; $('#mpMsg').innerHTML = '<div class="err">' + esc(e.message || 'Could not load the list') + '</div>'; }
+    };
+  };
+  draw();
+  return () => { const v = $('#mpMan'); if (v && v.value.trim() && !manual.includes(v.value.trim())) manual.push(v.value.trim()); return [...picked, ...manual]; };
+}
+
 function showSetup(first) {
   const box = $('#setup'); box.classList.remove('hidden');
-  let preset = PRESETS[0];
+  let preset = PRESETS[0]; let keep = { name: '', url: '', key: '' };
+  let getPicked = () => [];
   const draw = () => {
     box.innerHTML = '<div class="wrap"><svg class="logo"><use href="#i-logo"/></svg><h1>' + (first ? 'Welcome to KDex Agent' : 'Add a provider') + '</h1>' +
       '<p class="sub">Use your own API key. It is stored encrypted on this phone and sent only to the provider you choose.</p>' +
-      '<div class="seg" style="flex-wrap:wrap;margin-bottom:14px">' + PRESETS.map((p) => '<button type="button" class="btn sm' + (p.key === preset.key ? ' on' : '') + '" data-p="' + p.key + '"><span class="lbl">' + p.name + '</span></button>').join('') + '</div>' +
-      '<label class="field"><span>Name</span><input id="sName" value="' + esc(preset.name) + '"></label>' +
-      '<label class="field ' + (preset.key === 'custom' ? '' : 'hidden') + '" id="sUrlF"><span>Base URL (OpenAI-compatible)</span><input id="sUrl" placeholder="https://example.com/v1" value="' + esc(preset.baseUrl) + '" autocapitalize="off"></label>' +
-      '<label class="field"><span>API key</span><input id="sKey" type="password" placeholder="' + esc(preset.hint) + '" autocomplete="off" autocapitalize="off"></label>' +
-      '<div id="sMsg"></div><div id="sModels"></div>' +
-      '<button id="sGo" class="btn primary" type="button" style="width:100%"><span class="lbl">Connect and load models</span></button>' +
+      '<div class="pgrid">' + PRESETS.map((p) => '<button type="button" class="btn sm' + (p.key === preset.key ? ' on' : '') + '" data-p="' + p.key + '"><span class="lbl">' + p.name + '</span></button>').join('') + '</div>' +
+      '<label class="field"><span>Name</span><input id="sName" value="' + esc(keep.name || preset.name) + '"></label>' +
+      '<label class="field ' + (preset.key === 'custom' ? '' : 'hidden') + '" id="sUrlF"><span>Base URL (OpenAI-compatible)</span><input id="sUrl" placeholder="https://example.com/v1" value="' + esc(keep.url || preset.baseUrl) + '" autocapitalize="off"><small>Works with any OpenAI-compatible server, including one on your own network.</small></label>' +
+      '<label class="field"><span>API key</span><input id="sKey" type="password" placeholder="' + esc(preset.hint) + '" autocomplete="off" autocapitalize="off" value="' + esc(keep.key) + '"></label>' +
+      '<div id="sPick"></div><div id="sMsg"></div>' +
+      '<button id="sGo" class="btn primary" type="button" style="width:100%"><span class="lbl">Save provider</span></button>' +
       '<div class="safe">' + ICON('lock') + '<span>No account, no server. Chats and files never leave your phone except to your provider.</span></div>' +
       (first ? '' : '<button id="sCancel" class="btn" type="button" style="width:100%"><span class="lbl">Cancel</span></button>') + '</div>';
-    $$('[data-p]', box).forEach((b) => b.onclick = () => { preset = PRESETS.find((p) => p.key === b.dataset.p); draw(); });
+    $$('[data-p]', box).forEach((b) => b.onclick = () => { keep = { name: '', url: '', key: $('#sKey').value }; preset = PRESETS.find((p) => p.key === b.dataset.p); draw(); });
+    const prov = () => ({ id: 'tmp', name: '', type: preset.type, baseUrl: (preset.key === 'custom' ? $('#sUrl').value : preset.baseUrl).trim() });
+    getPicked = modelPicker($('#sPick'), { get baseUrl() { return prov().baseUrl; }, type: preset.type }, async () => $('#sKey').value.trim(), preset.models.map((x) => x), []);
+    if (preset.models.length) { /* preselect the first two suggestions */ $$('[data-id]', box).slice(0, 2).forEach((c) => { c.checked = true; c.dispatchEvent(new Event('change')); }); }
     $('#sGo').onclick = go;
     if ($('#sCancel')) $('#sCancel').onclick = () => box.classList.add('hidden');
   };
   const go = async () => {
     const msg = $('#sMsg'); msg.innerHTML = '';
     const name = $('#sName').value.trim() || preset.name;
-    const baseUrl = (preset.key === 'custom' ? $('#sUrl').value : preset.baseUrl).trim();
+    const baseUrl = (preset.key === 'custom' ? $('#sUrl').value : preset.baseUrl).trim().replace(/\/+$/, '');
     const key = $('#sKey').value.trim();
     if (!baseUrl || !/^https?:\/\//.test(baseUrl)) { msg.innerHTML = '<div class="err">Enter a valid base URL.</div>'; return; }
     if (!key) { msg.innerHTML = '<div class="err">Enter your API key.</div>'; return; }
+    const picked = [...new Set(getPicked())].slice(0, 20);
+    if (!picked.length) { msg.innerHTML = '<div class="err">Pick or type at least one model.</div>'; return; }
     const prov = { id: uid(), name, type: preset.type, baseUrl };
-    const btn = $('#sGo'); btn.disabled = true; btn.firstElementChild.textContent = 'Checking...';
-    let ids = [];
-    try { ids = await listModels(prov, key); } catch (e) { msg.innerHTML = '<div class="err">' + esc(e.message || 'Could not connect') + '</div><div class="note">You can still type a model id below.</div>'; }
-    btn.disabled = false; btn.firstElementChild.textContent = 'Save provider';
-    renderPick(prov, key, ids);
-  };
-  const renderPick = (prov, key, ids) => {
-    const wrap = $('#sModels');
-    wrap.innerHTML = (ids.length ? '<div class="ok">Key works. Pick the models you want (max 12).</div><div style="max-height:220px;overflow:auto;margin-bottom:10px">' +
-      ids.map((id, i) => '<label class="row-item" style="padding:8px 12px"><input type="checkbox" data-id="' + esc(id) + '"' + (i < 3 ? ' checked' : '') + '><span class="grow t">' + esc(id) + '</span></label>').join('') + '</div>' : '') +
-      '<label class="field"><span>Or type a model id</span><input id="sManual" placeholder="e.g. claude-sonnet-5-5" autocapitalize="off"></label>';
-    const go = $('#sGo'); go.onclick = async () => {
-      const picked = $$('[data-id]:checked', wrap).map((x) => x.dataset.id).slice(0, 12);
-      const man = $('#sManual').value.trim(); if (man) picked.push(man);
-      if (!picked.length) { $('#sMsg').innerHTML = '<div class="err">Pick or type at least one model.</div>'; return; }
-      await secure.set(A.keyName(prov.id), key);
-      S.providers.push(prov); await A.saveProviders(S.providers);
-      picked.forEach((api) => S.models.push({ id: uid(), providerId: prov.id, apiModel: api, label: api + (S.providers.length > 1 ? ' (' + prov.name + ')' : '') }));
-      await A.saveModels(S.models);
-      toast('Provider saved');
-      if (first) await enter(); else { $('#setup').classList.add('hidden'); fillModels(); if (S.sheetStack.length) openSettings(); }
-    };
+    await secure.set(A.keyName(prov.id), key);
+    S.providers.push(prov); await A.saveProviders(S.providers);
+    picked.forEach((api) => S.models.push({ id: uid(), providerId: prov.id, apiModel: api, label: api + (S.providers.length > 1 ? ' (' + prov.name + ')' : '') }));
+    await A.saveModels(S.models);
+    toast('Provider saved');
+    if (first) await enter(); else { $('#setup').classList.add('hidden'); fillModels(); if (S.sheetStack.length) openSettings(); }
   };
   draw();
+}
+
+/** Settings: add models to an existing provider. */
+async function openAddModels(p) {
+  const body = sheet('Add models', { back: openSettings });
+  const preset = PRESETS.find((x) => x.baseUrl === p.baseUrl);
+  const have = S.models.filter((m) => m.providerId === p.id).map((m) => m.apiModel);
+  body.innerHTML = '<div class="note" style="text-align:left;margin-top:0">' + esc(p.name) + '</div><div id="amPick"></div><div id="amMsg"></div>';
+  const get = modelPicker($('#amPick'), p, () => secure.get(A.keyName(p.id)), preset ? preset.models : [], have);
+  const foot = $('#sheetFoot'); foot.classList.remove('hidden'); foot.innerHTML = '<button id="amSave" class="btn primary" style="width:100%"><span class="lbl">Add selected models</span></button>';
+  $('#amSave').onclick = async () => {
+    const add = [...new Set(get())].filter((id) => !have.includes(id));
+    if (!add.length) { toast('Pick or type a model first.'); return; }
+    add.forEach((api) => S.models.push({ id: uid(), providerId: p.id, apiModel: api, label: api + (S.providers.length > 1 ? ' (' + p.name + ')' : '') }));
+    await A.saveModels(S.models); fillModels(); foot.classList.add('hidden'); toast(add.length + ' model(s) added'); openSettings();
+  };
 }
 
 // ------------------------------------------------------------ chats
@@ -349,9 +389,10 @@ function sheet(title, opts = {}) {
   $('#sheetTitle').textContent = title; $('#sheet').classList.remove('hidden');
   $('#sheetBack').classList.toggle('hidden', !opts.back); $('#sheetBack').onclick = opts.back || null;
   const tabs = $('#sheetTabs'); tabs.classList.add('hidden'); tabs.innerHTML = '';
+  $('#sheetFoot').classList.add('hidden'); $('#sheetFoot').innerHTML = '';
   const body = $('#sheetBody'); body.innerHTML = ''; body.scrollTop = 0; return body;
 }
-function closeSheet() { $('#sheet').classList.add('hidden'); S.sheetStack = []; }
+function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').classList.add('hidden'); S.sheetStack = []; }
 
 async function openProjects() {
   const body = sheet('Projects');
@@ -436,7 +477,10 @@ function openSettings() {
   body.innerHTML =
     '<div class="h3">Providers</div>' +
     S.providers.map((p) => '<div class="row-item">' + ICON('key') + '<div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' + esc(p.baseUrl) + '</div></div><button class="btn sm" data-key="' + p.id + '"><span class="lbl">Change key</span></button><button class="icon-btn" data-rp="' + p.id + '" aria-label="Remove">' + ICON('trash') + '</button></div>').join('') +
-    '<button id="addProv" class="btn" style="width:100%">' + ICON('plus') + '<span class="lbl">Add provider</span></button>' +
+    '<button id="addProv" class="btn" style="width:100%;margin-top:8px">' + ICON('plus') + '<span class="lbl">Add provider</span></button>' +
+    '<div class="h3">Models</div>' +
+    S.models.map((m) => '<div class="row-item"><div class="grow"><div class="t">' + esc(m.apiModel) + '</div><div class="s">' + esc((S.providers.find((x) => x.id === m.providerId) || {}).name || '') + '</div></div><button class="icon-btn" data-rmm="' + m.id + '" aria-label="Remove ' + esc(m.apiModel) + '">' + ICON('x') + '</button></div>').join('') +
+    S.providers.map((p) => '<button class="btn" data-am="' + p.id + '" style="width:100%;margin-top:8px">' + ICON('plus') + '<span class="lbl">Add model to ' + esc(p.name) + '</span></button>').join('') +
     '<div class="h3">Chat</div>' +
     '<label class="field"><span>Default model</span><select id="setModel">' + S.models.map((m) => '<option value="' + esc(m.id) + '"' + (m.id === st.defaultModel ? ' selected' : '') + '>' + esc(modelLabel(m)) + '</option>').join('') + '</select></label>' +
     '<div class="field"><span>Token saving</span>' + seg('setMode', [['economy', 'Economy'], ['balanced', 'Balanced'], ['full', 'Full']], st.mode) + '<small>Older messages are summarised to cut cost. Economy keeps the least context.</small></div>' +
@@ -463,8 +507,15 @@ function openSettings() {
   $('#setSteps').onchange = (e) => save({ maxSteps: Math.max(1, Math.min(60, Number(e.target.value) || 20)) });
   $('#setInstr').onchange = (e) => save({ instructions: e.target.value });
   $('#addProv').onclick = () => showSetup(false);
+  $$('[data-am]', body).forEach((b) => b.onclick = () => openAddModels(S.providers.find((x) => x.id === b.dataset.am)));
+  $$('[data-rmm]', body).forEach((b) => b.onclick = async () => {
+    if (S.models.length === 1) { toast('Keep at least one model.'); return; }
+    S.models = S.models.filter((m) => m.id !== b.dataset.rmm); await A.saveModels(S.models);
+    if (S.settings.defaultModel === b.dataset.rmm) await save({ defaultModel: S.models[0].id });
+    fillModels(); openSettings();
+  });
   $$('[data-key]', body).forEach((b) => b.onclick = async () => {
-    const v = prompt('New API key'); if (v && v.trim()) { await secure.set(A.keyName(b.dataset.key), v.trim()); toast('Key updated'); }
+    const v = await askText('New API key', 'Paste the key'); if (v) { await secure.set(A.keyName(b.dataset.key), v); toast('Key updated'); }
   });
   $$('[data-rp]', body).forEach((b) => b.onclick = async () => {
     if (S.providers.length === 1) { toast('Add another provider before removing the last one.'); return; }
@@ -479,7 +530,7 @@ function openSettings() {
     $$('[data-dm]', body).forEach((b) => b.onclick = async () => { await A.saveMemory((await A.getMemory()).filter((x) => x.id !== b.dataset.dm)); mem(); });
   };
   mem();
-  $('#memAdd').onclick = async () => { const v = prompt('Note (one short fact)'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
+  $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
   $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
   $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message)); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message));
   $('#gitId').onclick = () => openGitIdentity(openSettings);
@@ -505,100 +556,225 @@ async function exportChat() {
 }
 
 // ------------------------------------------------------------ git UI
-const KIND_LABEL = { new: 'new', modified: 'modified', deleted: 'deleted' };
-function progressText(p) { return p && p.phase ? p.phase + (p.total ? ' ' + Math.round((p.loaded / p.total) * 100) + '%' : '') : ''; }
+const pct = (p) => (p && p.phase ? p.phase + (p.total ? ' ' + Math.round((p.loaded / p.total) * 100) + '%' : '') : '');
+const GS = { tab: 'changes', sel: new Set(), known: new Set(), keepSel: false, hist: 10 };
+const dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
+const baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
 
-async function openGit() {
+function busyLine(text) { const el = $('#gMsg'); if (el) el.innerHTML = text ? '<div class="busy"><span class="spin"></span>' + esc(text) + '</div>' : ''; }
+function errLine(text) { const el = $('#gMsg'); if (el) el.innerHTML = text ? '<div class="err">' + esc(text) + '</div>' : ''; }
+const DONE = { Fetching: 'Fetched', Pulling: 'Pulled', Pushing: 'Pushed', 'Force pushing': 'Force pushed', Committing: 'Committed', Discarding: 'Discarded', 'Creating branch': 'Branch created', 'Switching branch': 'Switched branch', Merging: 'Merged', 'Deleting branch': 'Branch deleted', 'Undoing commit': 'Commit undone', 'Saving remote': 'Remote saved' };
+async function gitRun(label, fn, after) {
+  $$('#sheet .btn, #sheet .linkbtn, #sheet .icon-btn').forEach((b) => { b.disabled = true; });
+  busyLine(label + '...');
+  try {
+    await fn((p) => busyLine(label + ' ' + pct(p)));
+    toast(DONE[label] || 'Done');
+    if (after) await after(); else await openGit();
+  } catch (e) {
+    const m = (e && e.message) || String(e);
+    if (/^Set your Git name/.test(m)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGit()); return; }
+    await openGit(GS.tab, true); errLine(m);
+  }
+}
+
+async function loadGitState(folder) {
+  const [branch, changes, branches, history, remote] = await Promise.all([G.currentBranch(folder), G.status(folder), G.branches(folder), G.log(folder, GS.hist), G.remoteInfo(folder)]);
+  const ab = remote ? await G.aheadBehind(folder) : null;
+  const cur = new Set(changes.map((c) => c.path));
+  const prevKnown = GS.keepSel ? GS.known : new Set();
+  GS.sel = new Set([...cur].filter((p) => !prevKnown.has(p) || GS.sel.has(p)));
+  GS.known = cur; GS.keepSel = true;
+  return { branch, changes, branches, history, remote, ab };
+}
+
+async function openGit(tab, keepMsg) {
   if (!S.folder) { toast('Open a folder first.'); return; }
   const folder = S.folder;
-  const repo = await G.isRepo(folder);
-  if (!repo) return openGitSetup(folder);
+  if (!(await G.isRepo(folder))) return openGitStart(folder);
+  if (tab) GS.tab = tab;
   const body = sheet('Git');
-  body.innerHTML = '<div class="note">Loading...</div>';
-  let branch, changes, remote, branchList, history;
-  try {
-    [branch, changes, branchList, history] = await Promise.all([G.currentBranch(folder), G.status(folder), G.branches(folder), G.log(folder, 15)]);
-  } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; return; }
-  const gs = await G.getGitSettings();
-  body.innerHTML =
-    '<div class="row-item">' + ICON('branch') + '<div class="grow"><div class="t">' + esc(branch || '') + '</div><div class="s">' + changes.length + ' change' + (changes.length === 1 ? '' : 's') + '</div></div>' +
-    '<select id="gBranch" style="height:34px;border:1px solid var(--line);border-radius:10px;background:var(--card);max-width:40%">' + branchList.map((b) => '<option' + (b === branch ? ' selected' : '') + '>' + esc(b) + '</option>').join('') + '</select>' +
-    '<button id="gNewBranch" class="icon-btn" aria-label="New branch">' + ICON('plus') + '</button></div>' +
-    '<div class="seg" style="margin-bottom:10px"><button id="gPull" class="btn"><svg class="ic"><use href="#i-down"/></svg><span class="lbl">Pull</span></button><button id="gPush" class="btn"><svg class="ic"><use href="#i-up"/></svg><span class="lbl">Push</span></button></div>' +
-    '<div id="gMsg"></div>' +
-    '<div class="h3">Changes</div>' +
-    (changes.length ? changes.map((c) => '<div class="row-item" data-gf="' + esc(c.path) + '">' + ICON('file') + '<div class="grow"><div class="t">' + esc(c.path) + '</div><div class="s">' + KIND_LABEL[c.kind] + '</div></div><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard">' + ICON('undo') + '</button></div>').join('') : '<div class="note">Nothing to commit.</div>') +
-    (changes.length ? '<label class="field" style="margin-top:10px"><span>Commit message</span><textarea id="gMessage" style="height:72px" placeholder="What did you change?"></textarea></label>' +
-      '<div class="seg"><button id="gSuggest" class="btn"><span class="lbl">Suggest message</span></button><button id="gCommit" class="btn primary"><span class="lbl">Commit all</span></button></div>' : '') +
-    '<div class="h3">History</div>' + (history.map((h) => '<div class="kv"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:8px">' + esc(h.commit.message.trim().split('\n')[0]) + '</span><span>' + h.oid.slice(0, 7) + '</span></div>').join('') || '<div class="note">No commits yet.</div>') +
-    '<div class="h3">Settings</div><div class="kv"><span>Author</span><span>' + esc(gs.name ? gs.name + ' <' + gs.email + '>' : 'not set') + '</span></div>' +
-    '<button id="gIdent" class="btn" style="width:100%;margin:8px 0">' + '<span class="lbl">Identity and tokens</span></button>' +
-    '<button id="gRemote" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Change remote URL</span></button>' +
-    '<div class="safe">' + ICON('lock') + '<span>Git data is stored inside the app. Your folder holds only your files.</span></div>';
+  body.innerHTML = '<div class="busy"><span class="spin"></span>Loading...</div>';
+  let st;
+  try { st = await loadGitState(folder); } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message || String(e)) + '</div>'; return; }
+  S.gitState = st; updateGitChip();
 
-  const msg = (t, ok) => { $('#gMsg').innerHTML = t ? '<div class="' + (ok ? 'ok' : 'err') + '">' + esc(t) + '</div>' : ''; };
-  const busy = async (label, fn) => {
-    const btns = $$('#sheetBody .btn'); btns.forEach((b) => b.disabled = true); msg(label + '...', true);
-    try { await fn((p) => msg(label + ' ' + progressText(p), true)); updateGitChip(); updateChangesChip(); openGit(); setTimeout(() => toast(label + ' done'), 300); }
-    catch (e) { btns.forEach((b) => b.disabled = false); msg(e.message || String(e)); }
-  };
-  $('#gBranch').onchange = (e) => busy('Switching branch', () => G.checkout(folder, e.target.value));
-  $('#gNewBranch').onclick = () => { const n = prompt('New branch name'); if (n && n.trim()) busy('Creating branch', () => G.createBranch(folder, n.trim().replace(/\s+/g, '-'))); };
-  $('#gPull').onclick = () => busy('Pulling', (pr) => G.pull(folder, { onProgress: pr }));
-  $('#gPush').onclick = async () => {
-    if (changes.length && !await confirmBox('Uncommitted changes', 'Push sends commits only. Your ' + changes.length + ' uncommitted change(s) stay on the phone. Continue?', 'Push')) return;
-    busy('Pushing', (pr) => G.push(folder, { onProgress: pr }));
-  };
-  $$('[data-gd]', body).forEach((b) => b.onclick = async (e) => {
-    e.stopPropagation();
-    if (!await confirmBox('Discard changes?', 'Restore ' + b.dataset.gd + ' to the last commit. New files are deleted.', 'Discard')) return;
-    busy('Discarding', () => G.discard(folder, b.dataset.gd));
-  });
-  $$('[data-gf]', body).forEach((r) => r.onclick = () => openGitDiff(folder, r.dataset.gf));
-  if ($('#gSuggest')) $('#gSuggest').onclick = async () => {
-    const b = $('#gSuggest'); b.disabled = true; b.firstElementChild.textContent = 'Thinking...';
-    try { $('#gMessage').value = await A.suggestCommitMessage(currentModelId(), folder); } catch (e) { msg(e.message); }
-    b.disabled = false; b.firstElementChild.textContent = 'Suggest message';
-  };
-  if ($('#gCommit')) $('#gCommit').onclick = () => busy('Committing', () => G.commit(folder, $('#gMessage').value));
-  $('#gIdent').onclick = () => openGitIdentity(() => openGit());
-  $('#gRemote').onclick = async () => { const u = prompt('Remote URL (https://...)'); if (u && u.trim()) busy('Saving remote', () => G.setRemote(folder, u.trim())); };
+  const head = gitHead(st);
+  const tabs = [['changes', 'Changes' + (st.changes.length ? ' (' + st.changes.length + ')' : '')], ['branches', 'Branches'], ['history', 'History'], ['remote', 'Remote']];
+  const tb = $('#sheetTabs'); tb.classList.remove('hidden');
+  tb.innerHTML = tabs.map(([k, l]) => '<button class="tab' + (GS.tab === k ? ' on' : '') + '" data-tab="' + k + '">' + l + '</button>').join('');
+  $$('[data-tab]', tb).forEach((b) => b.onclick = () => { GS.tab = b.dataset.tab; renderGitTab(folder, st, head, body); $$('[data-tab]', tb).forEach((x) => x.classList.toggle('on', x === b)); });
+  renderGitTab(folder, st, head, body);
+  if (keepMsg) return;
 }
+
+function gitHead(st) {
+  const abTxt = st.ab && st.ab.ahead != null ? ((st.ab.ahead ? '↑' + st.ab.ahead : '') + (st.ab.behind ? ' ↓' + st.ab.behind : '')).trim() : '';
+  return (
+    '<div class="gsum"><div class="top2">' + ICON('branch') + '<div class="nm">' + esc(st.branch || '') + '</div>' + (abTxt ? '<span class="ab">' + abTxt + '</span>' : (st.remote && st.ab && st.ab.noRemoteBranch ? '<span class="ab">not pushed</span>' : '')) + '</div>' +
+    '<div class="rm">' + (st.remote ? esc(st.remote.host + '/' + st.remote.path) : 'No remote yet') + '</div>' +
+    '<div class="seg"><button id="gFetch" class="btn sm"><span class="lbl">Fetch</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button></div></div><div id="gMsg"></div>');
+}
+
+function renderGitTab(folder, st, head, body) {
+  const foot = $('#sheetFoot'); foot.classList.add('hidden'); foot.innerHTML = '';
+  let h = head;
+  if (GS.tab === 'changes') {
+    if (!st.changes.length) h += '<div class="note" style="margin-top:18px">No changes since the last commit.</div>';
+    else {
+      const staged = st.changes.filter((c) => GS.sel.has(c.path)); const unstaged = st.changes.filter((c) => !GS.sel.has(c.path));
+      const row = (c, on) => '<div class="gr"><button class="stg' + (on ? ' on' : '') + '" data-sel="' + esc(c.path) + '" aria-label="' + (on ? 'Unstage ' : 'Stage ') + esc(c.path) + '">' + ICON(on ? 'minus' : 'plus') + '</button><div class="grow" data-gf="' + esc(c.path) + '"><div class="t">' + esc(baseOf(c.path)) + '</div>' + (dirOf(c.path) ? '<div class="s">' + esc(dirOf(c.path)) + '</div>' : '') + '</div><span class="kind ' + c.kind + '">' + c.kind + '</span><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard ' + esc(c.path) + '" style="width:34px;height:34px">' + ICON('undo') + '</button></div>';
+      h += '<div class="gbar"><span class="h4">Staged (' + staged.length + ')</span>' + (staged.length ? '<button id="gUnstageAll" class="linkbtn">Unstage all</button>' : '') + '</div>' +
+        (staged.map((c) => row(c, true)).join('') || '<div class="note" style="text-align:left">Nothing staged. Tap + on a file to include it in the next commit.</div>') +
+        '<div class="gbar"><span class="h4">Changes (' + unstaged.length + ')</span><span>' + (unstaged.length ? '<button id="gStageAll" class="linkbtn">Stage all</button>' : '') + '<button id="gDiscardAll" class="linkbtn danger" style="margin-left:14px">Discard all</button></span></div>' +
+        (unstaged.map((c) => row(c, false)).join('') || '<div class="note" style="text-align:left">Everything is staged.</div>');
+      foot.classList.remove('hidden');
+      foot.innerHTML = '<textarea id="gMessage" rows="1" placeholder="Commit message"></textarea><div class="row"><button id="gSuggest" class="btn" aria-label="Suggest a message">' + ICON('bulb') + '<span class="lbl">Suggest</span></button><button id="gCommit" class="btn primary"><span class="lbl"></span></button></div>';
+    }
+  } else if (GS.tab === 'branches') {
+    h += '<button id="gNew" class="btn" style="width:100%;margin:10px 0 8px">' + ICON('plus') + '<span class="lbl">New branch from here</span></button>' +
+      st.branches.map((b) => '<div class="row-item"><div class="grow"><div class="t">' + esc(b) + '</div></div>' + (b === st.branch ? '<span class="badge cur">current</span>' :
+        '<button class="btn sm" data-sw="' + esc(b) + '"><span class="lbl">Switch</span></button><button class="btn sm" data-mg="' + esc(b) + '"><span class="lbl">Merge</span></button><button class="icon-btn" data-db="' + esc(b) + '" aria-label="Delete ' + esc(b) + '" style="width:34px;height:34px">' + ICON('trash') + '</button>') + '</div>').join('') +
+      '<div class="note" style="text-align:left">Merge brings the chosen branch into <b>' + esc(st.branch || '') + '</b>.</div>';
+  } else if (GS.tab === 'history') {
+    h += (st.history.length ? '<button id="gUndo" class="btn" style="width:100%;margin:10px 0 4px">' + ICON('undo') + '<span class="lbl">Undo last commit (keep changes)</span></button>' : '') +
+      (st.history.map((x) => '<div class="hist"><div class="t">' + esc(x.commit.message.trim().split('\n')[0]) + '</div><div class="s">' + esc(x.commit.author.name) + ' · ' + x.oid.slice(0, 7) + ' · ' + ago(x.commit.author.timestamp * 1000) + '</div></div>').join('') || '<div class="note">No commits yet.</div>') +
+      (st.history.length >= GS.hist ? '<button id="gMore" class="btn" style="width:100%;margin-top:10px"><span class="lbl">Show 10 more</span></button>' : '');
+  } else {
+    h += '<div class="h3">Remote</div><div class="card"><div class="t" style="word-break:break-all">' + (st.remote ? esc(st.remote.url) : 'No remote set') + '</div><div style="margin-top:10px"><button id="gRemote" class="btn sm"><span class="lbl">' + (st.remote ? 'Change URL' : 'Set remote URL') + '</span></button></div></div>';
+    if (!st.remote) h += '<div class="h3">Create a new repository</div><div class="card"><p>Create a repository on GitHub or GitLab for these files and upload them.</p><button id="gPublish" class="btn primary" style="width:100%"><span class="lbl">Create and push</span></button></div>';
+    h += '<div class="h3">Account</div><div class="card"><div class="kv" style="border:0"><span>Author</span><span id="gAuthor"></span></div><button id="gIdent" class="btn sm"><span class="lbl">Identity and tokens</span></button></div>' +
+      '<div class="h3">Danger zone</div><div class="card danger-zone"><p>Force push replaces the remote branch with yours. Commits only on the remote are lost.</p><button id="gForce" class="btn sm danger"' + (st.remote ? '' : ' disabled') + '><span class="lbl">Force push</span></button>' +
+      '<p style="margin-top:14px">Remove Git data for this folder from the app. Your files stay untouched.</p><button id="gWipe" class="btn sm danger"><span class="lbl">Remove Git from this folder</span></button></div>';
+  }
+  body.innerHTML = h;
+  bindGit(folder, st, body);
+}
+
+function bindGit(folder, st, body) {
+  const run = (label, fn) => gitRun(label, fn);
+  $('#gFetch').onclick = () => run('Fetching', (pr) => G.fetchRemote(folder, { onProgress: pr }));
+  $('#gPull').onclick = () => run('Pulling', (pr) => G.pull(folder, { onProgress: pr }));
+  $('#gPush').onclick = async () => {
+    if (st.changes.length && !await confirmBox('Uncommitted changes', 'Push uploads commits only. Your ' + st.changes.length + ' uncommitted change(s) stay on this phone.', 'Push')) return;
+    run('Pushing', (pr) => G.push(folder, { onProgress: pr }));
+  };
+  $$('[data-gf]', body).forEach((r) => r.onclick = () => openGitDiff(folder, r.dataset.gf));
+  const redraw = () => { const m = $('#gMessage') ? $('#gMessage').value : ''; const top = $('#sheetBody').scrollTop; renderGitTab(folder, st, gitHead(st), body); if ($('#gMessage')) $('#gMessage').value = m; $('#sheetBody').scrollTop = top; };
+  $$('[data-sel]', body).forEach((c) => c.onclick = () => { GS.sel.has(c.dataset.sel) ? GS.sel.delete(c.dataset.sel) : GS.sel.add(c.dataset.sel); redraw(); });
+  if ($('#gStageAll')) $('#gStageAll').onclick = () => { st.changes.forEach((x) => GS.sel.add(x.path)); redraw(); };
+  if ($('#gUnstageAll')) $('#gUnstageAll').onclick = () => { GS.sel.clear(); redraw(); };
+  $$('[data-gd]', body).forEach((b) => b.onclick = async () => {
+    if (!await confirmBox('Discard changes?', 'Restore ' + b.dataset.gd + ' to the last commit. A new file is deleted.', 'Discard')) return;
+    run('Discarding', () => G.discard(folder, b.dataset.gd));
+  });
+  if ($('#gDiscardAll')) $('#gDiscardAll').onclick = async () => {
+    if (!await confirmBox('Discard all changes?', 'All ' + st.changes.length + ' changed files go back to the last commit. New files are deleted. This cannot be undone.', 'Discard all')) return;
+    run('Discarding', () => G.discardAll(folder));
+  };
+  if ($('#gCommit')) {
+    syncCommit(st);
+    const ta = $('#gMessage'); ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 96) + 'px'; };
+    $('#gSuggest').onclick = async () => {
+      const b = $('#gSuggest'); b.disabled = true; const l = b.querySelector('.lbl'); l.textContent = 'Thinking...';
+      try { ta.value = await A.suggestCommitMessage(currentModelId(), folder); ta.oninput(); } catch (e) { errLine(e.message); }
+      b.disabled = false; l.textContent = 'Suggest';
+    };
+    $('#gCommit').onclick = () => { const paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p)); run('Committing', () => G.commit(folder, ta.value, paths)); };
+  }
+  if ($('#gNew')) $('#gNew').onclick = async () => { const n = await askText('New branch', 'Branch name', 'feature/my-change'); if (n) run('Creating branch', () => G.createBranch(folder, n.replace(/\s+/g, '-'))); };
+  $$('[data-sw]', body).forEach((b) => b.onclick = () => run('Switching branch', () => G.checkout(folder, b.dataset.sw)));
+  $$('[data-mg]', body).forEach((b) => b.onclick = async () => { if (await confirmBox('Merge branch?', 'Merge "' + b.dataset.mg + '" into "' + st.branch + '"?', 'Merge')) run('Merging', () => G.mergeBranch(folder, b.dataset.mg)); });
+  $$('[data-db]', body).forEach((b) => b.onclick = async () => { if (await confirmBox('Delete branch?', 'Delete "' + b.dataset.db + '" from this phone. The remote copy is not touched.', 'Delete')) run('Deleting branch', () => G.deleteBranch(folder, b.dataset.db)); });
+  if ($('#gMore')) $('#gMore').onclick = () => { GS.hist = Math.min(GS.hist + 10, 50); openGit('history'); };
+  if ($('#gUndo')) $('#gUndo').onclick = async () => { if (await confirmBox('Undo last commit?', 'The commit is removed from this branch. Its changes come back as uncommitted changes. Nothing is lost.', 'Undo commit')) run('Undoing commit', () => G.undoLastCommit(folder)); };
+  if ($('#gRemote')) $('#gRemote').onclick = async () => { const u = await askText(st.remote ? 'Change remote URL' : 'Set remote URL', 'https://github.com/user/repo.git', st.remote ? st.remote.url : ''); if (u) run('Saving remote', () => G.setRemote(folder, u)); };
+  if ($('#gPublish')) $('#gPublish').onclick = () => openGitStart(folder, 'new');
+  if ($('#gIdent')) { G.getGitSettings().then((g) => { const a = $('#gAuthor'); if (a) a.textContent = g.name ? g.name + ' <' + g.email + '>' : 'not set'; }); $('#gIdent').onclick = () => openGitIdentity(() => openGit('remote')); }
+  if ($('#gForce')) $('#gForce').onclick = async () => {
+    if (!await confirmBox('Force push?', 'This overwrites "' + st.branch + '" on the remote with your local version. Anyone else\'s commits there will be lost.', 'Force push')) return;
+    run('Force pushing', (pr) => G.push(folder, { force: true, onProgress: pr }));
+  };
+  if ($('#gWipe')) $('#gWipe').onclick = async () => {
+    if (!await confirmBox('Remove Git from this folder?', 'Commit history stored in the app is deleted. Your files are not touched.', 'Remove')) return;
+    await G.remove(folder); toast('Git removed'); updateGitChip(); openGit();
+  };
+}
+function syncCommit(st) {
+  const n = st.changes.filter((c) => GS.sel.has(c.path)).length; const b = $('#gCommit'); if (!b) return;
+  b.disabled = !n; b.querySelector('.lbl').textContent = n ? 'Commit ' + n + ' staged' : 'Stage files first';
+}
+function askText(title, placeholder, value = '') {
+  return new Promise((res) => {
+    $('#dlgTitle').textContent = title; $('#dlgText').innerHTML = '<input id="dlgInput" style="width:100%;height:42px;border:1px solid var(--line);border-radius:12px;padding:0 12px;background:var(--card);outline:0" placeholder="' + esc(placeholder) + '" autocapitalize="off" autocomplete="off">';
+    $('#dlgInput').value = value; $('#dlgYes').firstElementChild.textContent = 'OK'; $('#dialog').classList.remove('hidden');
+    setTimeout(() => { const i = $('#dlgInput'); if (i) i.focus(); }, 50);
+    const done = (v) => { const t = $('#dlgInput') ? $('#dlgInput').value.trim() : ''; $('#dialog').classList.add('hidden'); $('#dlgText').textContent = ''; $('#dlgYes').onclick = $('#dlgNo').onclick = null; res(v ? t : null); };
+    $('#dlgYes').onclick = () => done(true); $('#dlgNo').onclick = () => done(false);
+  });
+}
+
 async function openGitDiff(folder, path) {
-  const body = sheet(path, { back: openGit });
-  body.innerHTML = '<div class="note">Loading...</div>';
+  const body = sheet(path, { back: () => openGit() });
+  body.innerHTML = '<div class="busy"><span class="spin"></span>Loading...</div>';
   try {
     const d = await G.diffFile(folder, path);
-    body.innerHTML = '<div class="tool"><div class="diff" style="max-height:none">' + d.lines.map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') + '</div></div>';
+    body.innerHTML = '<div class="gbar"><span>+' + d.added + ' −' + d.removed + '</span></div><div class="tool"><div class="diff" style="max-height:none">' + d.lines.map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') + '</div></div>';
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
 
-async function openGitSetup(folder) {
+/** Start screen for a folder without Git: clone, publish as a new repository, or keep it local. */
+async function openGitStart(folder, mode) {
   const body = sheet('Git for ' + folder.name);
-  let empty = true;
-  try { empty = !(await fs.list(folder.uri, '')).length; } catch (e) { /* ignore */ }
-  body.innerHTML =
-    '<div class="note" style="text-align:left">Use Git to clone a repository, let the agent edit it, then commit and push.</div><div id="gMsg"></div>' +
-    '<div class="h3">Clone a repository' + (empty ? '' : ' (needs an empty folder)') + '</div>' +
-    '<label class="field"><span>Repository URL</span><input id="cUrl" placeholder="https://github.com/user/repo.git" autocapitalize="off" autocomplete="off"></label>' +
-    '<label class="field"><span>Access token (for private repos and pushing)</span><input id="cTok" type="password" autocomplete="off" autocapitalize="off" placeholder="Paste a personal access token"><small>Stored encrypted on this phone. Saved per host, so you only enter it once.</small></label>' +
-    '<label class="row-item" style="padding:8px 12px"><input type="checkbox" id="cFull"><span class="grow t">Download full history (slower)</span></label>' +
-    '<button id="cGo" class="btn primary" style="width:100%"' + (empty ? '' : ' disabled') + '><span class="lbl">Clone</span></button>' +
-    '<div class="h3">Or start from the files already here</div>' +
-    '<label class="field"><span>Remote URL (optional)</span><input id="iUrl" placeholder="https://github.com/user/repo.git" autocapitalize="off" autocomplete="off"></label>' +
-    '<button id="iGo" class="btn" style="width:100%"><span class="lbl">Initialize a new repository</span></button>';
-  const msg = (t, ok) => { $('#gMsg').innerHTML = t ? '<div class="' + (ok ? 'ok' : 'err') + '">' + esc(t) + '</div>' : ''; };
-  $('#cGo').onclick = async () => {
-    const url = $('#cUrl').value.trim(); if (!url) { msg('Enter the repository URL.'); return; }
-    const btns = $$('#sheetBody .btn'); btns.forEach((b) => b.disabled = true); msg('Cloning...', true);
-    try {
-      await G.clone(folder, url, { token: $('#cTok').value.trim(), depth: $('#cFull').checked ? 0 : 1, onProgress: (p) => msg('Cloning ' + progressText(p), true) });
-      toast('Cloned'); drawCtx(); openGit();
-    } catch (e) { btns.forEach((b) => b.disabled = false); $('#cGo').disabled = !empty; msg(e.message || String(e)); }
+  const gsett = await G.getGitSettings(); const hosts = await G.listTokenHosts();
+  let empty = true; try { empty = !(await fs.list(folder.uri, '')).length; } catch (e) { /* ignore */ }
+  let m = mode || (empty ? 'clone' : 'new');
+  const draw = () => {
+    const tabs = [['clone', 'Clone'], ['new', 'New repo'], ['local', 'Local only']];
+    let h = '<div class="seg" style="margin-bottom:14px">' + tabs.map(([k, l]) => '<button class="btn sm' + (m === k ? ' on' : '') + '" data-m="' + k + '"><span class="lbl">' + l + '</span></button>').join('') + '</div><div id="gMsg"></div>';
+    if (m === 'clone') {
+      h += '<p class="note" style="text-align:left;margin-top:0">Download a repository into this folder, let the agent edit it, then commit and push.</p>' +
+        (empty ? '' : '<div class="err">This folder is not empty. Pick an empty folder to clone into (Projects &gt; Clone a repository).</div>') +
+        '<label class="field"><span>Repository URL</span><input id="cUrl" placeholder="https://github.com/user/repo.git" autocapitalize="off" autocomplete="off"></label>' +
+        '<label class="field"><span>Access token</span><input id="cTok" type="password" autocomplete="off" autocapitalize="off" placeholder="' + (hosts.length ? 'Leave empty to use a saved token' : 'Needed for private repositories and pushing') + '"><small>Stored encrypted on this phone, once per host.</small></label>' +
+        '<label class="gr" style="border:0"><input type="checkbox" class="cb" id="cFull"><span>Download full history (slower)</span></label>' +
+        '<button id="cGo" class="btn primary" style="width:100%;margin-top:8px"' + (empty ? '' : ' disabled') + '><span class="lbl">Clone repository</span></button>';
+    } else if (m === 'new') {
+      h += '<p class="note" style="text-align:left;margin-top:0">Create a repository on GitHub or GitLab for the files in this folder and upload them.</p>' +
+        '<div class="field"><span>Service</span><div class="seg" id="nProv"><button class="btn sm on" data-v="github"><span class="lbl">GitHub</span></button><button class="btn sm" data-v="gitlab"><span class="lbl">GitLab</span></button></div></div>' +
+        '<label class="field hidden" id="nHostF"><span>GitLab host</span><input id="nHost" value="gitlab.com" autocapitalize="off"></label>' +
+        '<label class="field"><span>Repository name</span><input id="nName" value="' + esc(G.repoSlug(folder.name)) + '" autocapitalize="off"></label>' +
+        '<div class="field"><span>Visibility</span><div class="seg" id="nVis"><button class="btn sm on" data-v="private"><span class="lbl">Private</span></button><button class="btn sm" data-v="public"><span class="lbl">Public</span></button></div></div>' +
+        '<label class="field"><span>Description (optional)</span><input id="nDesc"></label>' +
+        '<label class="field"><span>Access token</span><input id="nTok" type="password" autocomplete="off" autocapitalize="off" placeholder="' + (hosts.length ? 'Leave empty to use a saved token' : 'Needs permission to create repositories') + '"></label>' +
+        '<label class="gr" style="border:0"><input type="checkbox" class="cb" id="nIgn" checked><span>Add a .gitignore (node_modules, .env, logs) if missing</span></label>' +
+        '<button id="nGo" class="btn primary" style="width:100%;margin-top:8px"><span class="lbl">Create and push</span></button>' +
+        '<div class="safe">' + ICON('lock') + '<span>Every file in this folder is uploaded. Check for secrets first.</span></div>';
+    } else {
+      h += '<p class="note" style="text-align:left;margin-top:0">Track changes on this phone only. You can add a remote later.</p><button id="lGo" class="btn primary" style="width:100%"><span class="lbl">Initialize repository</span></button>';
+    }
+    body.innerHTML = h;
+    $$('[data-m]', body).forEach((b) => b.onclick = () => { m = b.dataset.m; draw(); });
+    const segVal = (id) => { const on = $('#' + id + ' .on'); return on ? on.dataset.v : ''; };
+    ['nProv', 'nVis'].forEach((id) => { $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); if (id === 'nProv') $('#nHostF').classList.toggle('hidden', b.dataset.v !== 'gitlab'); }); });
+    const lock = (on) => $$('#sheet .btn').forEach((b) => b.disabled = on);
+    const fail = (e) => { lock(false); if ($('#cGo')) $('#cGo').disabled = !empty; const msg = (e && e.message) || String(e); if (/^Set your Git name/.test(msg)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGitStart(folder, m)); } else errLine(msg); };
+    if ($('#cGo')) $('#cGo').onclick = async () => {
+      const url = $('#cUrl').value.trim(); if (!url) { errLine('Enter the repository URL.'); return; }
+      lock(true); busyLine('Cloning...');
+      try { await G.clone(folder, url, { token: $('#cTok').value.trim(), depth: $('#cFull').checked ? 0 : 1, onProgress: (p) => busyLine('Cloning ' + pct(p)) }); toast('Cloned'); GS.keepSel = false; drawCtx(); openGit('changes'); } catch (e) { fail(e); }
+    };
+    if ($('#nGo')) $('#nGo').onclick = async () => {
+      const provider = segVal('nProv'); lock(true); busyLine('Starting...');
+      try {
+        if ($('#nIgn').checked) { try { await fs.stat(folder.uri, '.gitignore').then(async (s) => { if (!s || !s.exists) await fs.writeText(folder.uri, '.gitignore', 'node_modules/\n.env\n.env.*\n*.log\n.DS_Store\n__pycache__/\n*.pyc\n'); }); } catch (e) { /* optional */ } }
+        const r = await G.publishNew(folder, { provider, host: $('#nHost').value.trim(), name: $('#nName').value, isPrivate: segVal('nVis') === 'private', description: $('#nDesc').value.trim(), token: $('#nTok').value.trim(), message: 'Initial commit' }, (t) => busyLine(t + '...'));
+        toast('Repository created'); GS.keepSel = false; drawCtx(); await openGit('remote'); const el = $('#gMsg'); if (el) el.innerHTML = '<div class="ok">Uploaded to ' + esc(r.webUrl || r.cloneUrl) + '</div>';
+      } catch (e) { fail(e); }
+    };
+    if ($('#lGo')) $('#lGo').onclick = async () => { try { await G.init(folder); toast('Repository created'); GS.keepSel = false; drawCtx(); openGit('changes'); } catch (e) { fail(e); } };
   };
-  $('#iGo').onclick = async () => {
-    try { await G.init(folder, $('#iUrl').value.trim()); toast('Repository created'); drawCtx(); openGit(); } catch (e) { msg(e.message); }
-  };
+  draw();
 }
 
 async function openGitIdentity(back) {
@@ -671,7 +847,7 @@ function wire() {
   $('#dNew').onclick = () => newChat(S.folder); $('#topNewBtn').onclick = () => newChat(S.folder);
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
-  $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = openGit; $('#chipChanges').onclick = openChanges;
+  $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges;
   $('#sheetClose').onclick = closeSheet;
   $('#chatSearch').oninput = drawChatList;
   $('#chatList').onclick = async (e) => {

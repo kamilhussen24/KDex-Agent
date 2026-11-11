@@ -72,3 +72,8 @@ Copy the APK to the phone and open it. Android will ask you to allow installs fr
 npm ci && npx cap add android && npx cap sync android && node scripts/prepare-android.mjs
 cd android && ./gradlew assembleDebug
 ```
+
+## v1.3.0
+- Providers: Gemini, xAI, Mistral, Groq, Together added. Setup shows a short suggested model list; the full list loads only on request, with search. Any model id can be typed. Models can be added or removed later in Settings.
+- Git: explicit Stage / Unstage (Staged and Changes sections), history shows the last 10 commits with a "Show 10 more" button (max 50).
+- Native dialogs replaced by in-app dialogs (API key change, memory notes).

@@ -254,4 +254,108 @@ export async function remove(folder) {
   };
   await rm(id);
 }
+
+// ---------------------------------------------------------------- more operations
+export async function remoteInfo(folder) {
+  const url = await remoteUrl(folder);
+  if (!url) return null;
+  let host = hostOf(url); let path = '';
+  try { path = new URL(url).pathname.replace(/^\/|\.git$/g, ''); } catch (e) { /* ignore */ }
+  return { url, host, path };
+}
+export async function fetchRemote(folder, { onProgress } = {}) {
+  const url = await remoteUrl(folder);
+  if (!url) throw new Error('No remote set. Add one in the Remote tab.');
+  const branch = await currentBranch(folder);
+  try {
+    await git().fetch({ ...ctx(folder), http, remote: 'origin', ref: branch, singleBranch: true, tags: false, onAuth: authFor(await tokenFor(folder, url)), onProgress: (p) => onProgress && onProgress(p) });
+  } catch (e) { throw nice(e); }
+}
+/** { ahead, behind } against origin/<branch> as of the last fetch, or null when unknown. */
+export async function aheadBehind(folder) {
+  try {
+    const c = ctx(folder); const b = await currentBranch(folder);
+    const local = await git().resolveRef({ ...c, ref: 'refs/heads/' + b });
+    let remote; try { remote = await git().resolveRef({ ...c, ref: 'refs/remotes/origin/' + b }); } catch (e) { return { ahead: null, behind: 0, noRemoteBranch: true }; }
+    if (local === remote) return { ahead: 0, behind: 0 };
+    const walk = async (tip) => new Set((await git().log({ ...c, ref: tip, depth: 200 })).map((x) => x.oid));
+    const L = await walk(local); const R = await walk(remote);
+    return { ahead: [...L].filter((x) => !R.has(x)).length, behind: [...R].filter((x) => !L.has(x)).length };
+  } catch (e) { return null; }
+}
+export async function deleteBranch(folder, name) {
+  if (name === (await currentBranch(folder))) throw new Error('Switch to another branch before deleting this one.');
+  await git().deleteBranch({ ...ctx(folder), ref: name });
+}
+export async function mergeBranch(folder, theirs) {
+  const au = await author(); const c = ctx(folder);
+  const ours = await currentBranch(folder);
+  if (ours === theirs) throw new Error('Pick a different branch to merge.');
+  try { return await git().merge({ ...c, ours, theirs, author: au, committer: au, abortOnConflict: true }); }
+  catch (e) {
+    if (/Conflict/i.test((e && e.code) || '') || /conflict/i.test(String(e.message))) throw new Error('Merge conflict. Nothing was changed. Merge on a computer, or ask the agent to align the branches first.');
+    throw e;
+  }
+}
+/** Undo the last commit but keep all its changes in the working tree. */
+export async function undoLastCommit(folder) {
+  const c = ctx(folder); const b = await currentBranch(folder);
+  const oid = await git().resolveRef({ ...c, ref: 'HEAD' });
+  const { commit } = await git().readCommit({ ...c, oid });
+  if (!commit.parent.length) throw new Error('This is the first commit, there is nothing before it.');
+  await git().writeRef({ ...c, ref: 'refs/heads/' + b, value: commit.parent[0], force: true });
+  return oid;
+}
+export async function discardAll(folder) {
+  const ch = await status(folder);
+  for (const f of ch) await discard(folder, f.path);
+  return ch.length;
+}
+
+// ---------------------------------------------------------------- create a new repository on GitHub or GitLab
+const slug = (s) => String(s || '').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+export const repoSlug = slug;
+async function jsonRequest(url, method, headers, payload) {
+  const r = await httpRaw({ url, method, headers: { 'content-type': 'application/json', 'user-agent': 'KDex-Agent', ...headers }, body: JSON.stringify(payload) });
+  let text = ''; const dec = new TextDecoder();
+  for await (const c of r.chunks) text += dec.decode(c, { stream: true });
+  let j = {}; try { j = JSON.parse(text); } catch (e) { /* not json */ }
+  return { status: r.status, json: j, text };
+}
+export async function createRemoteRepo({ provider, host, token, name, isPrivate, description }) {
+  if (!token) throw new Error('A token is needed to create a repository. Add one in Identity and tokens.');
+  const n = slug(name); if (!n) throw new Error('Enter a repository name.');
+  let override = ''; try { override = localStorage.getItem('kdexApiBase') || ''; } catch (e) { /* ignore */ }
+  let res;
+  if (provider === 'gitlab') {
+    const base = override || 'https://' + (host || 'gitlab.com');
+    res = await jsonRequest(base + '/api/v4/projects', 'POST', { 'PRIVATE-TOKEN': token }, { name: n, path: n, visibility: isPrivate ? 'private' : 'public', description: description || '' });
+    if (res.status === 201 || res.status === 200) return { cloneUrl: res.json.http_url_to_repo, webUrl: res.json.web_url, host: hostOf(res.json.http_url_to_repo) };
+  } else {
+    const base = override || 'https://api.github.com';
+    res = await jsonRequest(base + '/user/repos', 'POST', { authorization: 'Bearer ' + token, accept: 'application/vnd.github+json' }, { name: n, private: !!isPrivate, description: description || '', auto_init: false });
+    if (res.status === 201 || res.status === 200) return { cloneUrl: res.json.clone_url, webUrl: res.json.html_url, host: hostOf(res.json.clone_url) };
+  }
+  if (res.status === 401 || res.status === 403) throw new Error('The token was rejected. It needs permission to create repositories (GitHub: "repo" scope).');
+  if (res.status === 422 || res.status === 400) throw new Error('Could not create it. A repository named "' + n + '" may already exist.');
+  throw new Error('Could not create the repository (HTTP ' + res.status + ').');
+}
+
+/** New project flow: init if needed, first commit, create the remote repo, push. */
+export async function publishNew(folder, opts, step = () => {}) {
+  const host = opts.provider === 'gitlab' ? (opts.host || 'gitlab.com') : 'github.com';
+  if (opts.token) { await saveToken(host, opts.token); await rememberHost(host); }
+  const token = opts.token || await getToken(host);
+  if (!(await gitdirExists(folder))) { step('Preparing repository'); await git().init({ ...ctx(folder), defaultBranch: 'main' }); }
+  let hasCommit = true; try { await git().resolveRef({ ...ctx(folder), ref: 'HEAD' }); } catch (e) { hasCommit = false; }
+  if (!hasCommit || (await status(folder)).length) { step('Saving files'); await commit(folder, opts.message || (hasCommit ? 'Update' : 'Initial commit')); }
+  step('Creating repository');
+  const r = await createRemoteRepo({ provider: opts.provider, host, token, name: opts.name, isPrivate: opts.isPrivate, description: opts.description });
+  await git().addRemote({ ...ctx(folder), remote: 'origin', url: r.cloneUrl, force: true });
+  await saveToken(r.host, token); await rememberHost(r.host);
+  step('Uploading');
+  await push(folder, { onProgress: (p) => step('Uploading ' + (p && p.phase ? p.phase : '')) });
+  return r;
+}
+
 export const hostFromUrl = hostOf;
