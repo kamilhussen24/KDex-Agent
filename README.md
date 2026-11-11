@@ -1,1 +1,65 @@
-# KDex-Agent
+# KDex Chat for Android
+
+A private AI chat that works inside a folder you choose, like Claude Code on your phone.
+Bring your own API key (Anthropic, OpenAI, DeepSeek, OpenRouter or any OpenAI-compatible endpoint).
+No server and no account: keys, chats, memory and backups stay on the phone.
+
+## Features
+- Chat with thinking (Off / Low / High), collapsible thought card, memory notes, chat history
+- Pick a project folder with Android's file manager; the model can list, search, read, create, edit and delete files only inside it
+- Every change needs your approval (Apply / Reject / Apply all), a backup is saved first, and Undo is one tap
+- Token saving (rolling summaries, compacted tool output), per-day usage and estimated cost in USD
+- Image and text-file attachments, dark and light theme
+
+## Build the APK with GitHub Actions
+1. Create a new GitHub repository and push this project to it (the `android/` folder is generated in CI, so it is not committed).
+2. Open **Actions > Build Android APK > Run workflow**.
+   - **debug**: works immediately, no secrets needed. Good for testing.
+   - **release**: signed APK. Needs the four secrets below.
+3. When the run finishes, download the APK from the run's **Artifacts** section.
+4. Pushing a tag such as `v1.0.0` also builds a release APK and attaches it to a GitHub Release.
+
+### Release signing (one time)
+Create a keystore on any computer with Java:
+
+```
+keytool -genkeypair -v -keystore kdex.keystore -alias kdex -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 kdex.keystore > kdex.keystore.b64
+```
+
+Add these repository secrets (Settings > Secrets and variables > Actions):
+
+| Secret | Value |
+| --- | --- |
+| `KEYSTORE_BASE64` | contents of `kdex.keystore.b64` |
+| `KEYSTORE_PASSWORD` | the keystore password |
+| `KEY_ALIAS` | `kdex` (or the alias you chose) |
+| `KEY_PASSWORD` | the key password |
+
+Keep the keystore safe. Updates must be signed with the same key or users have to uninstall first.
+
+## Install
+Copy the APK to the phone and open it. Android will ask you to allow installs from your browser or file manager ("unknown sources"). This is normal for apps shared outside Google Play.
+
+## Using it
+1. First launch: pick a provider, paste your API key, choose models.
+2. Open **Projects > Open a folder...** and choose a folder in the file manager.
+3. Ask for changes. Review each diff and tap **Apply**. Use **Changes** to undo.
+
+## Limitations
+- Android 11+ does not let apps pick the storage root or the Download folder. Choose a subfolder.
+- The model cannot run code or shell commands, only read and edit files.
+- Files over 1 MB are truncated when read; binary files are not editable.
+- Cost estimates are shown only for models with known prices; tokens are always counted.
+
+## Project layout
+- `www/` web UI (plain ES modules, no bundler)
+- `native/KdexNativePlugin.java` Capacitor plugin: encrypted key storage, streaming HTTP, folder access
+- `scripts/prepare-android.mjs` patches the generated Android project (plugin, icons, splash, version, signing)
+- `.github/workflows/android.yml` CI build
+
+## Local build (optional)
+```
+npm ci && npx cap add android && npx cap sync android && node scripts/prepare-android.mjs
+cd android && ./gradlew assembleDebug
+```

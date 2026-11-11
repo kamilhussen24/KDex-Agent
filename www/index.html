@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="light dark">
+<title>KDex Chat</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<linearGradient id="kg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF6A35"/><stop offset="1" stop-color="#F04478"/></linearGradient>
+<symbol id="i-logo" viewBox="0 0 32 32"><rect width="32" height="32" rx="8.3" fill="url(#kg)"/><path d="M10.6 8.2V23.8M10.8 16 21.4 8.2M10.8 16 21.4 23.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7V3Z M14 3v4h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M8 10l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V6M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17.5a2 2 0 0 1-3-3l7-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11 12l8-8M16 7l3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 7V4h4v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V6a2 2 0 0 1 2-2h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 8a7.5 7.5 0 0 0-13.4-1.5M5 4v3.5h3.5M5 16a7.5 7.5 0 0 0 13.4 1.5M19 20v-3.5h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z M13 7l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+</defs></svg>
+
+<div id="app" class="app">
+  <div id="scrim" class="scrim hidden"></div>
+
+  <aside id="drawer" class="drawer">
+    <div class="drawer-head">
+      <svg class="logo-sm"><use href="#i-logo"/></svg><span class="brand">KDex Chat</span>
+    </div>
+    <div class="drawer-actions">
+      <button id="dNew" class="btn wide" type="button"><svg class="ic"><use href="#i-plus"/></svg><span class="lbl">New chat</span></button>
+      <button id="dProjects" class="btn wide" type="button"><svg class="ic"><use href="#i-folder"/></svg><span class="lbl">Projects</span></button>
+    </div>
+    <div class="search"><svg class="ic"><use href="#i-search"/></svg><input id="chatSearch" type="search" placeholder="Search chats" autocomplete="off"></div>
+    <div id="chatList" class="chat-list"></div>
+    <div class="drawer-foot"><button id="dSettings" class="btn wide" type="button"><svg class="ic"><use href="#i-gear"/></svg><span class="lbl">Settings</span></button></div>
+  </aside>
+
+  <main id="main" class="main">
+    <header class="top">
+      <button id="menuBtn" class="icon-btn" type="button" aria-label="Menu"><svg class="ic"><use href="#i-menu"/></svg></button>
+      <select id="modelSelect" aria-label="Model"></select>
+      <span class="spacer"></span>
+      <button id="topFolderBtn" class="icon-btn" type="button" aria-label="Projects"><svg class="ic"><use href="#i-folder"/></svg></button>
+      <button id="topNewBtn" class="icon-btn" type="button" aria-label="New chat"><svg class="ic"><use href="#i-plus"/></svg></button>
+    </header>
+
+    <div id="ctxBar" class="ctxbar hidden">
+      <button id="chipFolder" class="chip" type="button"><svg class="ic"><use href="#i-folder"/></svg><span id="chipFolderName" class="lbl"></span></button>
+      <button id="chipFiles" class="chip" type="button"><svg class="ic"><use href="#i-file"/></svg><span class="lbl">Files</span></button>
+      <button id="chipChanges" class="chip" type="button"><svg class="ic"><use href="#i-edit"/></svg><span id="chipChangesLbl" class="lbl">Changes</span></button>
+    </div>
+
+    <div id="messages" class="messages"></div>
+    <div id="approveBar" class="approve-bar hidden"><span id="approveText" class="lbl"></span><button id="approveAll" class="btn primary sm" type="button"><span class="lbl">Apply all</span></button></div>
+
+    <div id="thinkMenu" class="menu hidden" role="menu">
+      <div class="hd">Thinking (this chat)</div>
+      <button type="button" class="it" data-think="off"><b>Off</b><small>Fastest and cheapest</small></button>
+      <button type="button" class="it" data-think="low"><b>Low</b><small>Short thinking, small extra cost</small></button>
+      <button type="button" class="it" data-think="high"><b>High</b><small>Deep thinking, costs more</small></button>
+    </div>
+
+    <form id="composer" class="composer">
+      <div class="box">
+        <div id="chips" class="chips"></div>
+        <textarea id="input" rows="1" placeholder="Message KDex Chat" enterkeyhint="send"></textarea>
+        <div class="row">
+          <button id="attachBtn" class="icon-btn" type="button" aria-label="Attach"><svg class="ic"><use href="#i-clip"/></svg></button>
+          <input id="fileInput" type="file" multiple hidden accept="image/*,.txt,.md,.json,.csv,.py,.js,.ts,.jsx,.tsx,.html,.css,.xml,.yml,.yaml,.log,.sh,.java,.kt,.go,.rs,.c,.cpp,.h,.php,.rb,.sql,.ini,.toml,.env">
+          <button id="thinkBtn" class="pill" type="button" aria-haspopup="menu" aria-expanded="false"><svg class="ic"><use href="#i-bulb"/></svg><span id="thinkLbl" class="lbl">Thinking: Off</span></button>
+          <span class="spacer"></span>
+          <button id="sendBtn" class="send" type="submit" aria-label="Send"><svg class="ic"><use href="#i-up"/></svg></button>
+        </div>
+      </div>
+    </form>
+  </main>
+
+  <!-- Sheets -->
+  <section id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
+    <div class="sheet-card">
+      <div class="sheet-head">
+        <button id="sheetBack" class="icon-btn hidden" type="button" aria-label="Back"><svg class="ic"><use href="#i-back"/></svg></button>
+        <div id="sheetTitle" class="sheet-title"></div>
+        <button id="sheetClose" class="icon-btn" type="button" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+      <div id="sheetTabs" class="tabs hidden"></div>
+      <div id="sheetBody" class="sheet-body"></div>
+    </div>
+  </section>
+
+  <section id="setup" class="setup hidden"></section>
+  <div id="dialog" class="dialog hidden"><div class="dialog-card"><div id="dlgTitle" class="dlg-title"></div><div id="dlgText" class="dlg-text"></div><div class="dlg-actions"><button id="dlgNo" class="btn" type="button"><span class="lbl">Cancel</span></button><button id="dlgYes" class="btn primary" type="button"><span class="lbl">OK</span></button></div></div></div>
+  <div id="toast" class="toast hidden"></div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
