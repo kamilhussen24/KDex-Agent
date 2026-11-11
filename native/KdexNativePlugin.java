@@ -1,4 +1,4 @@
-package com.kdex.chat;
+package com.kdex.agent;
 
 import android.app.Activity;
 import android.content.ContentResolver;
@@ -48,7 +48,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 /**
- * Native helpers for KDex Chat:
+ * Native helpers for KDex Agent:
  *  - secure key storage (Android Keystore, AES-GCM)
  *  - streaming HTTP (no CORS, works for server-sent events)
  *  - folder access through the Storage Access Framework (the user picks a folder; nothing else is reachable)
@@ -59,6 +59,7 @@ public class KdexNativePlugin extends Plugin {
     private static final String KEY_ALIAS = "kdex_chat_key";
     private static final String PREFS = "kdex_secure";
     private static final int MAX_READ_BYTES = 1024 * 1024;
+    private static final long MAX_BYTES_FILE = 64L * 1024 * 1024;
     private static final Set<String> SKIP_DIRS = new HashSet<>(Arrays.asList(
             ".git", "node_modules", ".gradle", "__pycache__", ".venv", "venv", ".idea", ".cache"));
 
@@ -137,6 +138,7 @@ public class KdexNativePlugin extends Plugin {
         final String url = call.getString("url");
         final String method = call.getString("method", "POST");
         final String body = call.getString("body");
+        final String bodyB64 = call.getString("bodyB64");
         final JSObject headers = call.getObject("headers", new JSObject());
         if (id == null || url == null) { call.reject("id and url required"); return; }
         call.resolve();
@@ -155,9 +157,9 @@ public class KdexNativePlugin extends Plugin {
                     String v = headers.getString(k);
                     if (v != null) c.setRequestProperty(k, v);
                 }
-                if (body != null && !"GET".equals(method)) {
+                if ((body != null || bodyB64 != null) && !"GET".equals(method)) {
                     c.setDoOutput(true);
-                    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                    byte[] bytes = bodyB64 != null ? Base64.decode(bodyB64, Base64.DEFAULT) : body.getBytes(StandardCharsets.UTF_8);
                     c.setFixedLengthStreamingMode(bytes.length);
                     try (OutputStream os = c.getOutputStream()) { os.write(bytes); }
                 }
@@ -167,6 +169,12 @@ public class KdexNativePlugin extends Plugin {
                 head.put("type", "head");
                 head.put("status", status);
                 head.put("contentType", c.getContentType());
+                JSObject hdrs = new JSObject();
+                for (Map.Entry<String, List<String>> he : c.getHeaderFields().entrySet()) {
+                    if (he.getKey() == null) continue;
+                    hdrs.put(he.getKey().toLowerCase(), android.text.TextUtils.join(", ", he.getValue()));
+                }
+                head.put("headers", hdrs);
                 notifyListeners("http", head);
 
                 InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
@@ -547,6 +555,82 @@ public class KdexNativePlugin extends Plugin {
                 if (id == null) { call.reject("Not found: " + rel); return; }
                 boolean ok = DocumentsContract.deleteDocument(resolver(), DocumentsContract.buildDocumentUriUsingTree(tree, id));
                 if (!ok) { call.reject("Could not delete " + rel); return; }
+                call.resolve();
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        });
+    }
+
+    @PluginMethod
+    public void readB64(PluginCall call) {
+        pool.execute(() -> {
+            try {
+                Uri tree = Uri.parse(call.getString("uri", ""));
+                String rel = call.getString("path", "");
+                String id = findId(tree, rel);
+                if (id == null) { call.reject("ENOENT: " + rel); return; }
+                Doc d = statDoc(tree, id);
+                if (d != null && d.dir) { call.reject("EISDIR: " + rel); return; }
+                if (d != null && d.size > MAX_BYTES_FILE) { call.reject("File too large: " + rel); return; }
+                Uri doc = DocumentsContract.buildDocumentUriUsingTree(tree, id);
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                try (InputStream in = resolver().openInputStream(doc)) {
+                    if (in == null) { call.reject("Cannot open " + rel); return; }
+                    byte[] buf = new byte[32768];
+                    int n;
+                    while ((n = in.read(buf)) != -1) bos.write(buf, 0, n);
+                }
+                JSObject ret = new JSObject();
+                ret.put("b64", Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP));
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        });
+    }
+
+    @PluginMethod
+    public void writeB64(PluginCall call) {
+        pool.execute(() -> {
+            try {
+                Uri tree = Uri.parse(call.getString("uri", ""));
+                String rel = call.getString("path", "");
+                byte[] data = Base64.decode(call.getString("b64", ""), Base64.DEFAULT);
+                String[] parts = splitPath(rel);
+                if (parts.length == 0) { call.reject("A file path is required"); return; }
+                String parentId = ensureDir(tree, parts, parts.length - 1);
+                String name = parts[parts.length - 1];
+                String fileId = null;
+                for (Doc d : children(tree, parentId)) {
+                    if (name.equals(d.name)) {
+                        if (d.dir) { call.reject(rel + " is a folder"); return; }
+                        fileId = d.id;
+                        break;
+                    }
+                }
+                Uri target = fileId == null
+                        ? DocumentsContract.createDocument(resolver(), DocumentsContract.buildDocumentUriUsingTree(tree, parentId), "application/octet-stream", name)
+                        : DocumentsContract.buildDocumentUriUsingTree(tree, fileId);
+                if (target == null) { call.reject("Could not create " + rel); return; }
+                try (OutputStream os = resolver().openOutputStream(target, "wt")) {
+                    if (os == null) { call.reject("Cannot write " + rel); return; }
+                    os.write(data);
+                }
+                call.resolve();
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        });
+    }
+
+    @PluginMethod
+    public void mkdir(PluginCall call) {
+        pool.execute(() -> {
+            try {
+                Uri tree = Uri.parse(call.getString("uri", ""));
+                String[] parts = splitPath(call.getString("path", ""));
+                ensureDir(tree, parts, parts.length);
                 call.resolve();
             } catch (Exception e) {
                 call.reject(String.valueOf(e.getMessage()));

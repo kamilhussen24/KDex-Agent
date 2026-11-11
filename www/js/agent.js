@@ -5,6 +5,8 @@ import { secure } from './native.js';
 import { stream, complete } from './providers.js';
 import { TOOLS, WRITE_TOOLS, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
+import { isRepo } from './git.js';
+import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction } from './gittools.js';
 
 export const BUDGETS = { economy: 4000, balanced: 12000, full: 60000 };
 
@@ -67,7 +69,7 @@ async function recordUsage(kind, rt, u) {
 // ------------------------------------------------------------------ system prompt
 function systemPrompt(folder, memory, summary, custom) {
   const parts = [
-    'You are KDex Chat, an AI assistant inside an Android app. Answer in the language the user writes in. Be clear, practical and brief.',
+    'You are KDex Agent, an AI assistant inside an Android app. Answer in the language the user writes in. Be clear, practical and brief.',
   ];
   if (folder) {
     parts.push(
@@ -76,7 +78,9 @@ function systemPrompt(folder, memory, summary, custom) {
       'Rules: look before you change (list_dir, find_files or search, then read_file). Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
       'Do what the user asked and nothing else. The user approves every change and can undo it. ' +
       'You cannot run code or commands; if asked to, say so and tell the user what to run. ' +
-      'When finished, summarize what you changed in a few lines. Do not paste file contents into the reply unless asked.'
+      'When finished, summarize what you changed in a few lines. Do not paste file contents into the reply unless asked. ' +
+      'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval). ' +
+      'Read each file once; for large files use search to locate lines before reading a range. Do not repeat a read you already have.'
     );
   } else {
     parts.push('No project folder is open, so you have no file tools. If the user wants you to work on files, tell them to open a folder from Projects.');
@@ -261,7 +265,8 @@ export async function runTurn(ctx) {
   chat.think = think;
   await db.put('chats', chat);
 
-  const tools = folder ? TOOLS : null;
+  const hasGit = folder ? await isRepo(folder).catch(() => false) : false;
+  const tools = folder ? (hasGit ? TOOLS.concat(GIT_TOOLS) : TOOLS) : null;
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
@@ -342,7 +347,24 @@ export async function runTurn(ctx) {
       try {
         if (call.bad) throw new Error('The tool arguments were not valid JSON. Try again with valid arguments.');
         if (!folder) throw new Error('No project folder is open.');
-        if (WRITE_TOOLS.has(call.name)) {
+        if (GIT_ACTIONS.has(call.name)) {
+          const lines = await previewGitAction(call.name, call.args || {}, folder);
+          tm.plan = { path: 'git', op: call.name, added: 0, removed: 0, diff: lines, more: 0 };
+          tm.status = 'pending';
+          await db.put('messages', tm);
+          ui.onTool(tm);
+          const decision = await ui.requestApproval(tm, signal); // git actions always ask, even in auto-apply mode
+          if (decision !== 'apply') {
+            tm.status = 'rejected';
+            tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this. Do not retry it; ask what they want instead.';
+          } else {
+            tm.content = await runGitAction(call.name, call.args || {}, folder);
+            tm.status = 'applied';
+          }
+        } else if (GIT_READS.has(call.name)) {
+          tm.content = await runGitRead(call.name, call.args || {}, folder);
+          tm.status = 'done';
+        } else if (WRITE_TOOLS.has(call.name)) {
           const plan = await planWrite(call.name, call.args, folder);
           tm.plan = { path: plan.path, op: plan.op, added: plan.added, removed: plan.removed, diff: plan.diff.lines, more: plan.diff.more };
           let decision = 'apply';
@@ -398,4 +420,22 @@ export async function removeChat(chatId) {
   await db.delByIndex('messages', 'chatId', chatId);
   await db.delByIndex('backups', 'chatId', chatId);
   await db.del('chats', chatId);
+}
+
+export async function suggestCommitMessage(modelId, folder) {
+  const { status, diffFile } = await import('./git.js');
+  const ch = await status(folder);
+  if (!ch.length) throw new Error('Nothing to commit.');
+  let sample = '';
+  for (const c of ch.slice(0, 6)) {
+    try { const d = await diffFile(folder, c.path); sample += '\n# ' + c.kind + ' ' + c.path + '\n' + d.lines.filter((l) => l.t !== 'ctx').slice(0, 40).map((l) => (l.t === 'add' ? '+' : '-') + (l.text || '').slice(0, 160)).join('\n'); } catch (e) { /* skip */ }
+  }
+  const rt = await runtimeFor(modelId);
+  const { text, usage } = await complete({
+    provider: rt.provider, apiKey: rt.apiKey, apiModel: rt.apiModel,
+    system: 'Write one Git commit message: a short imperative subject line (max 60 characters), nothing else. No quotes, no prefixes, no explanation.',
+    messages: [{ role: 'user', text: 'Files changed: ' + ch.map((c) => c.kind + ' ' + c.path).join(', ') + '\n' + sample.slice(0, 6000) }], maxTokens: 60,
+  });
+  await recordUsage('commit', rt, usage);
+  return String(text || '').split('\n')[0].replace(/^["'`]+|["'`]+$/g, '').trim().slice(0, 100);
 }

@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: "Build type"
+        description: "debug = test APK, release = signed APK (share directly), release-aab = signed bundle for Google Play"
         type: choice
-        options: [debug, release]
+        options: [debug, release, release-aab]
         default: debug
   push:
     tags: ["v*"]
@@ -40,7 +40,7 @@ jobs:
         run: npx cap sync android
 
       - name: Prepare signing (release only)
-        if: env.BUILD_TYPE == 'release'
+        if: env.BUILD_TYPE != 'debug'
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -63,23 +63,32 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          if [ "$BUILD_TYPE" = "release" ]; then ./gradlew assembleRelease --no-daemon; else ./gradlew assembleDebug --no-daemon; fi
+          case "$BUILD_TYPE" in
+            release) ./gradlew assembleRelease --no-daemon ;;
+            release-aab) ./gradlew bundleRelease --no-daemon ;;
+            *) ./gradlew assembleDebug --no-daemon ;;
+          esac
 
       - name: Collect APK
         run: |
           mkdir -p out
-          f=$(find android/app/build/outputs/apk -name "*.apk" | head -n1)
-          cp "$f" "out/KDex-Chat-${BUILD_TYPE}.apk"
+          if [ "$BUILD_TYPE" = "release-aab" ]; then
+            f=$(find android/app/build/outputs/bundle -name "*.aab" | head -n1)
+            cp "$f" "out/KDex-Agent-release.aab"
+          else
+            f=$(find android/app/build/outputs/apk -name "*.apk" | head -n1)
+            cp "$f" "out/KDex-Agent-${BUILD_TYPE}.apk"
+          fi
           ls -lh out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: KDex-Chat-${{ env.BUILD_TYPE }}-apk
-          path: out/*.apk
+          name: KDex-Agent-${{ env.BUILD_TYPE }}
+          path: out/*
           if-no-files-found: error
 
       - name: Attach to release (tag builds)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: out/*.apk
+          files: out/*

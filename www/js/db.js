@@ -1,5 +1,5 @@
 // Tiny IndexedDB wrapper. Everything is stored on the phone.
-const NAME = 'kdex-chat';
+const NAME = 'kdex-agent';
 const VERSION = 1;
 let dbp = null;
 

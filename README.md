@@ -1,10 +1,11 @@
-# KDex Chat for Android
+# KDex Agent for Android
 
 A private AI chat that works inside a folder you choose, like Claude Code on your phone.
 Bring your own API key (Anthropic, OpenAI, DeepSeek, OpenRouter or any OpenAI-compatible endpoint).
 No server and no account: keys, chats, memory and backups stay on the phone.
 
 ## Features
+- Git: clone a repository into a folder you pick, let the agent edit it, then review the diff, commit and push (token login). Also pull, branches, history, discard.
 - Chat with thinking (Off / Low / High), collapsible thought card, memory notes, chat history
 - Pick a project folder with Android's file manager; the model can list, search, read, create, edit and delete files only inside it
 - Every change needs your approval (Apply / Reject / Apply all), a backup is saved first, and Undo is one tap
@@ -15,7 +16,8 @@ No server and no account: keys, chats, memory and backups stay on the phone.
 1. Create a new GitHub repository and push this project to it (the `android/` folder is generated in CI, so it is not committed).
 2. Open **Actions > Build Android APK > Run workflow**.
    - **debug**: works immediately, no secrets needed. Good for testing.
-   - **release**: signed APK. Needs the four secrets below.
+   - **release**: signed APK to share directly. Needs the four secrets below.
+   - **release-aab**: signed Android App Bundle for Google Play (see STORE-LISTING.md).
 3. When the run finishes, download the APK from the run's **Artifacts** section.
 4. Pushing a tag such as `v1.0.0` also builds a release APK and attaches it to a GitHub Release.
 
@@ -46,6 +48,12 @@ Copy the APK to the phone and open it. Android will ask you to allow installs fr
 2. Open **Projects > Open a folder...** and choose a folder in the file manager.
 3. Ask for changes. Review each diff and tap **Apply**. Use **Changes** to undo.
 
+## Git notes
+- The working files are in your folder; the .git data is kept inside the app (fast, and keeps your folder clean). A folder that already has a .git directory from another tool is treated as plain files.
+- Authentication is by personal access token over https.
+- Clone downloads a shallow copy by default (latest commit). Tick full history if you need older commits.
+- Very large repositories can be slow or run out of memory on a phone.
+
 ## Limitations
 - Android 11+ does not let apps pick the storage root or the Download folder. Choose a subfolder.
 - The model cannot run code or shell commands, only read and edit files.
@@ -53,6 +61,7 @@ Copy the APK to the phone and open it. Android will ask you to allow installs fr
 - Cost estimates are shown only for models with known prices; tokens are always counted.
 
 ## Project layout
+- `www/vendor/` isomorphic-git, LightningFS, Buffer polyfill, Capacitor core (bundled, no build step)
 - `www/` web UI (plain ES modules, no bundler)
 - `native/KdexNativePlugin.java` Capacitor plugin: encrypted key storage, streaming HTTP, folder access
 - `scripts/prepare-android.mjs` patches the generated Android project (plugin, icons, splash, version, signing)

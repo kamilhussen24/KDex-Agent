@@ -1,6 +1,6 @@
 {
-  "appId": "com.kdex.chat",
-  "appName": "KDex Chat",
+  "appId": "com.kdex.agent",
+  "appName": "KDex Agent",
   "webDir": "www",
   "android": {
     "allowMixedContent": false

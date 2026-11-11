@@ -11,7 +11,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const versionName = process.env.APP_VERSION || pkg.version || '1.0.0';
 const versionCode = Number(process.env.APP_VERSION_CODE || process.env.GITHUB_RUN_NUMBER || 1);
 const res = path.join(android, 'app/src/main/res');
-const javaDir = path.join(android, 'app/src/main/java/com/kdex/chat');
+const javaDir = path.join(android, 'app/src/main/java/com/kdex/agent');
 const read = (p) => fs.readFileSync(p, 'utf8');
 const write = (p, t) => fs.writeFileSync(p, t);
 
@@ -19,7 +19,7 @@ const write = (p, t) => fs.writeFileSync(p, t);
 fs.mkdirSync(javaDir, { recursive: true });
 fs.copyFileSync(path.join(root, 'native/KdexNativePlugin.java'), path.join(javaDir, 'KdexNativePlugin.java'));
 write(path.join(javaDir, 'MainActivity.java'),
-`package com.kdex.chat;
+`package com.kdex.agent;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

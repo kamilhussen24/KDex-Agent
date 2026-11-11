@@ -43,23 +43,28 @@ function b64ToBytes(b64) {
   return out;
 }
 
+
+const enc = new TextEncoder();
+function bytesToB64(u8) {
+  let bin = '';
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 /**
- * Open a streaming request. Returns { status, body } where body is an async iterable of text chunks.
- * `signal` (AbortSignal) cancels the request.
+ * Low-level request. Returns { status, headers, chunks } where chunks is an async iterable of Uint8Array.
+ * `body` may be a string or a Uint8Array. `signal` (AbortSignal) cancels the request.
  */
-export async function httpStream({ url, method = 'POST', headers = {}, body = null, signal }) {
+export async function httpRaw({ url, method = 'POST', headers = {}, body = null, signal }) {
   if (!plugin) {
     const res = await fetch(url, { method, headers, body, signal });
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
+    const hdrs = {}; res.headers.forEach((v, k) => { hdrs[k] = v; });
+    const reader = res.body ? res.body.getReader() : null;
     return {
-      status: res.status,
-      body: (async function* () {
-        for (;;) {
-          const r = await reader.read();
-          if (r.done) break;
-          yield dec.decode(r.value, { stream: true });
-        }
+      status: res.status, headers: hdrs,
+      chunks: (async function* () {
+        if (!reader) return;
+        for (;;) { const r = await reader.read(); if (r.done) break; yield r.value; }
       })(),
     };
   }
@@ -71,13 +76,13 @@ export async function httpStream({ url, method = 'POST', headers = {}, body = nu
   let finished = false;
   let failure = null;
   let status = 0;
+  let respHeaders = {};
   let headResolve;
   const headReady = new Promise((r) => { headResolve = r; });
-  const dec = new TextDecoder('utf-8');
 
   waiters.set(id, (ev) => {
-    if (ev.type === 'head') { status = ev.status; headResolve(); return; }
-    if (ev.type === 'chunk') queue.push(dec.decode(b64ToBytes(ev.b64), { stream: true }));
+    if (ev.type === 'head') { status = ev.status; respHeaders = ev.headers || {}; headResolve(); return; }
+    if (ev.type === 'chunk') queue.push(b64ToBytes(ev.b64));
     else if (ev.type === 'end') { finished = true; headResolve(); }
     else if (ev.type === 'error') { failure = new Error(ev.message || 'Network error'); finished = true; headResolve(); }
     if (wake) { const w = wake; wake = null; w(); }
@@ -89,13 +94,15 @@ export async function httpStream({ url, method = 'POST', headers = {}, body = nu
     signal.addEventListener('abort', () => { finished = true; failure = failure || new DOMException('Aborted', 'AbortError'); cancel(); if (wake) { const w = wake; wake = null; w(); } headResolve(); });
   }
 
-  await plugin.httpStart({ id, url, method, headers, body });
+  const req = { id, url, method, headers };
+  if (body instanceof Uint8Array) req.bodyB64 = bytesToB64(body); else if (body != null) req.body = body;
+  await plugin.httpStart(req);
   await headReady;
   if (failure && !status) { waiters.delete(id); throw failure; }
 
   return {
-    status,
-    body: (async function* () {
+    status, headers: respHeaders,
+    chunks: (async function* () {
       try {
         for (;;) {
           while (queue.length) yield queue.shift();
@@ -110,6 +117,19 @@ export async function httpStream({ url, method = 'POST', headers = {}, body = nu
   };
 }
 
+/** Text streaming request (used for chat providers). Returns { status, body } where body yields strings. */
+export async function httpStream(opts) {
+  const r = await httpRaw(opts);
+  const dec = new TextDecoder('utf-8');
+  return {
+    status: r.status,
+    body: (async function* () {
+      for await (const c of r.chunks) { const t = dec.decode(c, { stream: true }); if (t) yield t; }
+      const tail = dec.decode(); if (tail) yield tail;
+    })(),
+  };
+}
+
 // ---------------------------------------------------------------- folder access
 // Browser fallback: a small in-memory demo folder so the UI works without a phone.
 const memFolders = new Map();
@@ -117,15 +137,18 @@ function memFolder(uri) {
   if (!memFolders.has(uri)) memFolders.set(uri, new Map());
   return memFolders.get(uri);
 }
+const memPut = (m, p, data) => m.set(p, { data: typeof data === 'string' ? enc.encode(data) : data, mtime: Date.now() });
+const memText = (e) => new TextDecoder().decode(e.data);
 
 export const fs = {
   async pickFolder() {
     if (plugin) return plugin.pickFolder();
     const uri = 'mem://demo-' + Math.random().toString(36).slice(2, 6);
     const m = memFolder(uri);
-    m.set('README.md', '# Demo folder\n\nThis folder lives in memory (browser test mode).\n');
-    m.set('app/main.py', 'def is_admin(user_id):\n    admins = load_admins()\n    return user_id in admins\n');
-    m.set('app/config.py', 'ADMIN_IDS = [\n]\n');
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('kdexEmptyDemo') === '1') return { uri, name: 'cloned', path: 'cloned' };
+    memPut(m, 'README.md', '# Demo folder\n\nThis folder lives in memory (browser test mode).\n');
+    memPut(m, 'app/main.py', 'def is_admin(user_id):\n    admins = load_admins()\n    return user_id in admins\n');
+    memPut(m, 'app/config.py', 'ADMIN_IDS = [\n]\n');
     return { uri, name: 'demo', path: 'demo' };
   },
   async releaseFolder(uri) { if (plugin) await plugin.releaseFolder({ uri }); },
@@ -134,12 +157,12 @@ export const fs = {
     const m = memFolder(uri);
     const base = path ? path.replace(/\/+$/, '') + '/' : '';
     const seen = new Map();
-    for (const [p, t] of m) {
+    for (const [p, e] of m) {
       if (!p.startsWith(base)) continue;
       const rest = p.slice(base.length);
       const i = rest.indexOf('/');
-      if (i >= 0) seen.set(rest.slice(0, i), { name: rest.slice(0, i), path: base + rest.slice(0, i), isDir: true, size: 0 });
-      else seen.set(rest, { name: rest, path: base + rest, isDir: false, size: t.length });
+      if (i >= 0) seen.set(rest.slice(0, i), { name: rest.slice(0, i), path: base + rest.slice(0, i), isDir: true, size: 0, modified: e.mtime });
+      else seen.set(rest, { name: rest, path: base + rest, isDir: false, size: e.data.length, modified: e.mtime });
     }
     return Array.from(seen.values());
   },
@@ -148,31 +171,46 @@ export const fs = {
     const m = memFolder(uri);
     const base = path ? path.replace(/\/+$/, '') + '/' : '';
     const files = [];
-    for (const [p, t] of m) if (p.startsWith(base)) files.push({ name: p.split('/').pop(), path: p, isDir: false, size: t.length });
+    for (const [p, e] of m) if (p.startsWith(base)) files.push({ name: p.split('/').pop(), path: p, isDir: false, size: e.data.length });
     return { files, truncated: false };
   },
   async stat(uri, path) {
     if (plugin) return plugin.stat({ uri, path });
     const m = memFolder(uri);
-    if (m.has(path)) return { exists: true, isDir: false, size: m.get(path).length };
+    if (m.has(path)) return { exists: true, isDir: false, size: m.get(path).data.length, modified: m.get(path).mtime };
     const base = path.replace(/\/+$/, '') + '/';
-    for (const p of m.keys()) if (p.startsWith(base)) return { exists: true, isDir: true, size: 0 };
-    return { exists: false };
+    for (const p of m.keys()) if (p.startsWith(base)) return { exists: true, isDir: true, size: 0, modified: 0 };
+    return { exists: path === '', isDir: path === '', size: 0, modified: 0 };
   },
   async readText(uri, path, maxBytes = 1048576) {
     if (plugin) return plugin.readText({ uri, path, maxBytes });
     const m = memFolder(uri);
     if (!m.has(path)) throw new Error('Not found: ' + path);
-    const t = m.get(path);
-    return { text: t.slice(0, maxBytes), size: t.length, binary: false, truncated: t.length > maxBytes };
+    const e = m.get(path); const t = memText(e);
+    return { text: t.slice(0, maxBytes), size: e.data.length, binary: false, truncated: e.data.length > maxBytes };
   },
   async writeText(uri, path, text) {
     if (plugin) { await plugin.writeText({ uri, path, text }); return; }
-    memFolder(uri).set(path, text);
+    memPut(memFolder(uri), path, text);
   },
+  async readBytes(uri, path) {
+    if (plugin) return b64ToBytes((await plugin.readB64({ uri, path })).b64);
+    const m = memFolder(uri);
+    if (!m.has(path)) throw new Error('ENOENT: ' + path);
+    return m.get(path).data;
+  },
+  async writeBytes(uri, path, data) {
+    if (plugin) { await plugin.writeB64({ uri, path, b64: bytesToB64(data) }); return; }
+    memPut(memFolder(uri), path, data);
+  },
+  async mkdir(uri, path) { if (plugin) await plugin.mkdir({ uri, path }); },
   async remove(uri, path) {
     if (plugin) { await plugin.remove({ uri, path }); return; }
-    if (!memFolder(uri).delete(path)) throw new Error('Not found: ' + path);
+    const m = memFolder(uri);
+    if (m.delete(path)) return;
+    const base = path.replace(/\/+$/, '') + '/'; let any = false;
+    for (const p of [...m.keys()]) if (p.startsWith(base)) { m.delete(p); any = true; }
+    if (!any) throw new Error('Not found: ' + path);
   },
 };
 

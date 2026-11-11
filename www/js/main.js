@@ -1,10 +1,12 @@
-// KDex Chat (Android) - UI layer. All data stays on this phone.
+// KDex Agent (Android) - UI layer. All data stays on this phone.
 import { $, $$, esc, uid, fmtBytes, fmtTok, fmtUsd, ago, dayKey } from './util.js';
 import { db } from './db.js';
 import { secure, fs, App, isNative } from './native.js';
 import { PRESETS, listModels } from './providers.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
+import * as G from './git.js';
+import { SUPPORT_EMAIL, APP_NAME, APP_VERSION } from './config.js';
 
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
@@ -72,7 +74,7 @@ function showSetup(first) {
   const box = $('#setup'); box.classList.remove('hidden');
   let preset = PRESETS[0];
   const draw = () => {
-    box.innerHTML = '<div class="wrap"><svg class="logo"><use href="#i-logo"/></svg><h1>' + (first ? 'Welcome to KDex Chat' : 'Add a provider') + '</h1>' +
+    box.innerHTML = '<div class="wrap"><svg class="logo"><use href="#i-logo"/></svg><h1>' + (first ? 'Welcome to KDex Agent' : 'Add a provider') + '</h1>' +
       '<p class="sub">Use your own API key. It is stored encrypted on this phone and sent only to the provider you choose.</p>' +
       '<div class="seg" style="flex-wrap:wrap;margin-bottom:14px">' + PRESETS.map((p) => '<button type="button" class="btn sm' + (p.key === preset.key ? ' on' : '') + '" data-p="' + p.key + '"><span class="lbl">' + p.name + '</span></button>').join('') + '</div>' +
       '<label class="field"><span>Name</span><input id="sName" value="' + esc(preset.name) + '"></label>' +
@@ -169,8 +171,13 @@ async function persistChat() {
 // ------------------------------------------------------------ context bar (folder chip)
 function drawCtx() {
   const bar = $('#ctxBar');
-  if (S.folder) { bar.classList.remove('hidden'); $('#chipFolderName').textContent = S.folder.name; updateChangesChip(); }
+  if (S.folder) { bar.classList.remove('hidden'); $('#chipFolderName').textContent = S.folder.name; updateChangesChip(); updateGitChip(); }
   else bar.classList.add('hidden');
+}
+async function updateGitChip() {
+  if (!S.folder) return;
+  const b = await G.isRepo(S.folder).then((ok) => ok ? G.currentBranch(S.folder) : null).catch(() => null);
+  $('#chipGitLbl').textContent = b || 'Git';
 }
 async function updateChangesChip() {
   if (!S.chat) return;
@@ -204,7 +211,7 @@ function renderMsg(m) {
     if (m.text) h += '<div class="body">' + renderMarkdown(m.text) + '</div>';
     else if (live && !m.calls.length && !m.thought) h += '<div class="body"><span class="dots"></span></div>';
     if (!live && (m.text || m.status === 'error')) {
-      h += '<div class="acts"><button class="icon-btn" data-act="copy" aria-label="Copy">' + ICON('copy') + '</button><button class="icon-btn" data-act="regen" aria-label="Regenerate">' + ICON('refresh') + '</button></div>';
+      h += '<div class="acts"><button class="icon-btn" data-act="copy" aria-label="Copy">' + ICON('copy') + '</button><button class="icon-btn" data-act="regen" aria-label="Regenerate">' + ICON('refresh') + '</button><button class="icon-btn" data-act="report" aria-label="Report this reply">' + ICON('flag') + '</button></div>';
       if (m.tin || m.tout) h += '<div class="meta">' + fmtTok(m.tin) + ' in · ' + fmtTok(m.tout) + ' out</div>';
     }
     const open = el.querySelector('details.think'); const wasOpen = open && open.open;
@@ -218,14 +225,14 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
 function toolCard(m) {
   const st = m.status || 'running';
   let h = '<div class="tool"><div class="th">' + ICON(TOOL_ICON[m.name] || 'file') + '<span class="nm">' + esc(m.name) + '</span><span class="pa">' + esc(m.args || '') + '</span><span class="st ' + st + '">' + esc(st === 'running' ? 'working' : st) + '</span></div>';
   if (m.plan) {
     h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') +
       (m.plan.more ? '<span class="dl c">... ' + m.plan.more + ' more lines</span>' : '') + '</div>';
-    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + ' · +' + m.plan.added + ' −' + m.plan.removed + '</span>';
+    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.path === 'git' ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
     if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">Apply</span></button>';
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
     h += '</div>';
@@ -350,6 +357,7 @@ async function openProjects() {
   const body = sheet('Projects');
   const draw = () => {
     body.innerHTML = '<button id="pOpen" class="btn primary" style="width:100%;margin-bottom:8px">' + ICON('folder') + '<span class="lbl">Open a folder...</span></button>' +
+      '<button id="pClone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('branch') + '<span class="lbl">Clone a repository...</span></button>' +
       '<button id="pNone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('plus') + '<span class="lbl">Chat without a folder</span></button>' +
       '<div class="safe">' + ICON('lock') + '<span>I can only touch the folder you pick. A backup is saved before every change.</span></div>' +
       (S.folders.length ? '<div class="h3">Your folders</div>' : '') +
@@ -363,6 +371,7 @@ async function openProjects() {
         closeSheet(); await newChat(f); await persistChat(); loadChats();
       } catch (e) { if (!/cancel/i.test(e.message || '')) toast(e.message || 'Could not open the folder'); }
     };
+    $('#pClone').onclick = cloneFlow;
     $('#pNone').onclick = () => { closeSheet(); newChat(null); };
     $$('[data-f]', body).forEach((r) => r.onclick = async (e) => {
       if (e.target.closest('[data-rmf]')) return;
@@ -442,7 +451,10 @@ function openSettings() {
     '<div class="h3">Data</div>' +
     '<button id="usageBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Usage and cost</span></button>' +
     '<button id="expBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Export this chat as text</span></button>' +
-    '<div class="h3">About</div><div class="kv"><span>Version</span><span>1.0.3</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
+    '<button id="bkOut" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Back up all data to a folder</span></button>' +
+    '<button id="bkIn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Restore from a backup</span></button>' +
+    '<div class="h3">Git</div><button id="gitId" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Identity and access tokens</span></button>' +
+    '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
   bindSeg('setAuto', (v) => save({ autoApply: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
@@ -469,6 +481,8 @@ function openSettings() {
   mem();
   $('#memAdd').onclick = async () => { const v = prompt('Note (one short fact)'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
   $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
+  $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message)); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message));
+  $('#gitId').onclick = () => openGitIdentity(openSettings);
 }
 async function save(p) { S.settings = await A.saveSettings(p); }
 
@@ -490,13 +504,174 @@ async function exportChat() {
   try { await navigator.clipboard.writeText(t); toast('Chat copied to clipboard'); } catch (e) { toast('Could not copy'); }
 }
 
+// ------------------------------------------------------------ git UI
+const KIND_LABEL = { new: 'new', modified: 'modified', deleted: 'deleted' };
+function progressText(p) { return p && p.phase ? p.phase + (p.total ? ' ' + Math.round((p.loaded / p.total) * 100) + '%' : '') : ''; }
+
+async function openGit() {
+  if (!S.folder) { toast('Open a folder first.'); return; }
+  const folder = S.folder;
+  const repo = await G.isRepo(folder);
+  if (!repo) return openGitSetup(folder);
+  const body = sheet('Git');
+  body.innerHTML = '<div class="note">Loading...</div>';
+  let branch, changes, remote, branchList, history;
+  try {
+    [branch, changes, branchList, history] = await Promise.all([G.currentBranch(folder), G.status(folder), G.branches(folder), G.log(folder, 15)]);
+  } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; return; }
+  const gs = await G.getGitSettings();
+  body.innerHTML =
+    '<div class="row-item">' + ICON('branch') + '<div class="grow"><div class="t">' + esc(branch || '') + '</div><div class="s">' + changes.length + ' change' + (changes.length === 1 ? '' : 's') + '</div></div>' +
+    '<select id="gBranch" style="height:34px;border:1px solid var(--line);border-radius:10px;background:var(--card);max-width:40%">' + branchList.map((b) => '<option' + (b === branch ? ' selected' : '') + '>' + esc(b) + '</option>').join('') + '</select>' +
+    '<button id="gNewBranch" class="icon-btn" aria-label="New branch">' + ICON('plus') + '</button></div>' +
+    '<div class="seg" style="margin-bottom:10px"><button id="gPull" class="btn"><svg class="ic"><use href="#i-down"/></svg><span class="lbl">Pull</span></button><button id="gPush" class="btn"><svg class="ic"><use href="#i-up"/></svg><span class="lbl">Push</span></button></div>' +
+    '<div id="gMsg"></div>' +
+    '<div class="h3">Changes</div>' +
+    (changes.length ? changes.map((c) => '<div class="row-item" data-gf="' + esc(c.path) + '">' + ICON('file') + '<div class="grow"><div class="t">' + esc(c.path) + '</div><div class="s">' + KIND_LABEL[c.kind] + '</div></div><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard">' + ICON('undo') + '</button></div>').join('') : '<div class="note">Nothing to commit.</div>') +
+    (changes.length ? '<label class="field" style="margin-top:10px"><span>Commit message</span><textarea id="gMessage" style="height:72px" placeholder="What did you change?"></textarea></label>' +
+      '<div class="seg"><button id="gSuggest" class="btn"><span class="lbl">Suggest message</span></button><button id="gCommit" class="btn primary"><span class="lbl">Commit all</span></button></div>' : '') +
+    '<div class="h3">History</div>' + (history.map((h) => '<div class="kv"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:8px">' + esc(h.commit.message.trim().split('\n')[0]) + '</span><span>' + h.oid.slice(0, 7) + '</span></div>').join('') || '<div class="note">No commits yet.</div>') +
+    '<div class="h3">Settings</div><div class="kv"><span>Author</span><span>' + esc(gs.name ? gs.name + ' <' + gs.email + '>' : 'not set') + '</span></div>' +
+    '<button id="gIdent" class="btn" style="width:100%;margin:8px 0">' + '<span class="lbl">Identity and tokens</span></button>' +
+    '<button id="gRemote" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Change remote URL</span></button>' +
+    '<div class="safe">' + ICON('lock') + '<span>Git data is stored inside the app. Your folder holds only your files.</span></div>';
+
+  const msg = (t, ok) => { $('#gMsg').innerHTML = t ? '<div class="' + (ok ? 'ok' : 'err') + '">' + esc(t) + '</div>' : ''; };
+  const busy = async (label, fn) => {
+    const btns = $$('#sheetBody .btn'); btns.forEach((b) => b.disabled = true); msg(label + '...', true);
+    try { await fn((p) => msg(label + ' ' + progressText(p), true)); updateGitChip(); updateChangesChip(); openGit(); setTimeout(() => toast(label + ' done'), 300); }
+    catch (e) { btns.forEach((b) => b.disabled = false); msg(e.message || String(e)); }
+  };
+  $('#gBranch').onchange = (e) => busy('Switching branch', () => G.checkout(folder, e.target.value));
+  $('#gNewBranch').onclick = () => { const n = prompt('New branch name'); if (n && n.trim()) busy('Creating branch', () => G.createBranch(folder, n.trim().replace(/\s+/g, '-'))); };
+  $('#gPull').onclick = () => busy('Pulling', (pr) => G.pull(folder, { onProgress: pr }));
+  $('#gPush').onclick = async () => {
+    if (changes.length && !await confirmBox('Uncommitted changes', 'Push sends commits only. Your ' + changes.length + ' uncommitted change(s) stay on the phone. Continue?', 'Push')) return;
+    busy('Pushing', (pr) => G.push(folder, { onProgress: pr }));
+  };
+  $$('[data-gd]', body).forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    if (!await confirmBox('Discard changes?', 'Restore ' + b.dataset.gd + ' to the last commit. New files are deleted.', 'Discard')) return;
+    busy('Discarding', () => G.discard(folder, b.dataset.gd));
+  });
+  $$('[data-gf]', body).forEach((r) => r.onclick = () => openGitDiff(folder, r.dataset.gf));
+  if ($('#gSuggest')) $('#gSuggest').onclick = async () => {
+    const b = $('#gSuggest'); b.disabled = true; b.firstElementChild.textContent = 'Thinking...';
+    try { $('#gMessage').value = await A.suggestCommitMessage(currentModelId(), folder); } catch (e) { msg(e.message); }
+    b.disabled = false; b.firstElementChild.textContent = 'Suggest message';
+  };
+  if ($('#gCommit')) $('#gCommit').onclick = () => busy('Committing', () => G.commit(folder, $('#gMessage').value));
+  $('#gIdent').onclick = () => openGitIdentity(() => openGit());
+  $('#gRemote').onclick = async () => { const u = prompt('Remote URL (https://...)'); if (u && u.trim()) busy('Saving remote', () => G.setRemote(folder, u.trim())); };
+}
+async function openGitDiff(folder, path) {
+  const body = sheet(path, { back: openGit });
+  body.innerHTML = '<div class="note">Loading...</div>';
+  try {
+    const d = await G.diffFile(folder, path);
+    body.innerHTML = '<div class="tool"><div class="diff" style="max-height:none">' + d.lines.map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') + '</div></div>';
+  } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
+}
+
+async function openGitSetup(folder) {
+  const body = sheet('Git for ' + folder.name);
+  let empty = true;
+  try { empty = !(await fs.list(folder.uri, '')).length; } catch (e) { /* ignore */ }
+  body.innerHTML =
+    '<div class="note" style="text-align:left">Use Git to clone a repository, let the agent edit it, then commit and push.</div><div id="gMsg"></div>' +
+    '<div class="h3">Clone a repository' + (empty ? '' : ' (needs an empty folder)') + '</div>' +
+    '<label class="field"><span>Repository URL</span><input id="cUrl" placeholder="https://github.com/user/repo.git" autocapitalize="off" autocomplete="off"></label>' +
+    '<label class="field"><span>Access token (for private repos and pushing)</span><input id="cTok" type="password" autocomplete="off" autocapitalize="off" placeholder="Paste a personal access token"><small>Stored encrypted on this phone. Saved per host, so you only enter it once.</small></label>' +
+    '<label class="row-item" style="padding:8px 12px"><input type="checkbox" id="cFull"><span class="grow t">Download full history (slower)</span></label>' +
+    '<button id="cGo" class="btn primary" style="width:100%"' + (empty ? '' : ' disabled') + '><span class="lbl">Clone</span></button>' +
+    '<div class="h3">Or start from the files already here</div>' +
+    '<label class="field"><span>Remote URL (optional)</span><input id="iUrl" placeholder="https://github.com/user/repo.git" autocapitalize="off" autocomplete="off"></label>' +
+    '<button id="iGo" class="btn" style="width:100%"><span class="lbl">Initialize a new repository</span></button>';
+  const msg = (t, ok) => { $('#gMsg').innerHTML = t ? '<div class="' + (ok ? 'ok' : 'err') + '">' + esc(t) + '</div>' : ''; };
+  $('#cGo').onclick = async () => {
+    const url = $('#cUrl').value.trim(); if (!url) { msg('Enter the repository URL.'); return; }
+    const btns = $$('#sheetBody .btn'); btns.forEach((b) => b.disabled = true); msg('Cloning...', true);
+    try {
+      await G.clone(folder, url, { token: $('#cTok').value.trim(), depth: $('#cFull').checked ? 0 : 1, onProgress: (p) => msg('Cloning ' + progressText(p), true) });
+      toast('Cloned'); drawCtx(); openGit();
+    } catch (e) { btns.forEach((b) => b.disabled = false); $('#cGo').disabled = !empty; msg(e.message || String(e)); }
+  };
+  $('#iGo').onclick = async () => {
+    try { await G.init(folder, $('#iUrl').value.trim()); toast('Repository created'); drawCtx(); openGit(); } catch (e) { msg(e.message); }
+  };
+}
+
+async function openGitIdentity(back) {
+  const body = sheet('Git identity and tokens', { back });
+  const gs = await G.getGitSettings(); const hosts = await G.listTokenHosts();
+  body.innerHTML =
+    '<div class="h3">Commit author</div>' +
+    '<label class="field"><span>Name</span><input id="gName" value="' + esc(gs.name) + '"></label>' +
+    '<label class="field"><span>Email</span><input id="gEmail" type="email" value="' + esc(gs.email) + '" autocapitalize="off"></label>' +
+    '<div class="h3">Access tokens</div>' +
+    (hosts.map((h) => '<div class="row-item">' + ICON('key') + '<div class="grow"><div class="t">' + esc(h) + '</div><div class="s">Token saved</div></div><button class="icon-btn" data-rh="' + esc(h) + '">' + ICON('trash') + '</button></div>').join('') || '<div class="note">No tokens saved.</div>') +
+    '<label class="field" style="margin-top:10px"><span>Host</span><input id="tHost" value="github.com" autocapitalize="off"></label>' +
+    '<label class="field"><span>Token</span><input id="tTok" type="password" autocomplete="off" autocapitalize="off"><small>GitHub: Settings > Developer settings > Personal access tokens (needs repo access). GitLab: a token with write_repository.</small></label>' +
+    '<button id="tSave" class="btn primary" style="width:100%"><span class="lbl">Save</span></button><div id="tMsg"></div>';
+  $('#tSave').onclick = async () => {
+    await G.saveGitSettings({ name: $('#gName').value.trim(), email: $('#gEmail').value.trim() });
+    const h = $('#tHost').value.trim().toLowerCase(); const t = $('#tTok').value.trim();
+    if (t && h) { await G.saveToken(h, t); await G.rememberHost(h); }
+    toast('Saved'); openGitIdentity(back);
+  };
+  $$('[data-rh]', body).forEach((b) => b.onclick = async () => { await G.forgetHost(b.dataset.rh); openGitIdentity(back); });
+}
+
+// ------------------------------------------------------------ clone from Projects
+async function cloneFlow() {
+  try {
+    const r = await fs.pickFolder(); if (!r || !r.uri) return;
+    let f = S.folders.find((x) => x.uri === r.uri);
+    if (!f) { f = { id: uid(), name: r.name || 'Folder', uri: r.uri }; S.folders.push(f); await A.saveFolders(S.folders); }
+    closeSheet(); await newChat(f); await persistChat(); loadChats(); openGit();
+  } catch (e) { if (!/cancel/i.test(e.message || '')) toast(e.message || 'Could not open the folder'); }
+}
+
+// ------------------------------------------------------------ report a reply (store policy for AI apps)
+async function reportReply(id) {
+  const m = await db.get('messages', id); if (!m) return;
+  if (!await confirmBox('Report this reply?', 'Use this if the reply is harmful, offensive or wrong in a dangerous way. The reply text is flagged on this phone' + (SUPPORT_EMAIL ? ' and an email draft opens so you can send it to us.' : '.'), 'Report')) return;
+  m.reported = true; await db.put('messages', m);
+  if (SUPPORT_EMAIL) location.href = 'mailto:' + SUPPORT_EMAIL + '?subject=' + encodeURIComponent('KDex Agent: reported reply') + '&body=' + encodeURIComponent('Reported reply:\n\n' + (m.text || '').slice(0, 3000));
+  toast('Reported. Thank you.');
+}
+
+// ------------------------------------------------------------ backup export / import (no API keys inside)
+async function exportBackup() {
+  const r = await fs.pickFolder().catch(() => null); if (!r || !r.uri) return;
+  const data = { app: 'kdex-agent', version: 1, at: Date.now() };
+  for (const st of ['kv', 'chats', 'messages', 'backups', 'usage']) data[st] = await db.all(st);
+  data.kv = data.kv.filter((x) => x.key !== 'lastChat');
+  const name = 'kdex-agent-backup-' + dayKey() + '.json';
+  await fs.writeText(r.uri, name, JSON.stringify(data));
+  toast('Saved ' + name + ' in ' + (r.name || 'the folder'));
+}
+async function importBackup() {
+  const r = await fs.pickFolder().catch(() => null); if (!r || !r.uri) return;
+  const files = (await fs.list(r.uri, '')).filter((e) => !e.isDir && /^kdex-agent-backup-.*\.json$/.test(e.name)).sort((a, b) => b.name.localeCompare(a.name));
+  if (!files.length) { toast('No backup file found in that folder.'); return; }
+  const f = files[0];
+  if (!await confirmBox('Restore backup?', 'Restore ' + f.name + '? Chats, notes and settings in the file replace the current ones. API keys are never in a backup; add them again if needed.', 'Restore')) return;
+  const t = await fs.readText(r.uri, f.path, 64 * 1024 * 1024);
+  const data = JSON.parse(t.text);
+  if (data.app !== 'kdex-agent') { toast('This is not a KDex Agent backup.'); return; }
+  for (const st of ['chats', 'messages', 'backups', 'usage']) { for (const row of await db.all(st)) await db.del(st, st === 'chats' || st === 'kv' ? row.id || row.key : row.id); }
+  for (const st of ['kv', 'chats', 'messages', 'backups', 'usage']) for (const row of data[st] || []) await db.put(st, row);
+  toast('Restored. Restarting...'); setTimeout(() => location.reload(), 700);
+}
+
 // ------------------------------------------------------------ wiring
 function wire() {
   $('#menuBtn').onclick = openDrawer; $('#scrim').onclick = closeDrawer;
   $('#dNew').onclick = () => newChat(S.folder); $('#topNewBtn').onclick = () => newChat(S.folder);
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
-  $('#chipFiles').onclick = () => openFiles(''); $('#chipChanges').onclick = openChanges;
+  $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = openGit; $('#chipChanges').onclick = openChanges;
   $('#sheetClose').onclick = closeSheet;
   $('#chatSearch').oninput = drawChatList;
   $('#chatList').onclick = async (e) => {
@@ -528,6 +703,7 @@ function wire() {
     const a = e.target.closest('[data-act]');
     if (a) {
       if (a.dataset.act === 'regen') regenerate();
+      else if (a.dataset.act === 'report') reportReply(Number(a.closest('.msg').dataset.id));
       else { const el = a.closest('.msg'); const m = await db.get('messages', Number(el.dataset.id)); try { await navigator.clipboard.writeText(m.text || ''); toast('Copied'); } catch (x) { /* ignore */ } }
     }
   });

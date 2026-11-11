@@ -29,10 +29,10 @@ export const TOOLS = [
   },
   {
     name: 'read_file',
-    description: 'Read a text file with line numbers. Long files are returned in parts: use offset (1-based line) and limit.',
+    description: 'Read a text file with line numbers. Returns up to 2000 lines per call, so most files fit in one call. For a very large file, use search first to find the lines you need, then read only that range with offset and limit. Never re-read a part you already have.',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer', description: 'Max lines, default 400' } },
+      properties: { path: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer', description: 'Max lines, default 2000' } },
       required: ['path'],
     },
   },
@@ -120,10 +120,10 @@ export async function runRead(name, args, folder) {
     const lines = r.text.split('\n');
     const total = lines.length;
     const offset = Math.max(1, parseInt(args.offset, 10) || 1);
-    const limit = Math.min(2000, Math.max(1, parseInt(args.limit, 10) || 400));
+    const limit = Math.min(4000, Math.max(1, parseInt(args.limit, 10) || 2000));
     const slice = lines.slice(offset - 1, offset - 1 + limit);
     let out = slice.map((l, i) => (offset + i) + '\t' + l.replace(/\r$/, '')).join('\n');
-    if (out.length > MAX_OUT) out = out.slice(0, MAX_OUT) + '\n[output cut]';
+    if (out.length > 60000) out = out.slice(0, 60000) + '\n[output cut at 60000 characters; call again with a later offset]';
     const end = offset - 1 + slice.length;
     out += '\n[lines ' + offset + '-' + end + ' of ' + total + (end < total ? '; call read_file again with offset ' + (end + 1) + ' to continue' : '') + (r.truncated ? '; file is larger than 1 MB and was cut' : '') + ']';
     return out;
@@ -133,7 +133,7 @@ export async function runRead(name, args, folder) {
 }
 
 // ------------------------------------------------------------------ write tools: plan, then apply
-function lineDiff(a, b) {
+export function lineDiff(a, b) {
   const A = a.split('\n');
   const B = b.split('\n');
   let pre = 0;
