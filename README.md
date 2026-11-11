@@ -106,3 +106,12 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - The Android status and navigation bars now follow the chosen theme (new `setBars` call in the native plugin).
 - Native controls (dropdowns, scrollbars, text fields) follow the chosen theme, not only the phone's.
 - Browser tests added in `tests/` (theme, Git sheet, first run). Removed unused code.
+
+## v1.6.0
+- Settings now uses a real gear icon.
+- The assistant knows the app: who made it, what it can and cannot do, where settings are, and answers in the user's language.
+- Thinking: Off, Low, Medium and High, with larger budgets for Medium and High.
+- Token saving by default: tighter history budgets (Economy 3,000, Balanced 9,000), repeated reads of an unchanged file are skipped, older tool output is trimmed, Anthropic prompt caching is on.
+- Token usage page: tokens only. Today, this month, last 7 days. Prices removed. Days older than 14 are deleted.
+- Model lists: up to 8 popular models are shown; search shows up to 10; any other model id can be typed. Non-chat models (embedding, image, audio) are hidden.
+- Terminal: the model is told to read stdout, stderr and the exit code, report the real result, and retry a failed command at most twice. Results now say "Command succeeded" or "Command FAILED". An empty final reply after tool work gets a fallback message.

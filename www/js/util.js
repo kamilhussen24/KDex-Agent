@@ -25,12 +25,6 @@ export function fmtTok(n) {
   return (n / 1000000).toFixed(2) + 'M';
 }
 
-export function fmtUsd(n) {
-  n = Number(n) || 0;
-  if (n === 0) return '$0.00';
-  if (n < 0.01) return '$' + n.toFixed(4);
-  return '$' + n.toFixed(2);
-}
 
 export function ago(ts) {
   const s = Math.max(0, (Date.now() - ts) / 1000);
@@ -45,6 +39,8 @@ export function dayKey(ts = Date.now()) {
   const d = new Date(ts);
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
+
+export const dayKeyAgo = (n) => dayKey(Date.now() - n * 86400000);
 
 /** Rough token estimate, Bengali-aware (Bengali text costs far more tokens per character). */
 export function estimateTokens(s) {

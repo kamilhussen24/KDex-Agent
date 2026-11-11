@@ -15,8 +15,8 @@
 //   { role:'tool', callId, name, content }
 import { httpStream } from './native.js';
 
-const BUDGET = { low: 2048, high: 8192 };
-const EFFORT = { low: 'low', high: 'high' };
+const BUDGET = { low: 2048, medium: 6000, high: 16000 };
+const EFFORT = { low: 'low', medium: 'medium', high: 'high' };
 
 async function* sseEvents(body) {
   let buf = '';
@@ -311,7 +311,15 @@ export async function listModels(provider, apiKey) {
   let j;
   try { j = JSON.parse(text); } catch (e) { throw new Error('Unexpected reply from the provider'); }
   const arr = Array.isArray(j.data) ? j.data : Array.isArray(j) ? j : [];
-  return arr.map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean).sort();
+  const NOT_CHAT = /embed|tts|whisper|transcribe|speech|audio|realtime|image|imagen|veo|lyria|clip|dall-e|moderation|rerank|vision-only|aqa/i;
+  return [...new Set(arr.map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean).map((id) => id.replace(/^models\//, '')).filter((id) => !NOT_CHAT.test(id)))].sort();
+}
+
+/** The few models most people want: stable names first (no dates, previews or experiments), shorter ids first. */
+export function popularModels(ids, n = 8) {
+  const BAD = /(\d{4}-\d{2}-\d{2}|-\d{6,8}$|preview|exp|latest|-\d{3}$|search|codex|oss|instruct|gemma|distill)/i;
+  const score = (id) => (BAD.test(id) ? 100 : 0) + id.length;
+  return [...ids].sort((a, b) => score(a) - score(b)).slice(0, n);
 }
 
 export const PRESETS = [

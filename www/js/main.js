@@ -1,8 +1,8 @@
 // KDex Agent (Android) - UI layer. All data stays on this phone.
-import { $, $$, esc, uid, fmtBytes, fmtTok, fmtUsd, ago, dayKey, copyText } from './util.js';
+import { $, $$, esc, uid, fmtBytes, fmtTok, ago, dayKey, dayKeyAgo, copyText } from './util.js';
 import { db, kvGet, kvSet } from './db.js';
 import { secure, fs, App, Termux, setBars } from './native.js';
-import { PRESETS, QUICK_FILL, listModels } from './providers.js';
+import { PRESETS, QUICK_FILL, listModels, popularModels } from './providers.js';
 import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
@@ -81,16 +81,16 @@ function modelPicker(box, prov, getKey, suggested, have) {
   const picked = new Set(); const manual = []; let all = null; let q = '';
   const present = new Set(have || []);
   const draw = () => {
-    const base = all || suggested;
-    let ids = base.filter((id) => !present.has(id) && (!q || id.toLowerCase().includes(q)));
-    const total = ids.length; ids = ids.slice(0, 60);
+    const pool = (all || suggested).filter((id) => !present.has(id));
+    let ids = q ? pool.filter((id) => id.toLowerCase().includes(q)) : (all ? popularModels(pool, 8) : pool.slice(0, 8));
+    const total = ids.length; ids = ids.slice(0, q ? 10 : 8);
     box.innerHTML =
       '<div class="h3">Models</div>' +
       (all ? '<input id="mpQ" class="inp" placeholder="Search ' + all.length + ' models" value="' + esc(q) + '" autocapitalize="off" autocomplete="off">' : '') +
       '<div id="mpList" style="max-height:230px;overflow:auto;margin:8px 0">' +
       (ids.map((id) => '<label class="row-item" style="padding:8px 12px"><input type="checkbox" class="cb" data-id="' + esc(id) + '"' + (picked.has(id) ? ' checked' : '') + '><span class="grow t">' + esc(id) + '</span></label>').join('') ||
         '<div class="note">' + (all ? 'No match. Type the model id below.' : 'No suggestions for this provider. Type a model id below or load the list.') + '</div>') +
-      (total > ids.length ? '<div class="note">Showing 60 of ' + total + '. Search to narrow down.</div>' : '') + '</div>' +
+      (all && !q && pool.length > ids.length ? '<div class="note">Popular models only. Search the other ' + (pool.length - ids.length) + ' or type any model id below.</div>' : (total > ids.length ? '<div class="note">Showing the first ' + ids.length + '. Search to narrow down.</div>' : '')) + '</div>' +
       manual.map((m) => '<div class="row-item"><div class="grow t">' + esc(m) + '</div><button class="icon-btn" data-rm="' + esc(m) + '" aria-label="Remove ' + esc(m) + '">' + ICON('x') + '</button></div>').join('') +
       '<div class="row" style="display:flex;gap:8px;margin-bottom:8px"><input id="mpMan" class="inp" style="flex:1" placeholder="Type a model id" autocapitalize="off" autocomplete="off"><button id="mpAdd" class="btn sm"><span class="lbl">Add</span></button></div>' +
       (all ? '' : '<button id="mpLoad" class="btn" style="width:100%"><span class="lbl">Load full list from provider</span></button>') + '<div id="mpMsg"></div>';
@@ -505,7 +505,7 @@ function openSettings() {
     '<div class="h3">Chat</div>' +
     '<label class="field"><span>Default model</span><select id="setModel">' + S.models.map((m) => '<option value="' + esc(m.id) + '"' + (m.id === st.defaultModel ? ' selected' : '') + '>' + esc(modelLabel(m)) + '</option>').join('') + '</select></label>' +
     '<div class="field"><span>Token saving</span>' + seg('setMode', [['economy', 'Economy'], ['balanced', 'Balanced'], ['full', 'Full']], st.mode) + '<small>Older messages are summarised to cut cost. Economy keeps the least context.</small></div>' +
-    '<div class="field"><span>Default thinking</span>' + seg('setThink', [['off', 'Off'], ['low', 'Low'], ['high', 'High']], st.defaultThink) + '</div>' +
+    '<div class="field"><span>Default thinking</span>' + seg('setThink', [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], st.defaultThink) + '</div>' +
     '<label class="field"><span>Max steps per message</span><input id="setSteps" type="number" min="1" max="60" value="' + st.maxSteps + '"><small>Stops runaway tool loops.</small></label>' +
     '<label class="field"><span>Custom instructions</span><textarea id="setInstr" placeholder="Tone, language, rules...">' + esc(st.instructions) + '</textarea></label>' +
     '<div class="h3">Files</div>' +
@@ -514,7 +514,7 @@ function openSettings() {
     '<div class="h3">Memory</div><div class="field">' + seg('setLearn', [['1', 'Learn about me'], ['0', 'Off']], st.autoLearn ? '1' : '0') + '<small>Short notes saved on this phone and shared with the model so it knows you.</small></div><div id="memList"></div>' +
     '<button id="memAdd" class="btn" style="width:100%">' + ICON('plus') + '<span class="lbl">Add a note</span></button>' +
     '<div class="h3">Data</div>' +
-    '<button id="usageBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Usage and cost</span></button>' +
+    '<button id="usageBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Token usage</span></button>' +
     '<button id="expBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Export this chat as text</span></button>' +
     '<button id="bkOut" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Back up all data to a folder</span></button>' +
     '<button id="bkIn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Restore from a backup</span></button>' +
@@ -602,16 +602,20 @@ function save(p) {
 }
 
 async function openUsage() {
-  const body = sheet('Usage and cost', { back: openSettings });
+  const body = sheet('Token usage', { back: openSettings });
   const rows = await db.all('usage'); const days = new Map();
-  rows.forEach((r) => { const d = days.get(r.day) || { tin: 0, tout: 0, cost: 0, priced: false }; d.tin += r.tin; d.tout += r.tout; if (r.cost != null) { d.cost += r.cost; d.priced = true; } days.set(r.day, d); });
-  const list = [...days.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 30);
-  const tot = list.reduce((a, [, d]) => ({ tin: a.tin + d.tin, tout: a.tout + d.tout, cost: a.cost + d.cost }), { tin: 0, tout: 0, cost: 0 });
-  const today = days.get(dayKey()) || { tin: 0, tout: 0, cost: 0 };
-  body.innerHTML = '<div class="kv"><span>Today</span><span>' + fmtTok(today.tin + today.tout) + ' tokens · ' + fmtUsd(today.cost) + '</span></div>' +
-    '<div class="kv"><span>Last 30 days</span><span>' + fmtTok(tot.tin + tot.tout) + ' tokens · ' + fmtUsd(tot.cost) + '</span></div><div class="h3">By day</div>' +
-    (list.map(([d, v]) => '<div class="kv"><span>' + d + '</span><span>' + fmtTok(v.tin) + ' in · ' + fmtTok(v.tout) + ' out' + (v.priced ? ' · ' + fmtUsd(v.cost) : '') + '</span></div>').join('') || '<div class="note">No usage yet.</div>') +
-    '<div class="note" style="margin-top:12px">Cost is an estimate in USD and is shown only for models with known prices. Tokens are always counted from the provider\'s reply.</div>';
+  rows.forEach((r) => { const d = days.get(r.day) || { tin: 0, tout: 0 }; d.tin += r.tin; d.tout += r.tout; days.set(r.day, d); });
+  const key = dayKey(); const month = key.slice(0, 7);
+  const sum = (f) => [...days.entries()].filter(([d]) => f(d)).reduce((a, [, v]) => ({ tin: a.tin + v.tin, tout: a.tout + v.tout }), { tin: 0, tout: 0 });
+  const today = sum((d) => d === key); const mon = sum((d) => d.startsWith(month));
+  const list = [...days.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7);
+  const line = (l, v) => '<div class="kv"><span>' + l + '</span><span>' + fmtTok(v.tin + v.tout) + ' tokens</span></div>';
+  body.innerHTML = line('Today', today) + line('This month', mon) +
+    '<div class="h3">Last 7 days</div>' +
+    (list.map(([d, v]) => '<div class="kv"><span>' + d + '</span><span>' + fmtTok(v.tin) + ' in · ' + fmtTok(v.tout) + ' out</span></div>').join('') || '<div class="note">No usage yet.</div>') +
+    '<div class="note" style="margin-top:12px">Counted from each provider\'s reply. Older days are removed after 14 days.</div>';
+  const old = [...days.keys()].filter((d) => d < dayKeyAgo(14));
+  if (old.length) rows.filter((r) => old.includes(r.day)).forEach((r) => db.del('usage', r.id).catch(() => {}));
 }
 async function exportChat() {
   const msgs = (await db.byIndex('messages', 'chatId', S.chat.id)).sort((a, b) => a.id - b.id);

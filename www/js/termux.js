@@ -70,5 +70,7 @@ export async function runTermux(args, folder) {
   const secs = Math.max(5, Math.min(600, parseInt(args.timeout_seconds, 10) || 120));
   const r = await Termux.run(command, cwd, secs * 1000);
   const out = clip(r.stdout, 12000); const err = clip(r.stderr, 4000);
-  return (out ? out.replace(/\s+$/, '') + '\n' : '') + (err ? '[stderr]\n' + err.replace(/\s+$/, '') + '\n' : '') + '[exit code ' + r.exitCode + (r.errmsg ? '; ' + r.errmsg : '') + ']';
+  const ok = Number(r.exitCode) === 0;
+  return (out ? out.replace(/\s+$/, '') + '\n' : '') + (err ? '[stderr]\n' + err.replace(/\s+$/, '') + '\n' : '') + (!out && !err ? '[no output]\n' : '') +
+    '[exit code ' + r.exitCode + (r.errmsg ? '; ' + r.errmsg : '') + '] ' + (ok ? 'Command succeeded.' : 'Command FAILED. Read the output above before answering.');
 }

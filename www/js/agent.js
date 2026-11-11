@@ -10,7 +10,7 @@ import { TERMUX_TOOLS, TERMUX_ACTIONS, previewTermux, runTermux, getTermuxPath }
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction } from './gittools.js';
 
-export const BUDGETS = { economy: 4000, balanced: 12000, full: 60000 };
+export const BUDGETS = { economy: 3000, balanced: 9000, full: 60000 };
 
 // ------------------------------------------------------------------ settings & models
 export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false };
@@ -47,44 +47,46 @@ export async function runtimeFor(modelId) {
   return { model: m, provider, apiKey, apiModel: m.apiModel };
 }
 
-// ------------------------------------------------------------------ prices (estimates, USD per 1M tokens)
-const PRICES = [
-  { re: /claude-fable-5/i, in: 8, out: 40, cr: 0.2 },
-  { re: /claude-opus-5/i, in: 4, out: 20, cr: 0.2 },
-  { re: /claude-sonnet-5/i, in: 2, out: 10, cr: 0.1 },
-  { re: /claude-haiku-5/i, in: 0.1, out: 0.5, cr: 0.01 },
-];
-export function costOf(apiModel, tin, tout, tcached) {
-  const p = PRICES.find((x) => x.re.test(apiModel || ''));
-  if (!p) return null;
-  const fresh = Math.max(0, tin - tcached);
-  return (fresh * p.in + tcached * p.cr + tout * p.out) / 1e6;
-}
 async function recordUsage(kind, rt, u) {
   if (!u || (!u.in && !u.out)) return;
   await db.put('usage', {
     day: dayKey(), at: Date.now(), kind, modelId: rt.model.id, label: rt.model.label || rt.apiModel,
-    tin: u.in || 0, tout: u.out || 0, cached: u.cached || 0, cost: costOf(rt.apiModel, u.in || 0, u.out || 0, u.cached || 0),
+    tin: u.in || 0, tout: u.out || 0, cached: u.cached || 0,
   });
 }
 
 // ------------------------------------------------------------------ system prompt
+const ABOUT =
+  'ABOUT YOU AND THIS APP\n' +
+  'You are KDex Agent, the AI assistant inside the KDex Agent Android app (made by Kamil Hussen, brand KDex, kamildex.com). The app has no server and no account: ' +
+  'the user brings their own API key (Anthropic, OpenAI, Gemini, DeepSeek, xAI or any OpenAI-compatible service), it is stored encrypted on the phone, and chats and files go only to the chosen provider. ' +
+  'The user gives the app one project folder; you can work only inside that folder. ' +
+  'What the app can do: chat in any language; read, search, create, edit and delete files in the project with approval, automatic backups and Undo; unzip and zip archives; ' +
+  'full Git (status, diff, commit, push, pull, branches, clone, publish to GitHub or GitLab) with approval for every action; run shell commands through Termux when the user turns Terminal on; ' +
+  'optional thinking levels (Off, Low, Medium, High) from the bulb button; attach images and text files; remember short notes about the user; show token usage in Settings. ' +
+  'Where things are: Settings from the menu (providers, models, token saving, thinking, terminal, git identity), Projects from the folder button, Files, Git and Changes chips above the chat. ' +
+  'If asked who you are or what you can do, answer from this description in the user\'s language. Do not claim to be a specific underlying model unless the user asks which model is selected; then say it depends on the model they chose in the top bar. ' +
+  'Never invent abilities: if something is not listed here, say you cannot do it in this app.\n\n' +
+  'HOW TO WORK WELL\n' +
+  'Understand the request first. For anything with several steps, think it through, then act. Be concise: no filler, no repeating the question, no pasting whole files. ' +
+  'Keep tokens low: read only what you need, read each file once, use search to find lines, prefer small edits. ' +
+  'Never claim something worked unless a tool result shows it. If a tool fails, read the error, fix the cause and try again once or twice, then explain plainly what is blocking you.';
+
 function systemPrompt(folder, memory, summary, custom, termuxPath) {
-  const parts = [
-    'You are KDex Agent, an AI assistant inside an Android app. Answer in the language the user writes in. Be clear, practical and brief.',
-  ];
+  const parts = [ABOUT, 'Answer in the language the user writes in (Bengali, English or mixed).'];
   if (folder) {
     parts.push(
-      'You are working inside the user\'s project folder "' + folder.name + '". You can list, search, read, create, edit and delete files there with the provided tools. ' +
-      'All paths are relative to this folder.\n' +
+      'PROJECT: you are working inside the folder "' + folder.name + '". Tools: list_dir, find_files, search, read_file, create/edit/delete files. All paths are relative to this folder; you cannot reach anything outside it.\n' +
       'Rules: look before you change (list_dir, find_files or search, then read_file). Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
       'Do what the user asked and nothing else. The user approves every change and can undo it. ' +
       (termuxPath
-        ? 'You can run shell commands with run_command in Termux (Linux on this phone); the project is at ' + termuxPath + '. Use it for unzip, installs, scripts, tests and git. Commands must exit on their own (no prompts, editors or endless servers). Check the exit code and fix failures yourself. Prefer the file tools for reading and editing files. '
-        : 'You cannot run code or commands yourself, but you do have built-in unzip and zip tools for archives; use them instead of telling the user to run a command. If the user wants you to run commands, install packages or run scripts, tell them to tap the Terminal chip above the chat and switch it On (it uses the Termux app). ') +
-      'When finished, summarize what you changed in a few lines. Do not paste file contents into the reply unless asked. ' +
-      'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval). ' +
-      'Read each file once; for large files use search to locate lines before reading a range. Do not repeat a read you already have.'
+        ? 'TERMINAL: run_command runs a bash command in Termux (Linux on this phone) with the project at ' + termuxPath + '. Use it like a computer shell: unzip, installs (pkg/pip/npm), scripts, builds, tests, git. ' +
+          'Each command must finish on its own (no prompts, editors or servers that never exit; add -y flags). The user approves every command. ' +
+          'After a command you receive stdout, stderr and the exit code. Exit code 0 means success; anything else means it failed. Read the output carefully, then tell the user the real result in plain words (what ran, what happened, what the output means). ' +
+          'If it failed, fix the cause (a missing package, a wrong path, a typo) and retry at most twice before explaining. Check results with a quick command (ls, cat, a test) instead of assuming. '
+        : 'You cannot run shell commands. You do have built-in unzip and zip tools; use them instead of telling the user to run a command. If the user wants scripts, installs or builds run, tell them to open the Terminal chip and turn it on (needs the Termux app). ') +
+      'When finished, summarize what you changed in a few lines. ' +
+      'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval).'
     );
   } else {
     parts.push('No project folder is open, so you have no file tools. If the user wants you to work on files, tell them to open a folder from Projects.');
@@ -277,6 +279,7 @@ export async function runTurn(ctx) {
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
+  const readSeen = new Set(); let ranTools = false;
   for (;;) {
     if (signal.aborted) return;
     steps++;
@@ -339,6 +342,10 @@ export async function runTurn(ctx) {
     await db.put('messages', asst);
     ui.onAssistant(asst);
 
+    if (!failed && !asst.calls.length && !asst.text.trim() && !signal.aborted && ranTools) {
+      asst.text = 'The steps above are finished. Ask me if you want a summary or a next step.';
+      await db.put('messages', asst); ui.onAssistant(asst);
+    }
     if (failed || !asst.calls.length) return;
 
     // ---- run the tool calls
@@ -348,6 +355,7 @@ export async function runTurn(ctx) {
         m.id = await db.put('messages', m); ui.onTool(m);
         continue;
       }
+      ranTools = true;
       const tm = { chatId: chat.id, role: 'tool', callId: call.id, name: call.name, args: previewArgs(call), content: '', status: 'running', at: Date.now() };
       tm.id = await db.put('messages', tm);
       ui.onTool(tm);
@@ -366,6 +374,7 @@ export async function runTurn(ctx) {
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this command. Do not retry it; ask what they want instead.';
           } else {
             tm.content = await runTermux(call.args || {}, folder);
+            readSeen.clear();
             tm.status = 'applied';
           }
         } else if (ARCHIVE_ACTIONS.has(call.name)) {
@@ -380,6 +389,7 @@ export async function runTurn(ctx) {
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this. Do not retry it; ask what they want instead.';
           } else {
             tm.content = await runArchive(call.name, call.args || {}, folder);
+            readSeen.clear();
             tm.status = 'applied';
           }
         } else if (GIT_ACTIONS.has(call.name)) {
@@ -394,6 +404,7 @@ export async function runTurn(ctx) {
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this. Do not retry it; ask what they want instead.';
           } else {
             tm.content = await runGitAction(call.name, call.args || {}, folder);
+            readSeen.clear();
             tm.status = 'applied';
           }
         } else if (GIT_READS.has(call.name)) {
@@ -416,11 +427,14 @@ export async function runTurn(ctx) {
             const bk = { chatId: chat.id, folderId: folder.id, path: plan.path, existed: plan.before !== null, content: plan.before === null ? '' : plan.before, op: plan.op, at: Date.now(), undone: false };
             bk.id = await db.put('backups', bk);
             tm.content = await applyWrite(plan, folder);
+            readSeen.clear();
             tm.status = 'applied';
             tm.backupId = bk.id;
           }
         } else {
-          tm.content = await runRead(call.name, call.args, folder);
+          const rk = call.name === 'read_file' ? JSON.stringify([call.args && call.args.path, call.args && call.args.offset, call.args && call.args.limit]) : null;
+          if (rk && readSeen.has(rk)) tm.content = '[Already read earlier in this task and unchanged since. Use that content instead of reading again.]';
+          else { tm.content = await runRead(call.name, call.args, folder); if (rk) readSeen.add(rk); }
           tm.status = 'done';
         }
       } catch (e) {
