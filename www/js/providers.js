@@ -52,9 +52,18 @@ function httpError(status, text) {
   let hint = '';
   if (status === 401 || status === 403) hint = ' Check your API key in Settings.';
   if (status === 429) hint = ' Rate limit or no credit left on this key.';
+  if (/image|vision|multimodal|modalit/i.test(detail) && /not support|unsupported|invalid|cannot|does not|only text|text-only|no support/i.test(detail)) hint = ' This model cannot read pictures. Remove the picture or switch to a vision model.' + hint;
   const err = new Error('Provider error ' + status + (detail ? ': ' + detail : '') + hint);
   err.status = status;
   return err;
+}
+
+/** Best guess whether a model can read pictures. Only well-known text-only families answer false. */
+export function likelySeesImages(apiModel) {
+  const id = String(apiModel || '').toLowerCase();
+  if (/vision|vl\b|-vl-|llava|pixtral|gemini|claude|gpt-4o|gpt-4\.1|gpt-5|gpt-4-turbo|o3\b|o4|omni|llama-?4|kimi-k2\.?[5-9]|glm-4\.?[5-9]v|qwen.*(vl|omni)/.test(id)) return true;
+  if (/deepseek|gpt-3\.5|o1-mini|o3-mini|coder|codestral|qwq|mistral-(7b|small|large|medium)|mixtral|command-r|gemma-?[12]\b|llama-?[23]|phi-?[1-3]|kimi|glm|minimax|qwen|sonar|text-|instruct/.test(id)) return false;
+  return true;
 }
 
 const trimBase = (u) => String(u || '').replace(/\/+$/, '');
@@ -63,7 +72,8 @@ const trimBase = (u) => String(u || '').replace(/\/+$/, '');
 function openaiMessages(system, messages, passReasoning) {
   const out = [];
   if (system) out.push({ role: 'system', content: system });
-  messages.forEach((m) => {
+  let pendingImgs = [];
+  messages.forEach((m, i) => {
     if (m.role === 'user') {
       if (m.images && m.images.length) {
         const parts = [];
@@ -82,6 +92,13 @@ function openaiMessages(system, messages, passReasoning) {
       out.push(o);
     } else if (m.role === 'tool') {
       out.push({ role: 'tool', tool_call_id: m.callId, content: m.content || ' ' });
+      if (m.images && m.images.length) pendingImgs.push(...m.images);
+    }
+    // a tool message cannot hold pictures here, so they follow as one user message after the run of tool results
+    const nxt = messages[i + 1];
+    if (pendingImgs.length && !(nxt && nxt.role === 'tool')) {
+      out.push({ role: 'user', content: [{ type: 'text', text: '(Picture from the view_image tool)' }].concat(pendingImgs.map((im) => ({ type: 'image_url', image_url: { url: 'data:' + im.mime + ';base64,' + im.data } }))) });
+      pendingImgs = [];
     }
   });
   return out;
@@ -183,6 +200,7 @@ function anthropicMessages(messages, withThinking) {
     } else if (m.role === 'tool') {
       const last = out[out.length - 1];
       const block = { type: 'tool_result', tool_use_id: m.callId, content: m.content || ' ' };
+      if (m.images && m.images.length) block.content = m.images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.data } })).concat([{ type: 'text', text: m.content || ' ' }]);
       if (last && last.role === 'user') {
         // tool results must come before any other content of the same user turn
         let i = 0;

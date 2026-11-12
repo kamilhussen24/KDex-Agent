@@ -6,7 +6,7 @@ import * as D from './diag.js';
 import { highlight, langOf } from './highlight.js';
 import { diffHtml } from './diffview.js';
 import { BINARY_EXT } from './tools.js';
-import { PRESETS, QUICK_FILL, listModels, popularModels } from './providers.js';
+import { PRESETS, QUICK_FILL, listModels, popularModels, likelySeesImages } from './providers.js';
 import { getTermuxPath, setTermuxPath, hasCustomTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
@@ -14,6 +14,8 @@ import * as G from './git.js';
 import { isSecretPath, isEnvLike, maskEnv, protectionOn } from './secrets.js';
 import { SUPPORT_EMAIL, APP_VERSION } from './config.js';
 import { checkUpdate, isNewer, REPO_URL } from './update.js';
+import { officeText, isOffice } from './docs.js';
+import { prepareImage } from './image.js';
 
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
@@ -316,7 +318,7 @@ async function newChat(folder) {
   S.chat = { id: uid(), title: '', model: currentModelId(), think: S.settings.defaultThink || 'off', auto: !!S.settings.autoDefault, folderId: folder ? folder.id : null, updated: Date.now() };
   S.folder = folder || null; S.think = S.chat.think; S.chat.fresh = true;
   S.els.clear(); S.approvals.clear();
-  fillModels(S.chat.model); drawCtx(); drawThink(); $('#messages').innerHTML = ''; renderEmpty(); updateApproveBar(); closeDrawer();
+  fillModels(S.chat.model); drawCtx(); drawThink(); $('#messages').innerHTML = ''; renderEmpty(); updateApproveBar(); closeDrawer(); drawRing();
 }
 /** Content shared from another app, or a notification tap: open the right chat and drop the shared text/files into the composer. */
 async function handleLaunch(l) {
@@ -345,7 +347,7 @@ async function openChat(id) {
   const box = $('#messages'); box.innerHTML = '';
   if (!msgs.length) renderEmpty();
   msgs.forEach((m) => renderMsg(m));
-  scrollEnd(true); closeDrawer(); drawChatList(); updateApproveBar();
+  scrollEnd(true); closeDrawer(); drawChatList(); updateApproveBar(); drawRing();
 }
 /** Hand a text file to the user: share sheet when available; on the phone otherwise save it into a folder they pick; in a browser a normal download. */
 async function saveOut(name, text) {
@@ -440,7 +442,7 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file' };
 function planCard(m) {
   const done = m.steps.filter((x) => x.status === 'done').length;
   return '<div class="tool plan"><div class="th">' + ICON('list') + '<span class="nm">Plan</span><span class="pa">' + done + ' of ' + m.steps.length + ' done</span></div><div class="steps">' +
@@ -458,9 +460,9 @@ function toolCard(m) {
   if (m.plan) {
     h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') +
       (m.plan.more ? '<span class="dl c">... ' + m.plan.more + ' more lines</span>' : '') + '</div>';
-    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + ((m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
-    if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : 'Apply') + '</span></button>' +
-      (m.plan.path === 'terminal' && m.plan.allowKeys && m.plan.allowKeys.length ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.join(', ')) + ' in this chat</button>' : '');
+    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
+    if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : m.plan.web ? 'Read' : 'Apply') + '</span></button>' +
+      ((m.plan.path === 'terminal' || m.plan.web) && m.plan.allowKeys && m.plan.allowKeys.length ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.map((k) => k.replace(/^web:/, '')).join(', ')) + ' in this chat</button>' : '');
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
     h += '</div>';
     if (m.plan.path === 'terminal' && m.content && st !== 'pending') h += '<pre class="out">' + esc(m.content.slice(-3000)) + '</pre>';
@@ -484,6 +486,24 @@ function decide(id, v) {
 
 // ------------------------------------------------------------ sending
 const WEIRD_MIME = /^image\/(png|jpe?g|webp|gif)$/;
+// Small ring next to the other composer icons: how full the chat history is for the chosen token-saving mode.
+async function drawRing() {
+  const btn = $('#ctxBtn'); if (!btn) return;
+  const id = S.chat && S.chat.id; let u = null;
+  try { if (id && !S.chat.fresh) u = await A.contextUsage(id); } catch (e) { u = null; }
+  if (!u || !u.used || (S.chat && S.chat.id !== id)) { btn.classList.add('hidden'); return; }
+  const r = 7.5, c = 2 * Math.PI * r, col = u.pct < 70 ? 'var(--ok)' : u.pct < 90 ? '#e0a14d' : 'var(--bad)';
+  btn.innerHTML = '<svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="' + r + '" fill="none" stroke="currentColor" stroke-opacity=".22" stroke-width="2.2"/><circle cx="10" cy="10" r="' + r + '" fill="none" stroke="' + col + '" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="' + (c * u.pct / 100).toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(-90 10 10)"/></svg>';
+  btn.setAttribute('aria-label', 'Context ' + u.pct + '% used'); btn.title = 'Context ' + u.pct + '% used'; btn.dataset.pct = u.pct; btn.dataset.used = u.used; btn.dataset.budget = u.budget; btn.dataset.mode = u.mode;
+  btn.classList.remove('hidden');
+}
+async function showRing() {
+  const b = $('#ctxBtn'); const pct = b.dataset.pct, used = +b.dataset.used, budget = +b.dataset.budget;
+  const k = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n));
+  const mode = b.dataset.mode.charAt(0).toUpperCase() + b.dataset.mode.slice(1);
+  const v = await choiceBox('Context ' + pct + '% used', 'About ' + k(used) + ' of the ' + k(budget) + ' token budget (' + mode + ' mode). When it is full, older messages are summarised automatically, so nothing is lost; small details may be shortened. For an unrelated task, a new chat is cheaper and more focused.', ['OK', 'New chat'], { noCancel: true });
+  if (v === 1) newChat(S.folder);
+}
 function setRunning(v) {
   S.running = v; const b = $('#sendBtn');
   b.classList.toggle('stop', v); b.innerHTML = ICON(v ? 'stop' : 'up'); b.setAttribute('aria-label', v ? 'Stop' : 'Send');
@@ -535,7 +555,7 @@ async function send(regenerate) {
     const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
     m.id = await db.put('messages', m); renderMsg(m);
   }
-  Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); updateChangesChip(); loadChats();
+  Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); updateChangesChip(); loadChats(); drawRing();
 }
 async function regenerate() {
   if (S.running) return;
@@ -550,28 +570,22 @@ async function regenerate() {
 function drawChips() {
   $('#chips').innerHTML = S.attach.map((a, i) => '<span class="achip">' + (a.img ? '<img alt="" src="data:' + a.mime + ';base64,' + a.data + '">' : ICON('file')) + '<span class="lbl" style="max-width:120px">' + esc(a.name) + '</span><button type="button" class="icon-btn" data-rm="' + i + '">' + ICON('x') + '</button></span>').join('');
 }
-function shrinkImage(file) {
-  return new Promise((res, rej) => {
-    const url = URL.createObjectURL(file); const im = new Image();
-    im.onload = () => {
-      const max = 1568; const k = Math.min(1, max / Math.max(im.width, im.height));
-      const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
-      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
-      res(c.toDataURL('image/jpeg', 0.85).split(',')[1]);
-    };
-    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Could not read image')); };
-    im.src = url;
-  });
-}
 async function addFiles(list) {
+  let imageNote = false;
   for (const f of Array.from(list)) {
     try {
-      if (WEIRD_MIME.test(f.type)) S.attach.push({ img: true, name: f.name, mime: 'image/jpeg', data: await shrinkImage(f) });
+      if (WEIRD_MIME.test(f.type)) { const im = await prepareImage(f); S.attach.push({ img: true, name: f.name, mime: im.mime, data: im.data }); imageNote = true; }
+      else if (isOffice(f.name)) { if (f.size > 8 * 1048576) toast(f.name + ' is too large (max 8 MB).'); else { let t = await officeText(f); let note = ''; if (t.length > 400 * 1024) { t = t.slice(0, 400 * 1024); note = '\n[Text cut: the file is long]'; } S.attach.push({ name: f.name, text: t + note }); } }
       else if (f.size > 400 * 1024) toast(f.name + ' is too large (max 400 KB). Put it in a project folder instead.');
       else { const t = await f.text(); if (t.includes('\u0000')) toast(f.name + ' looks like a binary file.'); else S.attach.push({ name: f.name, text: t }); }
     } catch (e) { toast(e.message); }
   }
   drawChips();
+  if (imageNote) warnNoVision();
+}
+function warnNoVision() {
+  const m = S.models.find((x) => x.id === currentModelId());
+  if (m && !likelySeesImages(m.apiModel)) toast("Pictures may not work. This model may not read pictures; if the reply ignores it, switch to a vision model (for example Claude, GPT-4o or Gemini).", { kind: 'warn' });
 }
 function autoGrow() { const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; }
 
@@ -958,7 +972,7 @@ function openSettings() {
     '<div id="updBox" style="margin-top:10px"></div><button id="licBtn" class="btn" style="width:100%;margin-top:8px"><span class="lbl">Licenses</span></button>';
   drawUpdate(body); $('#licBtn', body).onclick = openLicenses;
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
-  bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
+  bindSeg('setMode', (v) => { save({ mode: v }).then(() => drawRing()); }); bindSeg('setThink', (v) => save({ defaultThink: v }));
   bindSeg('setProt', (v) => save({ protectSecrets: v === '1' })); bindSeg('setAutoDef', (v) => save({ autoDefault: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
   const drawAF = async () => {
     const box = $('#afBox'); if (!box) return;
@@ -1614,6 +1628,7 @@ function wire() {
   $('#attachBtn').onclick = () => $('#fileInput').click();
   $('#fileInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
   $('#chips').onclick = (e) => { const b = e.target.closest('[data-rm]'); if (b) { S.attach.splice(Number(b.dataset.rm), 1); drawChips(); } };
+  $('#ctxBtn').onclick = showRing;
   $('#thinkBtn').onclick = (e) => { e.stopPropagation(); $('#thinkMenu').classList.toggle('hidden'); };
   $('#thinkMenu').onclick = (e) => { const b = e.target.closest('[data-think]'); if (!b) return; S.think = b.dataset.think; drawThink(); $('#thinkMenu').classList.add('hidden'); persistChat(); };
   document.addEventListener('click', (e) => { if (!e.target.closest('#thinkMenu')) $('#thinkMenu').classList.add('hidden'); });

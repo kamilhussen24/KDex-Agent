@@ -13,6 +13,7 @@ KDex Agent is an Android app that can work inside a folder you choose. It has no
 
 ## What leaves your phone, and only when you use the feature
 - **AI provider:** when you send a message, the text, attached or shared files and images, and any file contents the assistant reads from your project folder are sent directly to the AI provider you configured (for example Anthropic, OpenAI, Gemini, DeepSeek, xAI, Groq, Mistral, OpenRouter or a custom endpoint). Their privacy policies apply to that data.
+- **Web pages (only when the assistant reads one):** when you approve a site, the phone requests that web page directly, so the site can see your IP address and the address you asked for. The page text is then sent to your AI provider as part of the chat. Nothing from your files or keys is added to the request, and each new site needs your approval.
 - **Git host:** when you clone, pull, fetch or push, requests go to the Git host you enter (for example GitHub or GitLab), with your token.
 - **Update check:** the app asks GitHub's public releases page (api.github.com) for the latest version, about once a day and when you tap "Check for updates". This is an ordinary web request, so GitHub can see your IP address. No chats, files or keys are sent.
 - **Termux (optional):** if you turn the terminal on, commands you approve run in the Termux app on your phone. For a Git command in Termux, your saved token is lent to that one command only and is not stored in Termux.

@@ -104,7 +104,7 @@ padding:calc(var(--sat) + 12px) 12px calc(var(--sab) + 12px);transform:translate
 .dl.a{background:var(--addbg)}.dl.d{background:var(--delbg)}.dl.c{color:var(--mut)}
 .tool .tf{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--mut)}
 .tool .tf .btn{min-height:32px}
-.tool pre.out{margin:0;border-top:1px solid var(--line);padding:8px 12px;font-size:12px;max-height:200px;overflow:auto;white-space:pre-wrap;background:var(--code)}
+.tool pre.out{margin:0;border-top:1px solid var(--line);padding:8px 12px;font-size:12px;max-height:200px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--code)}
 .approve-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--line);background:var(--bg2);font-size:13px}
 .approve-bar .lbl{flex:1}
 .note{font-size:12px;color:var(--mut);text-align:center;margin:6px 0 12px}

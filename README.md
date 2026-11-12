@@ -13,12 +13,13 @@ Bring your own API key. No server, no account, no analytics: your keys, chats an
 **Chat**
 - Works with your own key from Anthropic, OpenAI, Gemini, DeepSeek, xAI, Groq, Mistral, OpenRouter or any OpenAI-compatible endpoint.
 - Thinking levels (Off, Low, High), memory notes, chat history with search, token saving, and usage with estimated cost.
-- Attach text files and images. Built-in ZIP tools (the model cannot run `unzip`, so the app does it).
+- Attach images, text and code files, and Word, Excel and PowerPoint files (PDF is not supported). Built-in ZIP tools (the model cannot run `unzip`, so the app does it).
+- Reads a public web page when you ask for fresh information or give a link (no key needed; you approve each site).
 
 **Project folders**
 - The agent can list, search, read, create, edit and delete files, only inside the folder you choose.
 - Every change is shown as a diff. You Apply or Reject it, a backup is saved first, and Undo is one tap. Auto mode is optional.
-- File viewer with syntax colours, image preview and a diff viewer with changed words highlighted.
+- Can look at picture files in the folder. File viewer with syntax colours, image preview and a diff viewer with changed words highlighted.
 - Optional "All files access" for much faster file and Git work, like Termux.
 
 **Git, built in**
