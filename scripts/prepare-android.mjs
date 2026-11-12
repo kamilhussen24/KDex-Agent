@@ -71,6 +71,12 @@ if (!m.includes('MANAGE_EXTERNAL_STORAGE')) {
 for (const perm of ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_DATA_SYNC', 'POST_NOTIFICATIONS', 'WAKE_LOCK', 'VIBRATE']) {
   if (!m.includes('android.permission.' + perm + '"')) m = m.replace('<application', '<uses-permission android:name="android.permission.' + perm + '" />\n    <application');
 }
+// Share into the app: text, links and text-like files from other apps
+if (!m.includes('android.intent.action.SEND"')) {
+  const filters = ['android.intent.action.SEND', 'android.intent.action.SEND_MULTIPLE'].map((a) =>
+    '            <intent-filter>\n                <action android:name="' + a + '" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <data android:mimeType="text/*" />\n                <data android:mimeType="application/*" />\n            </intent-filter>\n').join('');
+  m = m.replace('</activity>', filters + '        </activity>');
+}
 if (!m.includes('KdexWorkService')) m = m.replace('</application>', '    <service android:name=".KdexWorkService" android:exported="false" android:foregroundServiceType="dataSync" />\n    </application>');
 write(mf, m);
 

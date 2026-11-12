@@ -1,7 +1,7 @@
 // KDex Agent (Android) - UI layer. All data stays on this phone.
 import { $, $$, esc, uid, fmtBytes, fmtTok, ago, dayKey, dayKeyAgo, copyText } from './util.js';
 import { db, kvGet, kvSet } from './db.js';
-import { secure, fs, App, Termux, AllFiles, Work, setBars, isNative } from './native.js';
+import { secure, fs, App, Termux, AllFiles, Work, Launch, setBars, isNative } from './native.js';
 import * as D from './diag.js';
 import { highlight, langOf } from './highlight.js';
 import { diffHtml } from './diffview.js';
@@ -154,8 +154,9 @@ async function boot() {
   window.__stage = 'settings-ok';
   S.providers = await A.getProviders(); S.models = await A.getModels(); S.folders = await A.getFolders();
   window.__stage = 'wiring'; wire();
-  if (!S.models.length && !(await kvGet('setupSkipped', false))) { showSetup(true); window.__stage = 'ready'; return; }
-  await enter(); window.__stage = 'ready';
+  if (!S.models.length && !(await kvGet('setupSkipped', false))) { showSetup(true); document.documentElement.classList.add('ready'); window.__stage = 'ready'; return; }
+  await enter(); document.documentElement.classList.add('ready'); window.__stage = 'ready';
+  Launch.onLaunch(() => Launch.take().then(handleLaunch)); Launch.take().then(handleLaunch);
   setTimeout(() => offerAllFiles().catch(() => {}), 1200);
 }
 /** Opens Android's permission screen; when the user comes back it checks the result. */
@@ -313,6 +314,21 @@ async function newChat(folder) {
   S.els.clear(); S.approvals.clear();
   fillModels(S.chat.model); drawCtx(); drawThink(); $('#messages').innerHTML = ''; renderEmpty(); updateApproveBar(); closeDrawer();
 }
+/** Content shared from another app, or a notification tap: open the right chat and drop the shared text/files into the composer. */
+async function handleLaunch(l) {
+  if (!l || !$('#setup').classList.contains('hidden')) return;
+  if (l.chat && (!S.chat || S.chat.id !== l.chat) && S.chats.find((c) => c.id === l.chat)) await openChat(l.chat);
+  const sh = l.share; if (!sh) return;
+  const used = (await db.byIndex('messages', 'chatId', S.chat.id)).length > 0;
+  if (used) { const r = await choiceBox('Shared to KDex Agent', 'Add it to this chat, or start a new one?', ['New chat', 'This chat']); if (r === -1) return; if (r === 0) await newChat(S.folder); }
+  const txt = [sh.subject, sh.text].filter(Boolean).join('\n\n');
+  const input = $('#input'); if (txt) { input.value = (input.value ? input.value + '\n\n' : '') + txt; autoGrow(); }
+  const bad = [];
+  for (const f of sh.files || []) { if (f.status === 'ok' && typeof f.text === 'string') S.attach.push({ name: f.name, text: f.text }); else bad.push(f.name); }
+  if (bad.length) toast(bad.length === 1 ? bad[0] + " can't be read (too large or not text)." : bad.length + " files can't be read (too large or not text).");
+  drawChips(); input.focus();
+}
+window.__kdexLaunch = handleLaunch;
 async function openChat(id) {
   if (S.running) stopRun();
   const c = await db.get('chats', id); if (!c) return newChat();
@@ -499,17 +515,18 @@ async function send(regenerate) {
     requestSecret: (info, signal) => askSecret(info, signal),
     onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
-      S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
+      const first = !pendingCount(); S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
+      if (first) Work.needs('Waiting for your approval', S.chat && S.chat.id);
       signal.addEventListener('abort', () => decide(tm.id, 'reject'), { once: true });
     }),
   };
   try {
     await A.runTurn({ chat: S.chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder: S.folder, modelId: currentModelId(), think: S.think, signal: S.abort.signal, ui, regenerate: !!regenerate });
     netLine('');
-    if (!S.abort || !S.abort.signal.aborted) Work.done(true, 'Your request is done.');
+    if (!S.abort || !S.abort.signal.aborted) Work.done(true, 'Your request is done.', S.chat && S.chat.id);
     D.log('run', 'Agent run \u00b7 ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
   } catch (e) {
-    netLine(''); D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120));
+    netLine(''); D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120), S.chat && S.chat.id);
     toast(e.message || 'Something went wrong');
     const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
     m.id = await db.put('messages', m); renderMsg(m);
@@ -569,7 +586,7 @@ function closeDrawer() { $('#drawer').classList.remove('open'); $('#scrim').clas
 function sheet(title, opts = {}) {
   S.sheetStack.push(title);
   $$('#sheet .sheet-head button').forEach((b) => { b.disabled = false; });
-  $('#sheetTitle').textContent = title; $('#sheet').classList.remove('hidden');
+  $('#sheetTitle').innerHTML = '<span>' + esc(title) + '</span>'; $('#sheetTitle').title = title; $('#sheet').classList.remove('hidden');
   $('#sheetBack').classList.toggle('hidden', !opts.back); $('#sheetBack').onclick = opts.back || null;
   const tabs = $('#sheetTabs'); tabs.classList.add('hidden'); tabs.innerHTML = '';
   $('#sheetFoot').classList.add('hidden'); $('#sheetFoot').innerHTML = '';
@@ -600,6 +617,54 @@ function sheetDrag() {
       } else { card.style.transform = ''; root.style.background = ''; setTimeout(reset, calm ? 0 : 220); }
     };
     z.addEventListener('pointerup', end); z.addEventListener('pointercancel', end);
+  });
+}
+/** Touch swipe that dismisses a panel from anywhere on it. axis 'x' (towards negative) or 'y' (towards positive). */
+function swipeDismiss(el, o) {
+  let x0 = 0; let y0 = 0; let t0 = 0; let mode = null; let d = 0; let size = 1;
+  const calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const X = o.axis === 'x'; const sign = X ? -1 : 1;
+  el.addEventListener('touchstart', (e) => { if (e.touches.length !== 1) { mode = 'skip'; return; } x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); mode = null; d = 0; size = (X ? el.offsetWidth : el.offsetHeight) || 1; }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (mode === 'skip') return;
+    const dx = e.touches[0].clientX - x0; const dy = e.touches[0].clientY - y0;
+    const main = (X ? dx : dy) * sign; const cross = Math.abs(X ? dy : dx);
+    if (mode === null) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 10) return;
+      mode = (main > 0 && main > cross * 1.2 && o.can(e.target)) ? 'drag' : 'skip';
+      if (mode === 'drag') o.begin();
+    }
+    if (mode !== 'drag') return;
+    if (e.cancelable) e.preventDefault();
+    d = Math.max(0, main); o.move(d, size);
+  }, { passive: false });
+  const end = () => {
+    if (mode !== 'drag') { mode = null; return; }
+    mode = null; const v = d / Math.max(1, Date.now() - t0);
+    if (d > size * 0.3 || (v > 0.6 && d > 30)) o.commit(calm); else o.cancel(calm);
+  };
+  el.addEventListener('touchend', end); el.addEventListener('touchcancel', end);
+}
+/** True when something between the touch and the panel is scrolled, so a swipe should scroll it instead. */
+function scrolledAbove(target, stop) {
+  for (let n = target; n && n !== stop; n = n.parentElement) { if (n.scrollTop > 0 && n.scrollHeight > n.clientHeight) return true; if (/^(TEXTAREA|INPUT)$/.test(n.tagName)) return true; }
+  return false;
+}
+function touchSwipes() {
+  const dr = $('#drawer'); const sc = $('#scrim');
+  swipeDismiss(dr, {
+    axis: 'x', can: () => true, begin: () => { dr.style.transition = 'none'; },
+    move: (d, w) => { dr.style.transform = 'translateX(' + (-d) + 'px)'; sc.style.opacity = String(1 - Math.min(1, d / w)); },
+    commit: (calm) => { dr.style.transition = calm ? 'none' : 'transform .18s ease'; dr.style.transform = 'translateX(-102%)'; setTimeout(() => { closeDrawer(); dr.style.transition = dr.style.transform = sc.style.opacity = ''; }, calm ? 0 : 180); },
+    cancel: (calm) => { dr.style.transition = calm ? 'none' : 'transform .18s ease'; dr.style.transform = ''; sc.style.opacity = ''; setTimeout(() => { dr.style.transition = ''; }, calm ? 0 : 200); },
+  });
+  const card = $('#sheet .sheet-card'); const root = $('#sheet');
+  const rs = () => { card.style.transition = card.style.transform = ''; root.style.transition = root.style.background = ''; };
+  swipeDismiss(card, {
+    axis: 'y', can: (t) => !t.closest('#sheetGrip, .sheet-head') && !scrolledAbove(t, card), begin: () => { card.style.transition = root.style.transition = 'none'; },
+    move: (d, h) => { card.style.transform = 'translateY(' + d + 'px)'; root.style.background = 'rgba(0,0,0,' + (0.45 * (1 - Math.min(1, d / h))).toFixed(3) + ')'; },
+    commit: (calm) => { card.style.transition = calm ? 'none' : 'transform .2s ease'; root.style.transition = calm ? 'none' : 'background .2s ease'; card.style.transform = 'translateY(100%)'; root.style.background = 'rgba(0,0,0,0)'; setTimeout(() => { closeSheet(); rs(); }, calm ? 0 : 200); },
+    cancel: (calm) => { card.style.transition = calm ? 'none' : 'transform .2s ease'; root.style.transition = calm ? 'none' : 'background .2s ease'; card.style.transform = ''; root.style.background = ''; setTimeout(rs, calm ? 0 : 220); },
   });
 }
 function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').classList.add('hidden'); S.sheetStack = []; }
@@ -1499,7 +1564,7 @@ function wire() {
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
   $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal; $('#chipAuto').onclick = toggleAuto;
-  $('#sheetClose').onclick = closeSheet; sheetDrag();
+  $('#sheetClose').onclick = closeSheet; sheetDrag(); touchSwipes();
   $('#chatSearch').oninput = drawChatList;
   $('#chatList').onclick = async (e) => {
     const d = e.target.closest('[data-del]');
@@ -1557,4 +1622,4 @@ function wire() {
   })).catch(() => {});
 }
 
-boot().catch((e) => { const f = document.getElementById('fatal'); f.style.display = 'block'; f.textContent = 'Startup error: ' + (e && (e.stack || e.message)) + '\nstage=' + window.__stage; });
+boot().catch((e) => { document.documentElement.classList.add('ready'); const f = document.getElementById('fatal'); f.style.display = 'block'; f.textContent = 'Startup error: ' + (e && (e.stack || e.message)) + '\nstage=' + window.__stage; });

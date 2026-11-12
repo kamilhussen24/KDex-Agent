@@ -129,12 +129,15 @@ padding:calc(var(--sat) + 12px) 12px calc(var(--sab) + 12px);transform:translate
 .sheet{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.45);display:flex;align-items:flex-end}
 .sheet-card{width:100%;max-height:92%;height:92%;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;padding-bottom:var(--sab)}
 .sheet-head{display:flex;align-items:center;gap:4px;padding:8px 8px 4px}
-.sheet-title{flex:1;font-weight:700;font-size:17px;padding:0 6px}
+.sheet-head .icon-btn{flex:none}
+.sheet-title{flex:1;min-width:0;font-weight:700;font-size:17px;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+.sheet-title>span{direction:ltr;unicode-bidi:embed}
+.sheet-card{min-width:0;max-width:100%;overflow:hidden}
 .tabs{display:flex;gap:6px;padding:4px 12px 8px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
 .tab{height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--line);background:none;white-space:nowrap;flex:none;font-size:14px;line-height:1}
 .tab.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
-.sheet-body{flex:1;overflow:auto;padding:4px 14px 18px}
+.sheet-body{flex:1;min-width:0;overflow:auto;overflow-x:hidden;padding:4px 14px 18px}
 .row-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--card)}
 .row-item .grow{flex:1;min-width:0}
 .row-item .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -420,3 +423,18 @@ html[data-theme=dark]{--b2:#FF7A92;--ink:#FF7A92;--tint:rgba(255,110,140,.14);--
 .btn.primary{border:0}
 .btn.primary:active{filter:brightness(.9)}
 .gsum .seg .btn:not(.on){color:var(--fg);font-weight:500}
+
+/* v1.34.0: compact dialog buttons, toggles readable when not selected */
+.seg .btn:not(.on){color:var(--fg);font-weight:500}
+.dialog-card{padding:16px}
+.dialog-card .dlg-title{font-size:16px;margin-bottom:8px}
+.dialog-card .btn,.dialog-card .btn.primary:not(.sm){min-height:36px;padding:0 16px;border-radius:10px;font-size:14px;font-weight:500}
+.dialog-card .btn.primary:not(.sm){font-weight:600;padding:0 20px}
+.dialog-card input,.dialog-card .inp{height:38px;border-radius:10px;font-size:14px;padding:0 12px;margin-bottom:12px}
+.btn.dim{opacity:.75}
+:root{--ink:#BD2845;--bad-text:#C23535}
+html[data-theme=dark]{--bad-text:#FF8080}
+.btn.danger,.linkbtn.danger{color:var(--bad-text)}
+
+/* v1.35.0: keep the chat screen hidden until startup knows which screen to show */
+html:not(.ready) #app{visibility:hidden}

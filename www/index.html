@@ -18,6 +18,7 @@ var f=document.getElementById('fatal');window.__stage='html';
 function show(t){if(window.__stage==='ready')return;var dk=document.documentElement.getAttribute('data-theme')==='dark';f.style.background=dk?'#121212':'#fff';f.style.color=dk?'#ff8a80':'#b00020';f.style.display='block';f.textContent+=t+'\n\n';if(!document.getElementById('fatalBtn')){var b=document.createElement('button');b.id='fatalBtn';b.textContent='Reload';b.style.cssText='display:block;margin-top:16px;padding:10px 18px;font:600 14px sans-serif;border:1px solid currentColor;background:none;color:inherit;border-radius:10px';b.onclick=function(){location.reload();};f.parentNode.insertBefore(b,f.nextSibling);b.style.position='fixed';b.style.zIndex=10000;b.style.bottom='24px';b.style.left='16px';}}
 window.addEventListener('error',function(e){var t=e.target;if(t&&(t.src||t.href)){show('Failed to load: '+(t.src||t.href));}else{show('Error: '+(e.message||'')+' ('+(e.filename||'')+':'+(e.lineno||'')+')\nstage='+window.__stage);}},true);
 window.addEventListener('unhandledrejection',function(e){show('Promise error: '+(e.reason&&(e.reason.stack||e.reason.message)||e.reason)+'\nstage='+window.__stage);});
+setTimeout(function(){document.documentElement.classList.add('ready');},3500);
 setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too long. stage='+window.__stage);},6000);
 })();
 </script>

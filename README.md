@@ -316,3 +316,20 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - Legibility: Fetch, Push and Pull use full-strength text (a toggle rule had greyed them by mistake). Button and field borders are clearer, and muted text is darker in light theme and brighter in dark theme.
 - Git summary buttons are now in the order Fetch, Push, Pull.
 - Font: Inter (variable, Latin subset, about 48 KB, SIL Open Font License) is bundled so text weights look the same on every phone. Bangla text still uses the phone's own font.
+
+## v1.34.0
+- Dialogs: both buttons are now the same compact size (36 px, 10 px corners, 14 px text); the input is 38 px. Large page buttons (Commit, Save) are unchanged.
+- Legibility: unselected toggle options (Off, Auto, Light, Dark, All, Never and so on) use full-strength text. Selected options use a deeper brand tint (`#BD2845`) and danger buttons a stronger red, so every button, chip and link passes 4.5:1 contrast in light and dark. `tests/audit-contrast.py` walks the main screens and checks this.
+- Status bar (Android): the window background behind the status and navigation bars is painted with the theme colour, and contrast enforcement is switched off, so Dark theme no longer leaves a white bar on Android 15 and newer. Native change, check it on the phone.
+
+## v1.35.0
+- Startup: the chat screen stays hidden until the app knows which screen to show, so a first launch goes straight to the Welcome setup and a normal launch straight to the chat, with no flash of the wrong screen. A 3.5 second safety timer reveals the app regardless, and startup errors still show the red error page.
+
+## v1.36.0
+- Approval notification: when the agent needs your approval and KDex Agent is in the background, a "Needs your approval" notification appears. Tapping it, or the "request is done" notification, opens the chat it belongs to.
+- Share into the app: choose KDex Agent in another app's Share menu (text, links, text files, up to 5 files of 400 KB each). The shared text goes into the message box (it is not sent automatically) and files become attachments. If the current chat already has messages you choose New chat or This chat. Images and binary files are not supported and show a short message.
+- Native change (new intent filters, notification channel): check on the phone.
+
+## v1.37.0
+- Long titles: in every sheet the Back and Close buttons keep their place. A long file name or path is cut at the start (`…/public/delivery.html`) so the name stays visible. The sheet no longer shifts sideways; long code lines scroll inside their own box.
+- Swipe to close: swipe left anywhere on the menu to close it; swipe down anywhere on a sheet (when its content is scrolled to the top) to close it. A short swipe springs back. Typing fields and scrolled lists are left alone.

@@ -252,11 +252,18 @@ export async function gitNative(uri, op, args = {}, { onProgress, signal } = {})
   finally { gitWaiters.delete(id); if (signal) signal.removeEventListener('abort', stop); }
 }
 /** Keeps the app running (with a notification) while the agent works, so Android does not stop it when the screen turns off. */
+export const Launch = {
+  /** What the app was opened for: a chat to show (notification tap) and/or content shared from another app. Returned once. */
+  async take() { if (plugin) { try { return await plugin.takeLaunch(); } catch (e) { return {}; } } return {}; },
+  onLaunch(cb) { if (plugin) { try { plugin.addListener('launch', cb); } catch (e) { /* optional */ } } },
+};
 export const Work = {
+  /** A notification (only while the app is in the background) saying the agent waits for approval. */
+  async needs(text, chatId) { if (plugin) { try { await plugin.workNeeds({ text, chatId: chatId || '' }); } catch (e) { /* optional */ } } },
   async start(text) { if (plugin) { try { await plugin.workStart({ text }); } catch (e) { /* optional */ } } },
   async stop() { if (plugin) { try { await plugin.workStop(); } catch (e) { /* optional */ } } },
   /** A light vibration, and a notification when the app is in the background. */
-  async done(ok, text) { if (plugin) { try { await plugin.workDone({ ok: ok !== false, text: text || '' }); } catch (e) { /* optional */ } } else if (navigator.vibrate) { try { navigator.vibrate(ok === false ? [60, 70, 60] : 35); } catch (e) { /* ignore */ } } },
+  async done(ok, text, chatId) { if (plugin) { try { await plugin.workDone({ ok: ok !== false, text: text || '', chatId: chatId || '' }); } catch (e) { /* optional */ } } else if (navigator.vibrate) { try { navigator.vibrate(ok === false ? [60, 70, 60] : 35); } catch (e) { /* ignore */ } } },
 };
 
 /** "All files access": lets the app use normal file paths, which is much faster than Android's folder access. */

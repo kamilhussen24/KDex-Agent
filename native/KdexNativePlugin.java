@@ -58,6 +58,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import android.graphics.Color;
+import android.provider.OpenableColumns;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import android.graphics.drawable.ColorDrawable;
 import android.view.Window;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -115,6 +119,12 @@ public class KdexNativePlugin extends Plugin {
                     Window w = getActivity().getWindow();
                     w.setStatusBarColor(c);
                     w.setNavigationBarColor(c);
+                    // Android 15+ draws the app edge to edge and ignores the bar colours, so the strip behind
+                    // the bars shows the window background. Paint that too, or a dark app keeps a white bar.
+                    w.setBackgroundDrawable(new ColorDrawable(c));
+                    w.getDecorView().setBackgroundColor(c);
+                    try { getBridge().getWebView().getRootView().setBackgroundColor(c); } catch (Exception e) { /* no web view yet */ }
+                    if (Build.VERSION.SDK_INT >= 29) { w.setStatusBarContrastEnforced(false); w.setNavigationBarContrastEnforced(false); }
                     WindowInsetsControllerCompat ctl = WindowCompat.getInsetsController(w, w.getDecorView());
                     ctl.setAppearanceLightStatusBars(!dark);
                     ctl.setAppearanceLightNavigationBars(!dark);
@@ -631,7 +641,7 @@ public class KdexNativePlugin extends Plugin {
     protected void handleOnResume() {
         super.handleOnResume();
         inForeground = true;
-        try { ((android.app.NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE)).cancel(4103); } catch (Throwable t) { /* ignore */ }
+        try { android.app.NotificationManager nmc = (android.app.NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE); nmc.cancel(4103); nmc.cancel(4104); } catch (Throwable t) { /* ignore */ }
     }
 
     /** Short haptic tap, and when the app is in the background a notification saying the work finished. Everything here is best effort. */
@@ -654,8 +664,7 @@ public class KdexNativePlugin extends Plugin {
                         ch.setDescription("Tells you when KDex Agent has finished");
                         nm.createNotificationChannel(ch);
                     }
-                    Intent open = getContext().getPackageManager().getLaunchIntentForPackage(getContext().getPackageName());
-                    PendingIntent pi = open == null ? null : PendingIntent.getActivity(getContext(), 1, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                    PendingIntent pi = openChatIntent(1, call.getString("chatId", ""));
                     android.app.Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new android.app.Notification.Builder(getContext(), "kdex_done") : new android.app.Notification.Builder(getContext());
                     b.setContentTitle(ok ? "KDex Agent finished" : "KDex Agent needs you")
                             .setContentText(call.getString("text", ok ? "Your request is done." : "Something went wrong. Open the app to see."))
@@ -666,6 +675,128 @@ public class KdexNativePlugin extends Plugin {
             }
         } catch (Throwable t) { /* optional */ }
         call.resolve();
+    }
+
+
+    // ------------------------------------------------------------------ notifications that open a chat, and sharing into the app
+    private volatile String pendingChat = null;
+    private volatile JSObject pendingShare = null;
+
+    /** A launch intent for this app that carries the chat to open, for notification taps. */
+    private PendingIntent openChatIntent(int code, String chatId) {
+        Intent open = getContext().getPackageManager().getLaunchIntentForPackage(getContext().getPackageName());
+        if (open == null) return null;
+        if (chatId != null && chatId.length() > 0) open.putExtra("kdex_chat", chatId);
+        return PendingIntent.getActivity(getContext(), code, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    /** A separate notification, only while the app is in the background, when the agent waits for an approval. */
+    @PluginMethod
+    public void workNeeds(PluginCall call) {
+        try {
+            if (!inForeground) {
+                android.app.NotificationManager nm = (android.app.NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null) {
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        android.app.NotificationChannel ch = new android.app.NotificationChannel("kdex_ask", "Needs your approval", android.app.NotificationManager.IMPORTANCE_HIGH);
+                        ch.setDescription("Tells you when KDex Agent is waiting for you to approve something");
+                        nm.createNotificationChannel(ch);
+                    }
+                    PendingIntent pi = openChatIntent(2, call.getString("chatId", ""));
+                    android.app.Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new android.app.Notification.Builder(getContext(), "kdex_ask") : new android.app.Notification.Builder(getContext());
+                    b.setContentTitle("KDex Agent needs your approval")
+                            .setContentText(call.getString("text", "A change is waiting for you."))
+                            .setSmallIcon(android.R.drawable.stat_sys_warning).setAutoCancel(true);
+                    if (pi != null) b.setContentIntent(pi);
+                    nm.notify(4104, b.build());
+                }
+            }
+        } catch (Throwable t) { /* optional */ }
+        call.resolve();
+    }
+
+    /** Reads what the intent carries: a chat to open (notification tap) or shared text and files. */
+    private void consumeIntent(Intent it) {
+        if (it == null) return;
+        try {
+            String chat = it.getStringExtra("kdex_chat");
+            if (chat != null && chat.length() > 0) { pendingChat = chat; it.removeExtra("kdex_chat"); }
+            String act = it.getAction();
+            if (Intent.ACTION_SEND.equals(act) || Intent.ACTION_SEND_MULTIPLE.equals(act)) {
+                pendingShare = readShare(it);
+                it.setAction(Intent.ACTION_MAIN);
+            }
+        } catch (Throwable t) { /* ignore */ }
+    }
+
+    @SuppressWarnings({"deprecation", "unchecked"})
+    private JSObject readShare(Intent it) throws JSONException {
+        JSObject out = new JSObject();
+        CharSequence text = it.getCharSequenceExtra(Intent.EXTRA_TEXT);
+        CharSequence subject = it.getCharSequenceExtra(Intent.EXTRA_SUBJECT);
+        out.put("text", text == null ? "" : text.toString());
+        out.put("subject", subject == null ? "" : subject.toString());
+        java.util.ArrayList<Uri> uris = new java.util.ArrayList<>();
+        if (Intent.ACTION_SEND_MULTIPLE.equals(it.getAction())) {
+            java.util.ArrayList<Uri> many = it.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (many != null) uris.addAll(many);
+        } else {
+            Object one = it.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (one instanceof Uri) uris.add((Uri) one);
+        }
+        JSArray files = new JSArray();
+        int n = 0;
+        for (Uri u : uris) {
+            if (n++ >= 5) break;
+            JSObject f = new JSObject();
+            String name = "shared-file"; long size = -1;
+            try (Cursor c = getContext().getContentResolver().query(u, null, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    int i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME); if (i >= 0 && c.getString(i) != null) name = c.getString(i);
+                    int j = c.getColumnIndex(OpenableColumns.SIZE); if (j >= 0 && !c.isNull(j)) size = c.getLong(j);
+                }
+            } catch (Throwable t) { /* keep defaults */ }
+            f.put("name", name); f.put("size", size);
+            final int LIMIT = 400 * 1024;
+            try (InputStream in = getContext().getContentResolver().openInputStream(u)) {
+                if (in == null) { f.put("status", "unreadable"); files.put(f); continue; }
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                byte[] buf = new byte[16384]; int r; boolean big = false;
+                while ((r = in.read(buf)) > 0) { bo.write(buf, 0, r); if (bo.size() > LIMIT) { big = true; break; } }
+                byte[] data = bo.toByteArray();
+                boolean binary = false;
+                for (int k = 0; k < Math.min(data.length, 8000); k++) if (data[k] == 0) { binary = true; break; }
+                if (big) f.put("status", "big");
+                else if (binary) f.put("status", "binary");
+                else { f.put("status", "ok"); f.put("text", new String(data, java.nio.charset.StandardCharsets.UTF_8)); }
+            } catch (Throwable t) { f.put("status", "unreadable"); }
+            files.put(f);
+        }
+        out.put("files", files);
+        return out;
+    }
+
+    @Override
+    public void load() {
+        try { consumeIntent(getActivity().getIntent()); } catch (Throwable t) { /* ignore */ }
+    }
+
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        super.handleOnNewIntent(intent);
+        consumeIntent(intent);
+        if (pendingChat != null || pendingShare != null) notifyListeners("launch", new JSObject(), true);
+    }
+
+    /** What the app was opened for, once: a chat id from a notification and/or shared content. */
+    @PluginMethod
+    public void takeLaunch(PluginCall call) {
+        JSObject o = new JSObject();
+        String chat = pendingChat; JSObject share = pendingShare;
+        pendingChat = null; pendingShare = null;
+        if (chat != null) o.put("chat", chat);
+        if (share != null) o.put("share", share);
+        call.resolve(o);
     }
 
     @Override
