@@ -1,7 +1,7 @@
 // KDex Agent (Android) - UI layer. All data stays on this phone.
 import { $, $$, esc, uid, fmtBytes, fmtTok, ago, dayKey, dayKeyAgo, copyText } from './util.js';
 import { db, kvGet, kvSet } from './db.js';
-import { secure, fs, App, Termux, setBars, isNative } from './native.js';
+import { secure, fs, App, Termux, AllFiles, setBars, isNative } from './native.js';
 import { PRESETS, QUICK_FILL, listModels, popularModels } from './providers.js';
 import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
@@ -69,6 +69,29 @@ async function boot() {
   window.__stage = 'wiring'; wire();
   if (!S.models.length && !(await kvGet('setupSkipped', false))) { showSetup(true); window.__stage = 'ready'; return; }
   await enter(); window.__stage = 'ready';
+  setTimeout(() => offerAllFiles().catch(() => {}), 1200);
+}
+/** Opens Android's permission screen; when the user comes back it checks the result. */
+async function askAllFiles(done) {
+  try { await AllFiles.request(); } catch (e) { toast('Could not open the settings screen'); return; }
+  const back = async () => {
+    if (document.hidden) return;
+    document.removeEventListener('visibilitychange', back);
+    const st = await AllFiles.status(); G.resetGitCache();
+    toast(st.granted ? 'Fast file access is on' : 'Fast file access is still off');
+    if (done) done();
+  };
+  document.addEventListener('visibilitychange', back);
+}
+/** Once per install: ask for direct file access. It is optional; the app works without it, only slower. */
+async function offerAllFiles() {
+  if (!isNative) return;
+  const st = await AllFiles.status();
+  if (!st.supported || st.granted) return;
+  if (await kvGet('allFilesAsked', 0) >= 2) return;
+  await kvSet('allFilesAsked', (await kvGet('allFilesAsked', 0)) + 1);
+  const r = await choiceBox('Fast file access', 'Allow "All files access" so files and Git work at full speed, like Termux. Android opens a settings screen: turn on the switch for KDex Agent, then come back.', ['Allow', 'Not now']);
+  if (r === 0) askAllFiles();
 }
 async function enter() {
   $('#setup').classList.add('hidden');
@@ -618,11 +641,19 @@ function openSettings() {
     '<button id="bkOut" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Back up all data to a folder</span></button>' +
     '<button id="bkIn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Restore from a backup</span></button>' +
     '<div class="h3">Terminal (Termux)</div><div class="field">' + seg('setTerm', [['0', 'Off'], ['1', 'On']], st.termux ? '1' : '0') + '<small>Lets the agent run shell commands in Termux after you approve each one. Advanced.</small></div><div id="termBox"></div>' +
+    '<div class="h3">Fast file access</div><div id="afBox"></div>' +
     '<div class="h3">Git</div><button id="gitId" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Identity and access tokens</span></button>' +
     '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
   bindSeg('setProt', (v) => save({ protectSecrets: v === '1' })); bindSeg('setAutoDef', (v) => save({ autoDefault: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
+  const drawAF = async () => {
+    const box = $('#afBox'); if (!box) return;
+    const st2 = await AllFiles.status();
+    box.innerHTML = '<div class="kv"><span>All files access</span><span>' + (st2.web ? 'Android only' : !st2.supported ? 'Not needed' : st2.granted ? 'On' : 'Off') + '</span></div><div class="note" style="text-align:left">' + (st2.granted ? 'Files and Git use direct paths, like Termux does.' : 'Direct file access makes files and Git much faster. You turn it on once in Android settings.') + '</div>' + (st2.supported && !st2.granted ? '<button id="afOn" class="btn primary" style="width:100%;margin-bottom:8px"><span class="lbl">Turn on fast access</span></button>' : '');
+    if ($('#afOn')) $('#afOn').onclick = () => askAllFiles(drawAF);
+  };
+  drawAF();
   const rdTerm = () => drawTerm(rdTerm);
   bindSeg('setTerm', async (v) => { await save({ termux: v === '1' }); rdTerm(); updateTermChip(); });
   bindSeg('setTheme', (v) => { save({ theme: v }); applyTheme(); });
@@ -742,7 +773,7 @@ async function exportChat() {
 
 // ------------------------------------------------------------ git UI
 const pct = (p) => (p && p.phase ? p.phase + (p.total ? ' ' + Math.round((p.loaded / p.total) * 100) + '%' : '') : '');
-const GS = { tab: 'changes', sel: new Set(), known: new Set(), keepSel: false, hist: 10 };
+const GS = { tab: 'changes', sel: new Set(), known: new Set(), keepSel: false, hist: 10, reuse: null };
 const dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
 const baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
 
@@ -764,15 +795,16 @@ function errLine(text) {
   $$('[data-cu]', el).forEach((b) => b.onclick = async () => toast(await copyText(urls[+b.dataset.cu]) ? 'Link copied. Open it in your browser.' : 'Could not copy'));
 }
 const DONE = { Fetching: 'Fetched', Pulling: 'Pulled', Pushing: 'Pushed', 'Force pushing': 'Force pushed', Committing: 'Committed', Discarding: 'Discarded', 'Creating branch': 'Branch created', 'Switching branch': 'Switched branch', Merging: 'Merged', 'Deleting branch': 'Branch deleted', 'Undoing commit': 'Commit undone', 'Saving remote': 'Remote saved', 'Switching to HTTPS': 'Remote switched to HTTPS' };
-async function gitRun(label, fn, after) {
+async function gitRun(label, fn, after, keep) {
   $$('#sheetBody .btn, #sheetBody .linkbtn, #sheetBody .icon-btn, #sheetBody .stg').forEach((b) => { b.disabled = true; });
-  const ac = new AbortController();
+  const t0 = Date.now(); const ac = new AbortController();
   const cancel = () => { ac.abort(); busyLine('Cancelling...'); };
   busyLine(label + '...', null, cancel);
   try {
     await fn((p) => { const ph = phaseOf(p); busyLine(label + (ph ? ' · ' + ph : '') + (p && p.total ? ' ' + Math.round((p.loaded / p.total) * 100) + '%' : ''), p && p.total ? p.loaded / p.total : null, cancel); }, ac.signal);
     if (ac.signal.aborted) { await openGit(GS.tab); toast('Cancelled'); return; }
-    toast(DONE[label] || 'Done');
+    const secs = (Date.now() - t0) / 1000; toast((DONE[label] || 'Done') + (secs >= 2 ? ' · ' + secs.toFixed(1) + 's' : ''));
+    if (keep && S.gitState && !S.gitState.pending) GS.reuse = typeof keep === 'function' ? keep(S.gitState.changes) : S.gitState.changes;
     if (after) await after(); else await openGit();
   } catch (e) {
     const m = (e && e.message) || String(e);
@@ -806,12 +838,14 @@ async function openGit(tab, keepMsg) {
   if (!(await G.isRepo(folder))) return openGitStart(folder);
   if (tab) GS.tab = tab;
   const my = ++gitLoadId;
+  const reuse = GS.reuse; GS.reuse = null; // the working tree did not change, so do not scan every file again
   const body = sheet('Git');
   body.innerHTML = skeleton();
   let st;
   try { st = await loadGitQuick(folder); } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message || String(e)) + '</div>'; return; }
   if (my !== gitLoadId) return;
   S.gitState = st;
+  if (reuse) { st.changes = reuse; st.pending = false; const cur = new Set(reuse.map((c) => c.path)); GS.sel = new Set([...GS.sel].filter((x) => cur.has(x))); GS.known = cur; }
   const paint = () => {
     const head = gitHead(st);
     const tabs = [['changes', 'Changes' + (st.pending ? '' : st.changes.length ? ' (' + st.changes.length + ')' : '')], ['branches', 'Branches'], ['history', 'History'], ['remote', 'Remote']];
@@ -823,7 +857,7 @@ async function openGit(tab, keepMsg) {
   paint();
   // heavier work in the background; ignore it if the sheet moved on
   const stillHere = () => my === gitLoadId && S.gitState === st;
-  loadGitChanges(folder, st).then(() => { if (!stillHere()) return; const keep = $('#gMsg') ? $('#gMsg').innerHTML : ''; const msg = $('#gMessage') ? $('#gMessage').value : ''; const top = $('#sheetBody').scrollTop; paint(); if ($('#gMsg')) $('#gMsg').innerHTML = keep; if ($('#gMessage')) $('#gMessage').value = msg; $('#sheetBody').scrollTop = top; updateGitChip(); }).catch((e) => { if (stillHere()) { st.pending = false; paint(); errLine((e && e.message) || String(e)); } });
+  (reuse ? Promise.resolve() : loadGitChanges(folder, st)).then(() => { if (!stillHere()) return; const keep = $('#gMsg') ? $('#gMsg').innerHTML : ''; const msg = $('#gMessage') ? $('#gMessage').value : ''; const top = $('#sheetBody').scrollTop; paint(); if ($('#gMsg')) $('#gMsg').innerHTML = keep; if ($('#gMessage')) $('#gMessage').value = msg; $('#sheetBody').scrollTop = top; updateGitChip(); }).catch((e) => { if (stillHere()) { st.pending = false; paint(); errLine((e && e.message) || String(e)); } });
   G.inspectRepo(folder).then((r) => { if (!stillHere()) return; st.repo = r; if (GS.tab === 'remote') { const top = $('#sheetBody').scrollTop; paint(); $('#sheetBody').scrollTop = top; } }).catch(() => {});
   if (keepMsg) return;
 }
@@ -901,12 +935,12 @@ function bindGit(folder, st, body) {
     if (i.code === 'ssh') gitRun('Switching to HTTPS', () => G.useHttps(folder, i.remote, i.to), () => openGit('remote'));
     else if (i.code === 'identity') { if (i.cand) { await G.saveGitSettings({ name: i.cand.name, email: i.cand.email }); toast('Git identity saved'); await openGit('remote'); } else openGitIdentity(() => openGit('remote')); }
   });
-  const run = (label, fn) => gitRun(label, fn);
-  $('#gFetch').onclick = () => run('Fetching', (pr, sg) => G.fetchRemote(folder, { onProgress: pr, signal: sg }));
+  const run = (label, fn, keep) => gitRun(label, fn, undefined, keep);
+  $('#gFetch').onclick = () => run('Fetching', (pr, sg) => G.fetchRemote(folder, { onProgress: pr, signal: sg }), true);
   $('#gPull').onclick = () => run('Pulling', (pr, sg) => G.pull(folder, { onProgress: pr, signal: sg }));
   $('#gPush').onclick = async () => {
     if (st.changes.length && !await confirmBox('Uncommitted changes', 'Push uploads commits only. Your ' + st.changes.length + ' uncommitted change(s) stay on this phone.', 'Push')) return;
-    run('Pushing', (pr, sg) => G.push(folder, { onProgress: pr, signal: sg }));
+    run('Pushing', (pr, sg) => G.push(folder, { onProgress: pr, signal: sg }), true);
   };
   $$('[data-gf]', body).forEach((r) => r.onclick = () => openGitDiff(folder, r.dataset.gf));
   const redraw = () => { const m = $('#gMessage') ? $('#gMessage').value : ''; const top = $('#sheetBody').scrollTop; renderGitTab(folder, st, gitHead(st), body); if ($('#gMessage')) $('#gMessage').value = m; $('#sheetBody').scrollTop = top; };
@@ -929,21 +963,21 @@ function bindGit(folder, st, body) {
       try { ta.value = await A.suggestCommitMessage(currentModelId(), folder); ta.oninput(); } catch (e) { errLine(e.message); }
       b.disabled = false; l.textContent = 'Suggest';
     };
-    $('#gCommit').onclick = () => { const paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p)); run('Committing', () => G.commit(folder, ta.value, paths)); };
+    $('#gCommit').onclick = () => { const paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p)); run('Committing', () => G.commit(folder, ta.value, paths, st.changes), (ch) => ch.filter((c) => !paths.includes(c.path))); };
   }
   if ($('#gTok')) $('#gTok').onclick = async () => { const t = await askText('Access token for ' + st.remote.host, 'Paste the token'); if (t) { await G.saveToken(st.remote.host, t); await G.rememberHost(st.remote.host); toast('Token saved'); openGit(GS.tab); } };
-  if ($('#gNew')) $('#gNew').onclick = async () => { const n = await askText('New branch', 'Branch name', 'feature/my-change'); if (n) run('Creating branch', () => G.createBranch(folder, n.replace(/\s+/g, '-'))); };
+  if ($('#gNew')) $('#gNew').onclick = async () => { const n = await askText('New branch', 'Branch name', 'feature/my-change'); if (n) run('Creating branch', () => G.createBranch(folder, n.replace(/\s+/g, '-')), true); };
   $$('[data-sw]', body).forEach((b) => b.onclick = () => run('Switching branch', () => G.checkout(folder, b.dataset.sw)));
   $$('[data-mg]', body).forEach((b) => b.onclick = async () => { if (await confirmBox('Merge branch?', 'Merge "' + b.dataset.mg + '" into "' + st.branch + '"?', 'Merge')) run('Merging', () => G.mergeBranch(folder, b.dataset.mg)); });
   $$('[data-db]', body).forEach((b) => b.onclick = async () => { if (await confirmBox('Delete branch?', 'Delete "' + b.dataset.db + '" from this phone. The remote copy is not touched.', 'Delete')) run('Deleting branch', () => G.deleteBranch(folder, b.dataset.db)); });
   if ($('#gMore')) $('#gMore').onclick = () => { GS.hist = Math.min(GS.hist + 10, 50); openGit('history'); };
   if ($('#gUndo')) $('#gUndo').onclick = async () => { if (await confirmBox('Undo last commit?', 'The commit is removed from this branch. Its changes come back as uncommitted changes. Nothing is lost.', 'Undo commit')) run('Undoing commit', () => G.undoLastCommit(folder)); };
-  if ($('#gRemote')) $('#gRemote').onclick = async () => { const u = await askText(st.remote ? 'Change remote URL' : 'Set remote URL', 'https://github.com/user/repo.git', st.remote ? st.remote.url : ''); if (u) run('Saving remote', () => G.setRemote(folder, u)); };
+  if ($('#gRemote')) $('#gRemote').onclick = async () => { const u = await askText(st.remote ? 'Change remote URL' : 'Set remote URL', 'https://github.com/user/repo.git', st.remote ? st.remote.url : ''); if (u) run('Saving remote', () => G.setRemote(folder, u), true); };
   if ($('#gPublish')) $('#gPublish').onclick = () => openGitStart(folder, 'new');
   if ($('#gIdent')) { G.getGitSettings().then((g) => { const a = $('#gAuthor'); if (a) a.textContent = g.name ? g.name + ' <' + g.email + '>' : 'not set'; }); $('#gIdent').onclick = () => openGitIdentity(() => openGit('remote')); }
   if ($('#gForce')) $('#gForce').onclick = async () => {
     if (!await confirmBox('Force push?', 'This overwrites "' + st.branch + '" on the remote with your local version. Anyone else\'s commits there will be lost.', 'Force push')) return;
-    run('Force pushing', (pr, sg) => G.push(folder, { force: true, onProgress: pr, signal: sg }));
+    run('Force pushing', (pr, sg) => G.push(folder, { force: true, onProgress: pr, signal: sg }), true);
   };
   if ($('#gWipe')) $('#gWipe').onclick = async () => {
     if (!await confirmBox('Remove Git from this folder?', 'The commit history of this project is deleted. Your files are not touched.', 'Remove')) return;

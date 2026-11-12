@@ -305,21 +305,20 @@ async function loadExecs(folder) {
   } catch (e) { /* no commits yet */ }
   execSets.set(folder.id, set);
 }
-export async function commit(folder, message, paths) {
+export async function commit(folder, message, paths, known) {
   await loadExecs(folder);
   const c = ctx(folder); const au = await author();
   if (!message || !message.trim()) throw new Error('Write a commit message.');
-  const ch = await status(folder);
+  const ch = known || await status(folder); // the screen already scanned; do not read every file again
   const prot = await protectionOn();
   let list = paths ? ch.filter((x) => paths.includes(x.path)) : ch;
   // New secret files are never added to a commit by accident (they would be published on push).
   const skipped = prot ? list.filter((x) => x.kind === 'new' && isSecretPath(x.path)).map((x) => x.path) : [];
   if (skipped.length) list = list.filter((x) => !skipped.includes(x.path));
   if (!list.length) throw new Error(skipped.length ? 'Only secret files changed (' + skipped.join(', ') + '). They are never committed automatically. Add them to .gitignore.' : 'Nothing to commit.');
-  for (const f of list) {
-    if (f.kind === 'deleted') await git().remove({ ...c, filepath: f.path });
-    else await git().add({ ...c, filepath: f.path });
-  }
+  for (const f of list) if (f.kind === 'deleted') await git().remove({ ...c, filepath: f.path });
+  const adds = list.filter((f) => f.kind !== 'deleted').map((f) => f.path);
+  if (adds.length) await git().add({ ...c, filepath: adds, parallel: true }); // one index write for all files
   const oid = await git().commit({ ...c, message: message.trim(), author: au });
   execSets.delete(folder.id);
   return { oid, count: list.length, skipped };

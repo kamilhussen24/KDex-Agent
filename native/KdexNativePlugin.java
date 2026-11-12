@@ -15,6 +15,7 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.DocumentsContract;
+import android.provider.Settings;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
@@ -35,6 +36,9 @@ import com.getcapacitor.annotation.PermissionCallback;
 import org.json.JSONException;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -445,18 +449,70 @@ public class KdexNativePlugin extends Plugin {
         return parts.toArray(new String[0]);
     }
 
-    /** Returns the document id for a path, or null when it does not exist. */
-    private String findId(Uri tree, String rel) throws Exception {
+    // Folder ids already looked up, keyed by tree + path. A deep path such as .git/objects/ab/cdef used to list every
+    // parent folder again on each file operation, which made Git very slow on large folders.
+    private final Map<String, String> dirIds = new ConcurrentHashMap<>();
+
+    private static String joinParts(String[] parts, int n) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) { if (i > 0) sb.append('/'); sb.append(parts[i]); }
+        return sb.toString();
+    }
+
+    private void dropDirs(String key) {
+        for (String k : new ArrayList<>(dirIds.keySet())) {
+            if (k.equals(key) || k.startsWith(key + "/")) dirIds.remove(k);
+        }
+    }
+
+    /** Id of the folder made of parts[0..upTo). Returns null when a part is missing (and create is false). */
+    private String dirId(Uri tree, String[] parts, int upTo, boolean create) throws Exception {
+        String base = tree.toString() + "|";
         String id = DocumentsContract.getTreeDocumentId(tree);
-        for (String part : splitPath(rel)) {
-            String next = null;
+        int start = 0;
+        for (int i = upTo; i > 0; i--) {
+            String key = base + joinParts(parts, i);
+            String known = dirIds.get(key);
+            if (known == null) continue;
+            Doc d = null;
+            try { d = statDoc(tree, known); } catch (Exception e) { d = null; }
+            if (d != null && d.dir) { id = known; start = i; break; }
+            dropDirs(key); // the folder changed or was removed outside the app
+        }
+        for (int i = start; i < upTo; i++) {
+            String next = null; boolean isDir = false;
             for (Doc d : children(tree, id)) {
-                if (part.equals(d.name)) { next = d.id; break; }
+                if (parts[i].equals(d.name)) { next = d.id; isDir = d.dir; break; }
             }
-            if (next == null) return null;
+            if (next != null && !isDir) {
+                if (create) throw new Exception(parts[i] + " is a file, not a folder");
+                return null;
+            }
+            if (next == null) {
+                if (!create) return null;
+                Uri created = DocumentsContract.createDocument(resolver(),
+                        DocumentsContract.buildDocumentUriUsingTree(tree, id),
+                        DocumentsContract.Document.MIME_TYPE_DIR, parts[i]);
+                if (created == null) throw new Exception("Could not create folder " + parts[i]);
+                next = DocumentsContract.getDocumentId(created);
+            }
             id = next;
+            dirIds.put(base + joinParts(parts, i + 1), id);
         }
         return id;
+    }
+
+    /** Returns the document id for a path, or null when it does not exist. */
+    private String findId(Uri tree, String rel) throws Exception {
+        String[] parts = splitPath(rel);
+        if (parts.length == 0) return DocumentsContract.getTreeDocumentId(tree);
+        String parent = dirId(tree, parts, parts.length - 1, false);
+        if (parent == null) return null;
+        String name = parts[parts.length - 1];
+        for (Doc d : children(tree, parent)) {
+            if (name.equals(d.name)) return d.id;
+        }
+        return null;
     }
 
     private Doc statDoc(Uri tree, String id) {
@@ -493,12 +549,218 @@ public class KdexNativePlugin extends Plugin {
         return o;
     }
 
+
+    // ------------------------------------------------------------------ Direct file access
+    // With "All files access" the app reads and writes shared storage through normal file paths. That is how Termux
+    // works and it is far faster than Android's folder access (SAF), which needs a content query for every step.
+    // Without the permission, or for folders outside shared storage, the SAF code below is used unchanged.
+
+    private boolean allFilesGranted() {
+        try { return Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager(); } catch (Throwable t) { return false; }
+    }
+
+    @PluginMethod
+    public void allFilesStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("supported", Build.VERSION.SDK_INT >= 30);
+        ret.put("granted", allFilesGranted());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestAllFiles(PluginCall call) {
+        try {
+            Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + getContext().getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception e) {
+            try {
+                Intent j = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                j.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(j);
+            } catch (Exception e2) { call.reject("Could not open the settings screen"); return; }
+        }
+        call.resolve();
+    }
+
+    /** The real folder behind a picked tree, or null when direct access is not possible (then SAF is used). */
+    private File directRoot(Uri tree) {
+        try {
+            if (!allFilesGranted()) return null;
+            if (!"com.android.externalstorage.documents".equals(tree.getAuthority())) return null;
+            String id = DocumentsContract.getTreeDocumentId(tree);
+            int c = id.indexOf(':');
+            if (c < 0) return null;
+            String vol = id.substring(0, c);
+            String rest = id.substring(c + 1);
+            File base = "primary".equals(vol) ? android.os.Environment.getExternalStorageDirectory() : new File("/storage/" + vol);
+            File f = rest.isEmpty() ? base : new File(base, rest);
+            return f.isDirectory() ? f : null;
+        } catch (Exception e) { return null; }
+    }
+
+    private File fileFor(File root, String rel) throws Exception {
+        File f = root;
+        for (String p : splitPath(rel)) f = new File(f, p);
+        return f;
+    }
+
+    private static String baseOfRel(String rel) {
+        return rel == null || rel.isEmpty() ? "" : rel.replaceAll("/+$", "") + "/";
+    }
+
+    private JSObject fileEntry(File f, String path) throws JSONException {
+        JSObject o = new JSObject();
+        boolean dir = f.isDirectory();
+        o.put("name", f.getName());
+        o.put("path", path);
+        o.put("isDir", dir);
+        o.put("size", dir ? 0 : f.length());
+        o.put("modified", f.lastModified());
+        return o;
+    }
+
+    private void dList(PluginCall call, File root, String rel) throws Exception {
+        File dir = fileFor(root, rel);
+        if (!dir.exists()) { call.reject("Not found: " + rel); return; }
+        File[] kids = dir.listFiles();
+        if (kids == null) { call.reject("Cannot open " + rel); return; }
+        JSArray arr = new JSArray();
+        String base = baseOfRel(rel);
+        for (File k : kids) arr.put(fileEntry(k, base + k.getName()));
+        JSObject ret = new JSObject();
+        ret.put("entries", arr);
+        call.resolve(ret);
+    }
+
+    private void dWalkInto(File dir, String base, JSArray out, int max, int[] count) throws Exception {
+        File[] kids = dir.listFiles();
+        if (kids == null) return;
+        for (File k : kids) {
+            if (count[0] >= max) return;
+            String path = base + k.getName();
+            if (k.isDirectory()) {
+                if (SKIP_DIRS.contains(k.getName())) continue;
+                if (!k.getCanonicalPath().equals(k.getAbsolutePath())) continue; // symlinked folder: skip, avoids loops
+                dWalkInto(k, path + "/", out, max, count);
+            } else {
+                out.put(fileEntry(k, path));
+                count[0]++;
+            }
+        }
+    }
+
+    private void dWalk(PluginCall call, File root, String rel, int max) throws Exception {
+        File dir = fileFor(root, rel);
+        if (!dir.exists()) { call.reject("Not found: " + rel); return; }
+        JSArray arr = new JSArray();
+        int[] count = new int[]{0};
+        dWalkInto(dir, baseOfRel(rel), arr, max, count);
+        JSObject ret = new JSObject();
+        ret.put("files", arr);
+        ret.put("truncated", count[0] >= max);
+        call.resolve(ret);
+    }
+
+    private void dStat(PluginCall call, File root, String rel) throws Exception {
+        File f = fileFor(root, rel);
+        JSObject ret = new JSObject();
+        boolean ex = f.exists();
+        ret.put("exists", ex);
+        if (ex) { ret.put("isDir", f.isDirectory()); ret.put("size", f.isDirectory() ? 0 : f.length()); ret.put("modified", f.lastModified()); }
+        call.resolve(ret);
+    }
+
+    private void dReadText(PluginCall call, File root, String rel, int maxBytes) throws Exception {
+        File f = fileFor(root, rel);
+        if (!f.exists()) { call.reject("Not found: " + rel); return; }
+        if (f.isDirectory()) { call.reject("This is a folder, not a file: " + rel); return; }
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        boolean truncated = false;
+        try (InputStream in = new FileInputStream(f)) {
+            byte[] buf = new byte[16384];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                if (bos.size() + n > maxBytes) {
+                    bos.write(buf, 0, maxBytes - bos.size());
+                    truncated = true;
+                    break;
+                }
+                bos.write(buf, 0, n);
+            }
+        }
+        byte[] bytes = bos.toByteArray();
+        boolean binary = false;
+        for (int i = 0; i < Math.min(bytes.length, 8000); i++) {
+            if (bytes[i] == 0) { binary = true; break; }
+        }
+        JSObject ret = new JSObject();
+        ret.put("size", f.length());
+        ret.put("binary", binary);
+        ret.put("truncated", truncated);
+        ret.put("text", binary ? "" : new String(bytes, StandardCharsets.UTF_8));
+        call.resolve(ret);
+    }
+
+    private void dReadB64(PluginCall call, File root, String rel) throws Exception {
+        File f = fileFor(root, rel);
+        if (!f.exists()) { call.reject("ENOENT: " + rel); return; }
+        if (f.isDirectory()) { call.reject("EISDIR: " + rel); return; }
+        if (f.length() > MAX_BYTES_FILE) { call.reject("File too large: " + rel); return; }
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (InputStream in = new FileInputStream(f)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) != -1) bos.write(buf, 0, n);
+        }
+        JSObject ret = new JSObject();
+        ret.put("b64", Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP));
+        call.resolve(ret);
+    }
+
+    private void dWrite(PluginCall call, File root, String rel, byte[] data, boolean okFlag) throws Exception {
+        if (splitPath(rel).length == 0) { call.reject("A file path is required"); return; }
+        File f = fileFor(root, rel);
+        if (f.isDirectory()) { call.reject(rel + " is a folder"); return; }
+        File parent = f.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) { call.reject("Could not create folder for " + rel); return; }
+        try (OutputStream os = new FileOutputStream(f)) { os.write(data); }
+        if (okFlag) { JSObject ret = new JSObject(); ret.put("ok", true); call.resolve(ret); } else call.resolve();
+    }
+
+    private static boolean deleteTree(File f) {
+        boolean plain;
+        try { plain = f.getCanonicalPath().equals(f.getAbsolutePath()); } catch (Exception e) { plain = false; }
+        if (f.isDirectory() && plain) {
+            File[] kids = f.listFiles();
+            if (kids != null) for (File k : kids) deleteTree(k);
+        }
+        return f.delete();
+    }
+
+    private void dRemove(PluginCall call, File root, String rel) throws Exception {
+        if (splitPath(rel).length == 0) { call.reject("Refusing to delete the chosen folder itself"); return; }
+        File f = fileFor(root, rel);
+        if (!f.exists()) { call.reject("Not found: " + rel); return; }
+        boolean ok = deleteTree(f);
+        if (!ok) { call.reject("Could not delete " + rel); return; }
+        call.resolve();
+    }
+
+    private void dMkdir(PluginCall call, File root, String rel) throws Exception {
+        File f = fileFor(root, rel);
+        if (!f.isDirectory() && !f.mkdirs() && !f.isDirectory()) { call.reject("Could not create folder " + rel); return; }
+        call.resolve();
+    }
+
     @PluginMethod
     public void list(PluginCall call) {
         pool.execute(() -> {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
                 String rel = call.getString("path", "");
+                File dr = directRoot(tree);
+                if (dr != null) { dList(call, dr, rel); return; }
                 String id = findId(tree, rel);
                 if (id == null) { call.reject("Not found: " + rel); return; }
                 List<Doc> kids = children(tree, id);
@@ -534,6 +796,8 @@ public class KdexNativePlugin extends Plugin {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
                 String rel = call.getString("path", "");
+                File dr = directRoot(tree);
+                if (dr != null) { dWalk(call, dr, rel, call.getInt("max", 3000)); return; }
                 int max = call.getInt("max", 3000);
                 String id = findId(tree, rel);
                 if (id == null) { call.reject("Not found: " + rel); return; }
@@ -557,6 +821,8 @@ public class KdexNativePlugin extends Plugin {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
                 String rel = call.getString("path", "");
+                File dr = directRoot(tree);
+                if (dr != null) { dStat(call, dr, rel); return; }
                 String id = findId(tree, rel);
                 JSObject ret = new JSObject();
                 if (id == null) { ret.put("exists", false); call.resolve(ret); return; }
@@ -576,6 +842,8 @@ public class KdexNativePlugin extends Plugin {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
                 String rel = call.getString("path", "");
+                File dr = directRoot(tree);
+                if (dr != null) { dReadText(call, dr, rel, Math.min(call.getInt("maxBytes", MAX_READ_BYTES), MAX_READ_BYTES)); return; }
                 int maxBytes = Math.min(call.getInt("maxBytes", MAX_READ_BYTES), MAX_READ_BYTES);
                 String id = findId(tree, rel);
                 if (id == null) { call.reject("Not found: " + rel); return; }
@@ -615,22 +883,7 @@ public class KdexNativePlugin extends Plugin {
     }
 
     private String ensureDir(Uri tree, String[] parts, int upTo) throws Exception {
-        String id = DocumentsContract.getTreeDocumentId(tree);
-        for (int i = 0; i < upTo; i++) {
-            String next = null;
-            for (Doc d : children(tree, id)) {
-                if (parts[i].equals(d.name)) { next = d.id; break; }
-            }
-            if (next == null) {
-                Uri created = DocumentsContract.createDocument(resolver(),
-                        DocumentsContract.buildDocumentUriUsingTree(tree, id),
-                        DocumentsContract.Document.MIME_TYPE_DIR, parts[i]);
-                if (created == null) throw new Exception("Could not create folder " + parts[i]);
-                next = DocumentsContract.getDocumentId(created);
-            }
-            id = next;
-        }
-        return id;
+        return dirId(tree, parts, upTo, true);
     }
 
     @PluginMethod
@@ -639,6 +892,8 @@ public class KdexNativePlugin extends Plugin {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
                 String rel = call.getString("path", "");
+                File dr = directRoot(tree);
+                if (dr != null) { dWrite(call, dr, rel, call.getString("text", "").getBytes(StandardCharsets.UTF_8), true); return; }
                 String text = call.getString("text", "");
                 String[] parts = splitPath(rel);
                 if (parts.length == 0) { call.reject("A file path is required"); return; }
@@ -680,10 +935,13 @@ public class KdexNativePlugin extends Plugin {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
                 String rel = call.getString("path", "");
+                File dr = directRoot(tree);
+                if (dr != null) { dRemove(call, dr, rel); return; }
                 if (splitPath(rel).length == 0) { call.reject("Refusing to delete the chosen folder itself"); return; }
                 String id = findId(tree, rel);
                 if (id == null) { call.reject("Not found: " + rel); return; }
                 boolean ok = DocumentsContract.deleteDocument(resolver(), DocumentsContract.buildDocumentUriUsingTree(tree, id));
+                dropDirs(tree.toString() + "|" + joinParts(splitPath(rel), splitPath(rel).length));
                 if (!ok) { call.reject("Could not delete " + rel); return; }
                 call.resolve();
             } catch (Exception e) {
@@ -698,6 +956,8 @@ public class KdexNativePlugin extends Plugin {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
                 String rel = call.getString("path", "");
+                File dr = directRoot(tree);
+                if (dr != null) { dReadB64(call, dr, rel); return; }
                 String id = findId(tree, rel);
                 if (id == null) { call.reject("ENOENT: " + rel); return; }
                 Doc d = statDoc(tree, id);
@@ -726,6 +986,8 @@ public class KdexNativePlugin extends Plugin {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
                 String rel = call.getString("path", "");
+                File dr = directRoot(tree);
+                if (dr != null) { dWrite(call, dr, rel, Base64.decode(call.getString("b64", ""), Base64.DEFAULT), false); return; }
                 byte[] data = Base64.decode(call.getString("b64", ""), Base64.DEFAULT);
                 String[] parts = splitPath(rel);
                 if (parts.length == 0) { call.reject("A file path is required"); return; }
@@ -759,6 +1021,8 @@ public class KdexNativePlugin extends Plugin {
         pool.execute(() -> {
             try {
                 Uri tree = Uri.parse(call.getString("uri", ""));
+                File dr = directRoot(tree);
+                if (dr != null) { dMkdir(call, dr, call.getString("path", "")); return; }
                 String[] parts = splitPath(call.getString("path", ""));
                 ensureDir(tree, parts, parts.length);
                 call.resolve();

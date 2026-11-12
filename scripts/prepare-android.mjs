@@ -59,6 +59,10 @@ m = m.replace('android:allowBackup="true"', 'android:allowBackup="false"');
 if (!m.includes('com.termux.permission.RUN_COMMAND')) {
   m = m.replace('<application', '<uses-permission android:name="com.termux.permission.RUN_COMMAND" />\n    <queries>\n        <package android:name="com.termux" />\n    </queries>\n    <application');
 }
+// Fast direct file access (Termux-style). The user grants it once in Android settings; without it the app falls back to the slower folder access.
+if (!m.includes('MANAGE_EXTERNAL_STORAGE')) {
+  m = m.replace('<application', '<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <application');
+}
 write(mf, m);
 
 // 5. gradle: version + optional release signing

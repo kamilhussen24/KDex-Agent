@@ -227,6 +227,12 @@ export const App = isNative ? cap.registerPlugin('App') : null;
 /** Colours the Android status and navigation bars to match the theme. */
 export async function setBars(dark, color) { if (plugin) { try { await plugin.setBars({ dark, color }); } catch (e) { /* older build */ } } }
 
+/** "All files access": lets the app use normal file paths, which is much faster than Android's folder access. */
+export const AllFiles = {
+  async status() { if (plugin) { try { return await plugin.allFilesStatus(); } catch (e) { return { supported: false, granted: false }; } } return { supported: false, granted: false, web: true }; },
+  async request() { if (plugin) await plugin.requestAllFiles(); },
+};
+
 /** Optional bridge to the Termux app (Android only). Lets the agent run shell commands after the user approves. */
 export const Termux = {
   async status() {

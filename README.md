@@ -222,3 +222,11 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 
 ### v1.19.3
 - Fetch button now has its icon like Pull and Push.
+
+### v1.20.0 – faster Git
+- Folder access remembers folder ids, so a file operation no longer lists every parent folder again. Git writes many small files under .git/objects, so commit and push get much faster on big folders.
+- Slow actions show how long they took.
+
+### v1.21.0 – direct file access
+- New optional "All files access" permission (asked once, also in Settings > Fast file access). With it the app reads and writes shared storage through normal file paths, like Termux, instead of Android folder access, which needs a content query per step. Files, search, edits and Git become much faster.
+- Without the permission, or for folders outside shared storage, the previous folder access is used unchanged.
