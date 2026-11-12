@@ -20,11 +20,34 @@ const S = {
 const ICON = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
 
 // ------------------------------------------------------------ helpers
-let toastT;
-function toast(t) {
-  const el = $('#toast'); el.textContent = t; el.classList.remove('hidden');
-  clearTimeout(toastT); toastT = setTimeout(() => el.classList.add('hidden'), 2400);
+let toastT; let toastH;
+/** Picks the look of a notification from its wording: ok, warn, err or info. */
+function toastKind(t) {
+  if (/^(nothing|open a folder|pick or type|add your git|asking before|auto:|clone does not)/i.test(t)) return 'warn';
+  if (/could not|couldn't|can't|cannot|failed|went wrong|rejected|denied|not a kdex|no backup|not found|no connection|error/i.test(t)) return 'err';
+  if (/^(saved|saving|copied|done|cloned|undone|restored|reported|remembered|token saved|key updated|provider saved|git removed|git identity saved|repository created|all conversations deleted|committed|pushed|pulled|fetched)/i.test(t)) return 'ok';
+  return 'info';
 }
+const TOAST_ICON = { ok: 'check', err: 'alert', warn: 'alert', info: 'info' };
+/** Notification: a short pill for one line, a card when there is a detail. `opts.action = { label, fn }` adds a button. */
+function toast(t, opts = {}) {
+  const el = $('#toast'); const text = String(t == null ? '' : t).trim(); if (!text) return;
+  const kind = opts.kind || toastKind(text);
+  let title = text; let detail = '';
+  const cut = /^(.{3,60}?)(?: · |: )(.+)$/.exec(text);
+  if (cut) { title = cut[1]; detail = cut[2]; } else if (text.length > 70) { const m = /^(.{20,70}?[.!?])\s+(.+)$/.exec(text); if (m) { title = m[1]; detail = m[2]; } }
+  const card = !!detail || !!opts.action;
+  el.className = 'toast ' + kind + (card ? ' card' : ' pill');
+  el.innerHTML = '<span class="tic">' + ICON(TOAST_ICON[kind]) + '</span><span class="ttx"><span class="tt1">' + esc(title) + '</span>' + (detail ? '<span class="tt2">' + esc(detail) + '</span>' : '') + '</span>' + (opts.action ? '<button type="button" class="tact">' + esc(opts.action.label) + '</button>' : '');
+  el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
+  void el.offsetWidth; el.classList.add('show');
+  const hide = () => { el.classList.remove('show'); toastH = setTimeout(() => el.classList.add('hidden'), 220); };
+  clearTimeout(toastT); clearTimeout(toastH);
+  el.onclick = (e) => { if (e.target.closest('.tact')) { try { opts.action.fn(); } catch (x) { /* ignore */ } } hide(); };
+  toastT = setTimeout(hide, kind === 'err' || card ? 4200 : 2400);
+  if (kind === 'err') D.log('error', text);
+}
+window.__toast = toast;
 function confirmBox(title, text, yes = 'OK') {
   return new Promise((res) => {
     $('#dlgTitle').textContent = title; $('#dlgText').textContent = text; $('#dlgYes').firstElementChild.textContent = yes;

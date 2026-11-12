@@ -243,3 +243,6 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - **Diagnostics log:** Settings > Help > Diagnostics log lists errors and failed Git actions. Tokens and keys are masked; Copy log is safe to share.
 - **Secret scan:** before a commit, selected files are scanned for keys and tokens. You can leave the flagged files out or commit anyway. Values are never shown.
 - **Syntax colours and file viewer:** code blocks in chat are coloured, and the Files viewer shows line numbers and colours, with Copy.
+
+### v1.22.1 – notifications
+- All notifications share one design: a short pill for one-line messages, a card with a title and detail for longer ones. Success, warning, error and info each have their own icon and colour, in light and dark. Tap to dismiss; errors stay a little longer.
