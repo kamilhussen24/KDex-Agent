@@ -968,18 +968,13 @@ function errLine(text, opts = {}) {
   const el = $('#gMsg'); if (!el) return;
   if (!text) { el.innerHTML = ''; return; }
   const x = explainGitError(text);
-  const urls = [...new Set(String(text).match(/https?:\/\/[^\s<>"')]+/g) || [])];
   const fixBtn = x.fix === 'pull' ? '<button class="btn sm" data-fx="pull">' + ICON('down') + '<span class="lbl">Pull now</span></button>'
-    : x.fix === 'token' ? '<button class="btn sm" data-fx="token">' + ICON('key') + '<span class="lbl">Open token settings</span></button>'
     : x.fix === 'retry' && opts.retry ? '<button class="btn sm" data-fx="retry">' + ICON('refresh') + '<span class="lbl">Retry</span></button>' : '';
   el.innerHTML = '<div class="gerr"><span class="gic">' + ICON('alert') + '</span><div class="gtx"><div class="gt1">' + esc(x.title) + '</div><div class="gt2">' + esc(midCut(x.body)).replace(/\n/g, '<br>') + '</div>' +
-    '<div class="erract">' + fixBtn + urls.slice(0, 2).map((u, i) => '<button class="btn sm" data-cu="' + i + '">' + ICON('copy') + '<span class="lbl">Copy link</span></button>').join('') + '<button class="btn sm" data-cd="1">' + ICON('copy') + '<span class="lbl">Copy details</span></button></div></div></div>';
-  $$('[data-cu]', el).forEach((b) => b.onclick = async () => toast(await copyText(urls[+b.dataset.cu]) ? 'Link copied. Open it in your browser.' : 'Could not copy'));
-  $('[data-cd]', el).onclick = async () => toast(await copyText(String(text)) ? 'Copied' : 'Could not copy');
+    (fixBtn ? '<div class="erract">' + fixBtn + '</div>' : '') + '</div></div>';
   $$('[data-fx]', el).forEach((b) => b.onclick = () => {
     const f = S.folder; const k = b.dataset.fx;
     if (k === 'pull' && f) gitRun('Pulling', (pr, sg) => G.pull(f, { onProgress: pr, signal: sg }));
-    else if (k === 'token') openGitIdentity(() => openGit());
     else if (k === 'retry' && opts.retry) opts.retry();
   });
 }

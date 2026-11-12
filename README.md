@@ -265,3 +265,9 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 ### v1.24.0 – open a folder by path
 - New button "Open by path..." under "Open a folder...". Type or paste a path (`/storage/emulated/0/...`, `/sdcard/...`, an SD card under `/storage/XXXX-XXXX/...`, or a path relative to the storage root). The path is checked as you type: it must exist, be a folder and be readable. Then the folder opens like any other, with Files, Git and the agent.
 - Needs "All files access" (the sheet offers to turn it on). Private app folders (`/data/...`, Termux home `~`) are not shared by Android and cannot be opened. Opening the whole storage asks for confirmation first.
+
+### v1.25.0 – smarter AI, cleaner error cards
+- AI plans first: for a task that changes more than two files, needs several commands or is vague, it writes a short plan and waits for your go. Small clear fixes are done directly.
+- AI checks its own work: after changing files it reads the result back and runs the lightest test, lint or build when the terminal is available, then reports what it really checked.
+- Project map: on each turn the AI gets a short map of the open folder (main file types, top folders, root files, package.json scripts). It is cached for 20 minutes and refreshed after any change. Secret files and folders such as node_modules and .git are left out.
+- Git error cards no longer have Copy link, Copy details or Open token settings buttons (they did not work reliably in the Android WebView). The text states where to fix it, and can be selected with a long press. Pull now and Retry stay.

@@ -238,7 +238,7 @@ html[data-theme=dark] .toast.card.warn .tic{color:#fbbf24}
 .code-h .tag{font-size:12px}
 .code-h .mini{height:26px;padding:0 10px;font-size:12px}
 .body .code pre{border-radius:0;margin:0}
-.body,.bubble,.body pre,.body code,.diff,pre.out{-webkit-user-select:text;user-select:text}
+.body,.bubble,.body pre,.body code,.diff,pre.out,.gerr .gt1,.gerr .gt2{-webkit-user-select:text;user-select:text}
 .btn,.icon-btn,.chip,.tab{-webkit-user-select:none;user-select:none}
 .kv{gap:14px;align-items:baseline}.kv span:last-child{text-align:right;min-width:0;word-break:break-word}
 .warnbar{display:flex;align-items:center;gap:10px;margin:10px 0;padding:10px 12px;border:1px solid var(--b2);border-radius:12px;font-size:13px;background:var(--bg2)}

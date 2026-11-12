@@ -1,12 +1,12 @@
 // The chat engine: builds a token-cheap context, streams the reply, runs file tools in a loop,
 // asks the user before every change, keeps backups for Undo, learns memory notes, records usage.
 import { db, kvGet, kvSet } from './db.js';
-import { secure } from './native.js';
+import { secure, fs } from './native.js';
 import { stream, complete } from './providers.js';
-import { TOOLS, WRITE_TOOLS, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
+import { TOOLS, WRITE_TOOLS, BINARY_EXT, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo, resetGitCache } from './git.js';
-import { scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
+import { isSecretPath, scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
 import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction, gitActionIsRead } from './gittools.js';
@@ -99,7 +99,43 @@ const ABOUT =
   'Keep tokens low: read only what you need, read each file once, use search to find lines, prefer small edits. ' +
   'Never claim something worked unless a tool result shows it. If a tool fails, read the error, fix the cause and try again once or twice, then explain plainly what is blocking you.';
 
-function systemPrompt(folder, memory, summary, custom, termuxPath) {
+const PMAP_SKIP = /(^|\/)(node_modules|\.git|dist|build|out|target|__pycache__|\.venv|venv|\.next|\.gradle|\.idea|coverage|vendor)(\/|$)/;
+const PMAP_KEYS = ['package.json', 'requirements.txt', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle', 'composer.json', 'Makefile', 'Dockerfile', 'README.md'];
+/** A short map of the project (top folders, main files, scripts). Kept for 20 minutes so each turn does not rescan. */
+async function projectMap(folder) {
+  const key = 'pmap:' + folder.id;
+  const hit = await kvGet(key, null).catch(() => null);
+  if (hit && hit.text && Date.now() - hit.at < 20 * 60 * 1000) return hit.text;
+  let text = '';
+  try {
+    const { files, truncated } = await fs.walk(folder.uri, '', 1500);
+    const list = files.map((f) => f.path).filter((p) => !PMAP_SKIP.test(p) && !isSecretPath(p));
+    const top = {}; const rootFiles = [];
+    for (const p of list) { const i = p.indexOf('/'); if (i < 0) rootFiles.push(p); else { const d = p.slice(0, i); top[d] = (top[d] || 0) + 1; } }
+    const exts = {};
+    for (const p of list) { if (BINARY_EXT.test(p)) continue; const m = /\.([a-z0-9]+)$/i.exec(p); if (m) exts[m[1].toLowerCase()] = (exts[m[1].toLowerCase()] || 0) + 1; }
+    const lines = [];
+    lines.push('Files: ' + list.length + (truncated ? '+' : '') + '. Main types: ' + Object.entries(exts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([e, n]) => '.' + e + ' ' + n).join(', '));
+    const dirs = Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([d, n]) => d + '/ (' + n + ')');
+    if (dirs.length) lines.push('Folders: ' + dirs.join(', '));
+    if (rootFiles.length) lines.push('Root files: ' + rootFiles.slice(0, 20).join(', ') + (rootFiles.length > 20 ? ', ...' : ''));
+    if (rootFiles.includes('package.json')) {
+      try {
+        const r = await fs.readText(folder.uri, 'package.json', 20000);
+        const j = JSON.parse(r.text);
+        const sc = Object.keys(j.scripts || {}).slice(0, 8).join(', ');
+        lines.push('package.json: ' + (j.name || '(no name)') + (sc ? '; scripts: ' + sc : '') + (j.dependencies ? '; main deps: ' + Object.keys(j.dependencies).slice(0, 8).join(', ') : ''));
+      } catch (e) { /* unreadable, skip */ }
+    }
+    const marks = PMAP_KEYS.filter((k) => rootFiles.includes(k) && k !== 'package.json');
+    if (marks.length) lines.push('Also: ' + marks.join(', '));
+    text = lines.join('\n').slice(0, 1400);
+  } catch (e) { text = ''; }
+  await kvSet(key, { at: Date.now(), text }).catch(() => {});
+  return text;
+}
+
+function systemPrompt(folder, memory, summary, custom, termuxPath, pmap) {
   const parts = [ABOUT, 'Answer in the language the user writes in (Bengali, English or mixed).'];
   if (folder) {
     parts.push(
@@ -117,12 +153,15 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
           'SERVERS AND LONG-RUNNING COMMANDS: never run them with run_command (it would hang). Use start_job with a short name, then check_job to confirm it is running and read the log, and stop_job when done. To serve a website use for example start_job python3 -m http.server 8080 --bind 0.0.0.0 (or the project\'s own dev command), then give the user the link http://localhost:8080 (same phone) and mention that other devices on the same Wi-Fi can use the phone\'s IP address. ' +
           'If it failed, fix the cause (a missing package, a wrong path, a typo) and retry at most twice before explaining. Check results with a quick command (ls, cat, a test) instead of assuming. '
         : 'You cannot run shell commands. You do have built-in unzip and zip tools; use them instead of telling the user to run a command. If the user wants scripts, installs or builds run, give them the TERMINAL SETUP steps from the app guide. ') +
+      'PLAN FIRST: if the task changes more than two files, or needs several commands, or the request is vague, first reply with a short plan (3 to 6 lines: what you will change, in which files, and anything you are unsure about) and wait for the user to say go. Do not make changes before that. For a small, clear fix in one or two files, just do it. If the user already told you to go ahead, skip the plan. ' +
+      'CHECK YOUR WORK: after you change files, verify before you say it is done. Read back the changed part, and if a test, lint or build command exists (see package.json scripts or the PROJECT MAP) and the terminal is available, run the lightest one. If it fails, fix it. In your final summary say what you checked and the real result, or say plainly that you could not check. ' +
       'When finished, summarize what you changed in a few lines. ' +
       'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval, and git_push always asks, even in Auto mode). git_branch, git_fetch and git_remote are also available. When a git step fails, read the message: it says whether the token is missing, rejected or lacks write permission, whether a file is too big or the branch is protected, or whether the network is down. Tell the user exactly that and where to fix it (Settings > Git > Identity and access tokens); do not retry blindly. For huge repositories, LFS, submodules or SSH, use git in the terminal if it is on.'
     );
   } else {
     parts.push('NO FOLDER in this chat. You have no file or terminal tools here, but you can still do everyday work: answer, write, explain, review attached text files and photos, and write code. When the user needs a finished file (a script, a document, a config, a small page), call make_file with its name and full content; the chat shows a Download button. Never paste a long file into the reply when make_file fits. For real project work (several files, running commands, Git), tell the user to tap the folder button above the chat and pick the project folder, then continue.');
   }
+  if (folder && pmap) parts.push('PROJECT MAP (made automatically, may be slightly out of date; use list_dir to confirm before relying on it):\n' + pmap);
   if (custom && custom.trim()) parts.push('User instructions:\n' + custom.trim());
   if (memory.length) parts.push('What you know about the user from earlier chats (use it naturally, do not recite it):\n' + memory.map((m) => '- ' + m.text).join('\n'));
   if (summary) parts.push('Summary of the earlier part of this chat:\n' + summary);
@@ -238,7 +277,8 @@ async function buildContext(chat, rt, folder, settings, memory) {
     const i = start + k;
     return toNeutral(m, { compact: i < lastUser, keepImages: i >= keepImgFrom });
   });
-  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx), messages: msgs };
+  const pmap = folder ? await projectMap(folder) : '';
+  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx, pmap), messages: msgs };
 }
 
 // ------------------------------------------------------------------ memory learning
@@ -537,6 +577,7 @@ export async function runTurn(ctx) {
             bk.id = await db.put('backups', bk);
             pruneBackups(chat.id).catch(() => {});
             tm.content = await applyWrite(plan, folder);
+            kvSet('pmap:' + folder.id, null).catch(() => {});
             readSeen.clear();
             tm.status = 'applied';
             tm.backupId = bk.id;
