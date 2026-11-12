@@ -236,7 +236,9 @@ export const fs = {
 export const App = isNative ? cap.registerPlugin('App') : null;
 
 /** Colours the Android status and navigation bars to match the theme. */
-export async function setBars(dark, color) { if (plugin) { try { await plugin.setBars({ dark, color }); } catch (e) { /* older build */ } } }
+/** Android's Color.parseColor does not accept "#fff", so short hex colours are widened to "#ffffff". */
+export const fullHex = (c) => { const m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(String(c || '').trim()); return m ? '#' + m[1] + m[1] + m[2] + m[2] + m[3] + m[3] : c; };
+export async function setBars(dark, color) { if (plugin) { try { await plugin.setBars({ dark, color: fullHex(color) }); } catch (e) { /* older build */ } } }
 
 // ---------------------------------------------------------------- native Git (JGit) and background work
 const gitWaiters = new Map(); let gitListener = null;

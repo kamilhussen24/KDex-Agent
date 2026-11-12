@@ -318,11 +318,16 @@ function drawChatList() {
     ? (pinned.length ? '<div class="chat-head">Pinned</div>' + pinned.map(row).join('') + (rest.length ? '<div class="chat-head">Recent</div>' : '') : '') + rest.map(row).join('')
     : '<div class="note">' + (q ? 'No chats match' : 'No chats yet') + '</div>';
 }
-function closeRowMenu() { const m = $('#rowMenu'); if (m) m.remove(); }
+function closeRowMenu() { const m = $('#rowMenu'); if (m) m.remove(); const c = $('#rowScrim'); if (c) c.remove(); }
 /** Small menu next to a chat row: Pin, Rename, Delete. */
 function openRowMenu(btn, id) {
   closeRowMenu();
   const c = S.chats.find((x) => x.id === id); if (!c) return;
+  // A transparent layer under the menu: the first tap outside only closes the menu and does nothing else.
+  const sc = document.createElement('div'); sc.id = 'rowScrim'; sc.className = 'rowscrim';
+  const away = (e) => { e.preventDefault(); e.stopPropagation(); closeRowMenu(); };
+  sc.addEventListener('pointerdown', away); sc.addEventListener('click', away); sc.addEventListener('contextmenu', away);
+  document.body.appendChild(sc);
   const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
   m.innerHTML = '<button data-a="pin">' + ICON('pin') + '<span>' + (c.pinned ? 'Unpin' : 'Pin') + '</span></button><button data-a="rename">' + ICON('edit') + '<span>Rename</span></button><button data-a="del" class="danger">' + ICON('trash') + '<span>Delete</span></button>';
   document.body.appendChild(m);
@@ -334,7 +339,7 @@ function openRowMenu(btn, id) {
     const row = await db.get('chats', id); if (!row) return;
     if (b.dataset.a === 'pin') { row.pinned = !row.pinned; await db.put('chats', row); if (S.chat && S.chat.id === id) S.chat.pinned = row.pinned; await loadChats(); toast(row.pinned ? 'Pinned' : 'Unpinned'); }
     else if (b.dataset.a === 'rename') {
-      const v = await askText('Rename chat', 'Chat name', row.title || '');
+      const v = await askText('Rename chat', 'Chat name', row.title || 'New chat', true);
       if (!v) return;
       row.title = v.slice(0, 80); await db.put('chats', row); if (S.chat && S.chat.id === id) S.chat.title = row.title; await loadChats();
     } else {
@@ -1474,11 +1479,11 @@ function askSecret(info, signal) {
     if (signal) signal.addEventListener('abort', () => { if (!$('#dialog').classList.contains('hidden')) done(false); }, { once: true });
   });
 }
-function askText(title, placeholder, value = '') {
+function askText(title, placeholder, value = '', toEnd = false) {
   return new Promise((res) => {
     $('#dlgTitle').textContent = title; $('#dlgText').innerHTML = '<input id="dlgInput" style="width:100%;height:42px;border:1px solid var(--line);border-radius:12px;padding:0 12px;background:var(--card);outline:0" placeholder="' + esc(placeholder) + '" autocapitalize="off" autocomplete="off">';
     $('#dlgInput').value = value; $('#dlgYes').firstElementChild.textContent = 'OK'; $('#dialog').classList.remove('hidden');
-    setTimeout(() => { const i = $('#dlgInput'); if (i) i.focus(); }, 50);
+    setTimeout(() => { const i = $('#dlgInput'); if (i) { i.focus(); if (toEnd) { const n = i.value.length; try { i.setSelectionRange(n, n); } catch (e) { /* ignore */ } } } }, 50);
     const done = (v) => { const t = $('#dlgInput') ? $('#dlgInput').value.trim() : ''; $('#dialog').classList.add('hidden'); $('#dlgText').textContent = ''; $('#dlgYes').onclick = $('#dlgNo').onclick = null; res(v ? t : null); };
     $('#dlgYes').onclick = () => done(true); $('#dlgNo').onclick = () => done(false);
   });
@@ -1718,7 +1723,6 @@ function wire() {
     if (d) { e.stopPropagation(); openRowMenu(d, d.dataset.menu); return; }
     const it = e.target.closest('[data-id]'); if (it) openChat(it.dataset.id);
   };
-  document.addEventListener('click', (e) => { if (!e.target.closest('#rowMenu') && !e.target.closest('[data-menu]')) closeRowMenu(); });
   $('#composer').onsubmit = (e) => { e.preventDefault(); send(false); };
   $('#input').addEventListener('input', autoGrow);
   $('#attachBtn').onclick = () => $('#fileInput').click();

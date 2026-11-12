@@ -115,7 +115,9 @@ public class KdexNativePlugin extends Plugin {
         getActivity().runOnUiThread(new Runnable() {
             @Override public void run() {
                 try {
-                    int c = Color.parseColor(hex);
+                    String h = hex.trim();
+                    if (h.matches("#[0-9a-fA-F]{3}")) h = "#" + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2) + h.charAt(3) + h.charAt(3);
+                    int c = Color.parseColor(h);
                     Window w = getActivity().getWindow();
                     w.setStatusBarColor(c);
                     w.setNavigationBarColor(c);

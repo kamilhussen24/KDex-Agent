@@ -7,6 +7,14 @@ for its version.
 
 ## [Unreleased]
 
+## [1.44.1]
+
+### Fixed
+- Light mode: the status bar and the bottom bar showed black because the light background colour was sent to Android in a short form it rejects. They are now white with dark icons.
+- Chat menu: while it is open, the first tap outside only closes it. It no longer opens the chat underneath.
+- Rename chat starts with the current name, cursor at the end, so you can edit it.
+- The splash logo has rounded corners, like the logo on the welcome screen.
+
 ## [1.44.0]
 
 ### Added
