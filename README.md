@@ -257,3 +257,11 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - **Git diff:** tapping a changed file shows old and new line numbers, green added and red removed lines, changed words highlighted, and unchanged parts folded ("40 unchanged lines"). Very large files (over about 600 KB) and binary files skip the line view. The Changes list shows "+3 −1" under each file, filled in a few files at a time.
 - **Change history:** Settings of each chat's Changes sheet now lists what the agent created, edited or deleted with Undo, Restore (deleted files) and Undo all. Tapping a row shows what changed.
 - **Git errors:** a card with a plain title and explanation, plus a fix button where there is one (Pull now, Open token settings, Retry) and Copy details.
+
+### v1.23.1
+- Notifications follow the app theme (light card in light mode, dark card in dark mode) and can be swiped left, right or up to dismiss.
+- The file viewer no longer shows PDFs, office files, images, archives and other non-text files as garbled text; it shows a short "Not a text or code file" card instead.
+
+### v1.24.0 – open a folder by path
+- New button "Open by path..." under "Open a folder...". Type or paste a path (`/storage/emulated/0/...`, `/sdcard/...`, an SD card under `/storage/XXXX-XXXX/...`, or a path relative to the storage root). The path is checked as you type: it must exist, be a folder and be readable. Then the folder opens like any other, with Files, Git and the agent.
+- Needs "All files access" (the sheet offers to turn it on). Private app folders (`/data/...`, Termux home `~`) are not shared by Android and cannot be opened. Opening the whole storage asks for confirmation first.

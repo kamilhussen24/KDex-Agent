@@ -394,6 +394,52 @@ public class KdexNativePlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /** Opens a folder by its typed path instead of the system picker. Needs "All files access". With check=true it only reports what it found. */
+    @PluginMethod
+    public void openPath(PluginCall call) {
+        try {
+            if (!allFilesGranted()) { call.reject("Opening by path needs \"All files access\". Turn it on in Settings, then try again."); return; }
+            String raw = call.getString("path", "");
+            raw = raw == null ? "" : raw.trim();
+            if ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'"))) raw = raw.substring(1, raw.length() - 1).trim();
+            if (raw.isEmpty()) { call.reject("Type a folder path."); return; }
+            if (raw.startsWith("~")) { call.reject("\"~\" is the private Termux home, which Android does not share. Use a path under /storage/emulated/0/."); return; }
+            File ext = android.os.Environment.getExternalStorageDirectory();
+            String extPath = ext.getCanonicalPath();
+            String p = raw;
+            if (p.startsWith("file://")) p = p.substring(7);
+            if (p.equals("/sdcard") || p.startsWith("/sdcard/")) p = extPath + p.substring(7);
+            else if (p.equals("/storage/self/primary") || p.startsWith("/storage/self/primary/")) p = extPath + p.substring(21);
+            else if (p.equals("/storage/emulated/0") || p.startsWith("/storage/emulated/0/")) p = extPath + p.substring(19);
+            else if (!p.startsWith("/")) p = extPath + "/" + p;
+            File f = new File(p).getCanonicalFile();
+            String cp = f.getPath();
+            String vol; String rest;
+            if (cp.equals(extPath) || cp.startsWith(extPath + "/")) { vol = "primary"; rest = cp.length() > extPath.length() ? cp.substring(extPath.length() + 1) : ""; }
+            else if (cp.startsWith("/storage/")) {
+                String tail = cp.substring(9); int sl = tail.indexOf('/');
+                vol = sl < 0 ? tail : tail.substring(0, sl); rest = sl < 0 ? "" : tail.substring(sl + 1);
+                if (vol.isEmpty() || vol.equals("emulated") || vol.equals("self")) { call.reject("Use a path under /storage/emulated/0/ or an SD card under /storage/XXXX-XXXX/."); return; }
+            } else { call.reject("Only shared storage can be opened (/storage/emulated/0/... or an SD card). Private app folders such as /data are not available."); return; }
+            if (!f.exists()) { call.reject("No such folder: " + cp); return; }
+            if (!f.isDirectory()) { call.reject("This is a file, not a folder: " + cp); return; }
+            if (!f.canRead()) { call.reject("This folder cannot be read: " + cp); return; }
+            String[] names = f.list();
+            JSObject ret = new JSObject();
+            String docId = vol + ":" + rest;
+            ret.put("uri", DocumentsContract.buildTreeDocumentUri("com.android.externalstorage.documents", docId).toString());
+            ret.put("name", rest.isEmpty() ? "Storage" : f.getName());
+            ret.put("path", docId);
+            ret.put("full", cp);
+            ret.put("items", names == null ? 0 : names.length);
+            ret.put("root", rest.isEmpty());
+            ret.put("writable", f.canWrite());
+            call.resolve(ret);
+        } catch (Throwable t) {
+            call.reject("Could not check this path: " + t.getMessage());
+        }
+    }
+
     @PluginMethod
     public void releaseFolder(PluginCall call) {
         try {

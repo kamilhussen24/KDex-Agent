@@ -1,6 +1,6 @@
 {
   "name": "kdex-agent",
-  "version": "1.23.0",
+  "version": "1.24.0",
   "private": true,
   "description": "KDex Agent for Android: a private AI chat that works inside a folder you choose. Bring your own API key; no server.",
   "scripts": {

@@ -158,6 +158,17 @@ export const fs = {
     memPut(m, 'app/config.py', 'ADMIN_IDS = [\n]\n');
     return { uri, name: 'demo', path: 'demo' };
   },
+  /** Finds a folder by its typed path. Resolves { uri, name, path, full, items, writable, root } or rejects with a plain message. */
+  async openPath(path) {
+    if (plugin) return plugin.openPath({ path });
+    const p = String(path || '').trim();
+    if (!p) throw new Error('Type a folder path.');
+    if (/missing|nothere/i.test(p)) throw new Error('No such folder: ' + p);
+    if (/\.[a-z0-9]{1,4}$/i.test(p)) throw new Error('This is a file, not a folder: ' + p);
+    const uri = 'mem://path-' + p.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    const m = memFolder(uri); memPut(m, 'README.md', '# ' + p + '\n'); memPut(m, 'src/app.js', 'console.log(1);\n');
+    return { uri, name: p.replace(/\/+$/, '').split('/').pop() || 'Storage', path: p, full: p, items: 2, writable: true, root: false };
+  },
   async releaseFolder(uri) { if (plugin && !baseOf(uri)) await plugin.releaseFolder({ uri }); },
   async list(uri, path = '') {
     if (plugin) return rel(uri, (await plugin.list({ uri: treeOf(uri), path: jn(baseOf(uri), path) })).entries);

@@ -61,7 +61,7 @@ export const TOOLS = [
 
 export const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'delete_file']);
 
-const BINARY_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|pdf|zip|gz|tar|7z|rar|apk|aab|jar|class|so|dll|exe|bin|mp3|mp4|m4a|wav|ogg|mov|avi|mkv|ttf|otf|woff2?|db|sqlite)$/i;
+export const BINARY_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|pdf|zip|gz|tar|7z|rar|apk|aab|jar|class|so|dll|exe|bin|mp3|mp4|m4a|wav|ogg|mov|avi|mkv|ttf|otf|woff2?|db|sqlite|docx?|xlsx?|pptx?|odt|ods|iso|dmg|dex|obb|psd|heic|avif|flac|aac|webm|3gp|woff|eot)$/i;
 const MAX_OUT = 40000;
 
 function clip(s) {

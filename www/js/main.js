@@ -5,6 +5,7 @@ import { secure, fs, App, Termux, AllFiles, Work, setBars, isNative } from './na
 import * as D from './diag.js';
 import { highlight, langOf } from './highlight.js';
 import { diffHtml, buildDiff } from './diffview.js';
+import { BINARY_EXT } from './tools.js';
 import { PRESETS, QUICK_FILL, listModels, popularModels } from './providers.js';
 import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
@@ -32,6 +33,30 @@ function toastKind(t) {
 const TOAST_ICON = { ok: 'check', err: 'alert', warn: 'alert', info: 'info' };
 /** Shortens one very long word (a URL, a path) in the middle, so both its start and its end stay visible. */
 const midCut = (t) => String(t).replace(/\S{38,}/g, (w) => w.slice(0, 20) + '\u2026' + w.slice(-14));
+/** Swipe a notification left, right or up to dismiss it. */
+function swipeable(el) {
+  if (el._sw) return; el._sw = true;
+  let x0 = 0; let y0 = 0; let dx = 0; let dy = 0; let on = false; let id = null;
+  const base = 'translate(-50%,0)';
+  el.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; on = true; id = e.pointerId; x0 = e.clientX; y0 = e.clientY; dx = dy = 0; el.style.transition = 'none'; try { el.setPointerCapture(id); } catch (x) { /* ignore */ } });
+  el.addEventListener('pointermove', (e) => {
+    if (!on) return; dx = e.clientX - x0; dy = Math.min(0, e.clientY - y0);
+    if (Math.abs(dx) > 6 || dy < -6) el._moved = true;
+    el.style.transform = 'translate(calc(-50% + ' + dx + 'px),' + dy + 'px)';
+    el.style.opacity = String(Math.max(0.15, 1 - Math.max(Math.abs(dx) / 260, -dy / 120)));
+  });
+  const end = () => {
+    if (!on) return; on = false; try { el.releasePointerCapture(id); } catch (x) { /* ignore */ }
+    el.style.transition = '';
+    if (Math.abs(dx) > 70 || dy < -40) {
+      const out = dx > 70 ? 'calc(-50% + 140%)' : dx < -70 ? 'calc(-50% - 140%)' : '-50%';
+      el.style.transform = 'translate(' + out + ',' + (dy < -40 ? '-80px' : '0') + ')'; el.style.opacity = '0';
+      clearTimeout(toastT); toastH = setTimeout(() => { el.classList.add('hidden'); el.classList.remove('show'); el.style.transform = el.style.opacity = ''; }, 200);
+    } else { el.style.transform = el.style.opacity = ''; if (!el.classList.contains('show')) el.style.transform = base; }
+    setTimeout(() => { el._moved = false; }, 0);
+  };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+}
 /** Notification: a short pill for one line, a card when there is a detail. Tap a card to see the full text and copy it. `opts.action = { label, fn }` adds a button. */
 function toast(t, opts = {}) {
   const el = $('#toast'); const text = String(t == null ? '' : t).trim(); if (!text) return;
@@ -51,7 +76,10 @@ function toast(t, opts = {}) {
   const hide = () => { el.classList.remove('show'); toastH = setTimeout(() => el.classList.add('hidden'), 220); };
   const arm = (ms) => { clearTimeout(toastT); toastT = setTimeout(hide, ms); };
   clearTimeout(toastH);
+  el._dismiss = hide;
+  swipeable(el);
   el.onclick = async (e) => {
+    if (el._moved) { el._moved = false; return; }
     if (e.target.closest('[data-a]')) { try { opts.action.fn(); } catch (x) { /* ignore */ } hide(); return; }
     if (e.target.closest('[data-c]')) { const ok = await copyText(text); const b = el.querySelector('[data-c]'); if (b) b.textContent = ok ? 'Copied' : 'Failed'; arm(1800); return; }
     if (card && !open) { open = true; draw(); el.classList.add('show'); arm(9000); return; }
@@ -575,6 +603,7 @@ async function openProjects() {
   await loadPaths();
   const draw = () => {
     body.innerHTML = '<button id="pOpen" class="btn primary" style="width:100%;margin-bottom:8px">' + ICON('folder') + '<span class="lbl">Open a folder...</span></button>' +
+      '<button id="pPath" class="btn" style="width:100%;margin-bottom:8px">' + ICON('edit') + '<span class="lbl">Open by path...</span></button>' +
       '<button id="pClone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('branch') + '<span class="lbl">Clone a repository...</span></button>' +
       (S.folder ? '<button id="pDetach" class="btn" style="width:100%;margin-bottom:8px">' + ICON('x') + '<span class="lbl">Remove folder from this chat</span></button>' : '') +
       '<button id="pNone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('plus') + '<span class="lbl">New chat without a folder</span></button>' +
@@ -592,6 +621,7 @@ async function openProjects() {
         await applyFolder(f);
       } catch (e) { if (!/cancel/i.test(e.message || '')) toast(e.message || 'Could not open the folder'); }
     };
+    $('#pPath').onclick = openByPath;
     $('#pClone').onclick = cloneFlow;
     if ($('#pDetach')) $('#pDetach').onclick = () => applyFolder(null);
     $('#pNone').onclick = () => { closeSheet(); newChat(null); };
@@ -613,6 +643,44 @@ async function openProjects() {
   draw();
 }
 
+/** Open any folder by typing its path. The path is checked as you type, and nothing is opened until it exists. */
+async function openByPath() {
+  const body = sheet('Open by path', { back: openProjects });
+  const st = await AllFiles.status();
+  const ok = !!st.granted || !!st.web;
+  body.innerHTML = '<p class="note" style="text-align:left;margin-top:0">Type or paste the full path of a folder on this phone, for example <code>/storage/emulated/0/Projects/my-app</code>. It must exist before it can be opened.</p>' +
+    '<input id="opPath" class="inp" type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="/storage/emulated/0/..." style="width:100%;font:14px ui-monospace,Menlo,monospace">' +
+    '<div id="opMsg" class="opmsg"></div>' +
+    (ok ? '' : '<button id="opAllow" class="btn" style="width:100%;margin-top:8px">' + ICON('shield') + '<span class="lbl">Allow all files access</span></button>') +
+    '<button id="opGo" class="btn primary" style="width:100%;margin-top:10px">' + ICON('folder') + '<span class="lbl">Check and open</span></button>';
+  const inp = $('#opPath'); const msg = $('#opMsg'); let found = null; let seq = 0;
+  const show = (kind, text) => { msg.className = 'opmsg ' + kind; msg.textContent = text; };
+  const check = async () => {
+    const v = inp.value.trim(); const my = ++seq; found = null;
+    if (!v) { show('', ''); return null; }
+    if (!ok) { show('err', 'Turn on "All files access" first.'); return null; }
+    show('', 'Checking...');
+    try {
+      const r = await fs.openPath(v); if (my !== seq) return null;
+      found = r; show('good', 'Folder found \u00b7 ' + r.items + ' item' + (r.items === 1 ? '' : 's') + (r.writable ? '' : ' \u00b7 read only') + (r.full && r.full !== v ? '\n' + r.full : '')); return r;
+    } catch (e) { if (my === seq) show('err', (e && e.message) || 'Could not check this path.'); return null; }
+  };
+  let t = null; inp.oninput = () => { clearTimeout(t); t = setTimeout(check, 400); };
+  if ($('#opAllow')) $('#opAllow').onclick = () => askAllFiles(() => openByPath());
+  const go = async () => {
+    const r = found || await check(); if (!r) { if (!msg.textContent) show('err', 'Type a folder path.'); return; }
+    if (r.root && !await confirmBox('Open the whole storage?', 'This gives the agent your entire shared storage, every folder on the phone. Every change still asks you first. A single project folder is safer.', 'Open anyway')) return;
+    try {
+      let f = S.folders.find((x) => x.uri === r.uri);
+      if (!f) { f = { id: uid(), name: r.name || 'Folder', uri: r.uri }; S.folders.push(f); await A.saveFolders(S.folders); }
+      D.log('info', 'Opened folder by path');
+      await applyFolder(f);
+    } catch (e) { show('err', (e && e.message) || 'Could not open the folder'); }
+  };
+  $('#opGo').onclick = go; inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+  setTimeout(() => inp.focus(), 150);
+}
+
 async function openFiles(path = '') {
   if (!S.folder) return;
   const body = sheet(S.folder.name + (path ? ' / ' + path : ''), { back: path ? () => openFiles(path.split('/').slice(0, -1).join('/')) : null });
@@ -631,9 +699,12 @@ async function openFiles(path = '') {
 /** Read-only file viewer: line numbers, syntax colours, copy. Secret files stay hidden. */
 async function openFileView(p, body) {
   body.innerHTML = '<div class="note">Loading...</div>';
+  const notText = (size) => { body.innerHTML = '<div class="nofile">' + ICON('file') + '<div class="t">' + esc(baseOf(p)) + '</div><div class="s">' + (size ? fmtBytes(size) + ' \u00b7 ' : '') + 'Not a text or code file</div><div class="s">It cannot be shown here. Open it with another app on your phone.</div></div>'; };
   try {
+    if (BINARY_EXT.test(p)) { let sz = 0; try { sz = ((await fs.stat(S.folder.uri, p)) || {}).size || 0; } catch (e) { /* ignore */ } notText(sz); return; }
     const t = await fs.readText(S.folder.uri, p, 200000);
-    if (t.binary) { body.innerHTML = '<div class="note">Binary file, ' + fmtBytes(t.size) + '</div>'; return; }
+    const head = String(t.text || '').slice(0, 4000);
+    if (t.binary || head.indexOf('\u0000') >= 0 || ((head.match(/\uFFFD/g) || []).length > 3)) { notText(t.size); return; }
     const hide = isSecretPath(p) && await protectionOn();
     const text = hide ? (isEnvLike(p) ? maskEnv(t.text) : '<hidden>') : t.text;
     const n = text.replace(/\n$/, '').split('\n').length;
