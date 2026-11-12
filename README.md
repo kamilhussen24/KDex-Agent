@@ -279,3 +279,9 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - Git > History: shows 10 commits, "Show 10 more" up to 30, then "End of history" or "Showing the latest 30".
 - Git identity and tokens: Save returns to the previous screen. A token that is empty-host or too short or contains spaces stays on the screen with the reason under the Save button.
 - Terminal setup card: every command in its own single-line box (scrolls sideways, one tap selects the whole command).
+
+### v1.27.0 – calmer buttons
+- Primary buttons keep the brand orange-to-pink but in deeper tones (#D8432C to #CC3A5E), so white text reaches about 4.5:1 contrast (it was 2.85:1 on the orange end). They are 48px tall with 14px corners instead of tall capsules.
+- A selected option (segmented controls, active chips) now has a light pink tint, a pink border and pink text, so it is clear which one is chosen. Unselected options use muted text. Dark mode uses a lighter pink.
+- Links and text accents use a darker pink (`--ink`) for readability.
+- Fixed: a primary button briefly turned grey while pressed.
