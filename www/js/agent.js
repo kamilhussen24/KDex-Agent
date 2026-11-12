@@ -5,10 +5,11 @@ import { secure } from './native.js';
 import { stream, complete } from './providers.js';
 import { TOOLS, WRITE_TOOLS, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
-import { isRepo } from './git.js';
+import { isRepo, resetGitCache } from './git.js';
+import { scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar } from './secrets.js';
 import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
-import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction } from './gittools.js';
+import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction, gitActionIsRead } from './gittools.js';
 
 export const BUDGETS = { economy: 3000, balanced: 9000, full: 60000 };
 
@@ -22,7 +23,7 @@ const PLAN_TOOL = {
     required: ['steps'],
   },
 };
-export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false };
+export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true };
 
 export async function getSettings() {
   return { ...defaults, ...(await kvGet('settings', {})) };
@@ -80,8 +81,9 @@ const ABOUT =
   'APP GUIDE (use it to help the user set things up; give the steps in the user\'s language and keep them short)\n' +
   '- Connect a model: Settings > Add provider, pick the service, paste the API key, choose models (a few popular ones are listed; any other model id can be typed). Thinking: bulb button (Off, Low, Medium, High). Token usage: Settings > Token usage.\n' +
   '- Open a project: folder button > Open a folder, then pick the folder. Only that folder is accessible.\n' +
-  '- Approvals: the chip above the chat switches Ask first and Auto. Auto runs everyday actions and still asks for risky ones (rm, sudo, force push, publishing). File changes keep backups and Undo.\n' +
-  '- Git: the Git chip. Folder without Git: Clone, New repo (publishes to GitHub or GitLab) or Local only. Pushing needs a name, email and access token: Settings > Git > Identity and access tokens.\n' +
+  '- Approvals: the chip above the chat switches Ask first and Auto. Auto runs everyday actions and still asks for risky ones (rm, sudo, every git push, publishing). File changes keep backups and Undo.\n' +
+  '- Git: the Git chip. Folder without Git: Clone, New repo (publishes to GitHub or GitLab) or Local only. Pushing, and private repositories, need a name, email and access token: Settings > Git > Identity and access tokens (GitHub classic token with the repo scope, or fine-grained with Contents: Read and write). The built-in Git supports https only, one branch at a time, no Git LFS, no submodules and no SSH, and it is slow on very large repositories. When Terminal is on, real git in Termux (pkg install git) handles those cases, and the app lends it the saved token automatically for clone, fetch, pull and push.\n' +
+
   '- TERMINAL SETUP, needed once before commands work: (1) Install the Termux app from F-Droid or GitHub, not Google Play. (2) Open Termux and run: mkdir -p ~/.termux && echo "allow-external-apps=true" >> ~/.termux/termux.properties, then close and reopen Termux. ' +
   '(3) In this app tap the Terminal chip, switch it On, tap Grant permission, then Test connection. (4) For a folder in shared storage run termux-setup-storage once in Termux; if the project path shows unknown, use Change path. Keep Termux open and exempt from battery limits.\n' +
   '- If the user asks to run a command, install something or start a server and the terminal is off, do not pretend: tell them these steps, starting with whichever are missing. ' +
@@ -97,6 +99,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
     parts.push(
       'PROJECT: you are working inside the folder "' + folder.name + '". Tools: list_dir, find_files, search, read_file, create/edit/delete files. All paths are relative to this folder; you cannot reach anything outside it.\n' +
       'Rules: look before you change (list_dir, find_files or search, then read_file). Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
+      'SECRET FILES: .env files, keys and credentials in the project are protected. You cannot read or change them and their contents never appear in the chat; for .env files you see only variable names. You CAN run the project, scripts and tests, which use those files normally. Terminal output has secret values replaced by ***. Never ask the user to paste a secret into the chat. If a variable is missing, call request_env_var with its name and a one-line description: the user types the value in a private box and you never see it; afterwards continue the task. Do not try to get around this (no cat, base64, copying the file or printing environment values). ' +
       'Do what the user asked and nothing else. The user approves every change and can undo it. ' +
       (termuxPath
         ? 'TERMINAL: run_command runs a bash command in Termux (Linux on this phone) with the project at ' + termuxPath + '. Use it like a computer shell: unzip, installs (pkg/pip/npm), scripts, builds, tests, git. ' +
@@ -109,7 +112,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
           'If it failed, fix the cause (a missing package, a wrong path, a typo) and retry at most twice before explaining. Check results with a quick command (ls, cat, a test) instead of assuming. '
         : 'You cannot run shell commands. You do have built-in unzip and zip tools; use them instead of telling the user to run a command. If the user wants scripts, installs or builds run, give them the TERMINAL SETUP steps from the app guide. ') +
       'When finished, summarize what you changed in a few lines. ' +
-      'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval).'
+      'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval, and git_push always asks, even in Auto mode). git_branch, git_fetch and git_remote are also available. When a git step fails, read the message: it says whether the token is missing, rejected or lacks write permission, whether a file is too big or the branch is protected, or whether the network is down. Tell the user exactly that and where to fix it (Settings > Git > Identity and access tokens); do not retry blindly. For huge repositories, LFS, submodules or SSH, use git in the terminal if it is on.'
     );
   } else {
     parts.push('No project folder is open, so you have no file tools. If the user wants you to work on files, tell them to tap the Add folder chip above the chat (the folder can be added or changed at any time without losing this conversation).');
@@ -289,6 +292,7 @@ export async function runTurn(ctx) {
   const think = ctx.think || 'off';
 
   await repairHistory(chat.id);
+  if (folder) { forgetSecrets(folder); resetGitCache(folder); } // Termux or another tool may have changed the repository since the last turn
 
   if (!ctx.regenerate) {
     const userMsg = { chatId: chat.id, role: 'user', text: ctx.text || '', images: ctx.images && ctx.images.length ? ctx.images : undefined, files: ctx.attachNames, at: Date.now(), status: 'done' };
@@ -395,8 +399,21 @@ export async function runTurn(ctx) {
           const steps = (Array.isArray(call.args && call.args.steps) ? call.args.steps : []).slice(0, 20).map((x) => ({ text: String((x && x.text) || '').slice(0, 160), status: ['todo', 'doing', 'done'].includes(x && x.status) ? x.status : 'todo' })).filter((x) => x.text);
           tm.steps = steps; tm.args = steps.filter((x) => x.status === 'done').length + '/' + steps.length + ' done';
           tm.content = 'Plan updated.'; tm.status = 'done';
+        } else if (call.name === 'request_env_var') {
+          const nm = String((call.args && call.args.name) || '').trim();
+          if (!VALID_ENV_NAME.test(nm)) throw new Error('Use a valid variable name such as STRIPE_SECRET_KEY.');
+          const file = envFileName(call.args && call.args.file);
+          const st = await envStatus(folder, file, nm);
+          tm.args = nm + ' > ' + file;
+          if (st.state === 'set') { tm.content = nm + ' is already set in ' + file + ' (value hidden). Nothing was changed; you can rely on it.'; tm.status = 'done'; }
+          else {
+            tm.status = 'pending'; await db.put('messages', tm); ui.onTool(tm);
+            const v = await ui.requestSecret({ name: nm, file, description: String((call.args && call.args.description) || '').slice(0, 200) }, signal);
+            if (v == null) { tm.status = 'rejected'; tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user chose not to add ' + nm + ' now. Do not ask again unless they bring it up; explain what will not work without it.'; }
+            else { const notes = await writeEnvVar(folder, file, nm, v); tm.status = 'applied'; tm.content = nm + ' was added to ' + file + ' (the value is hidden from you). ' + notes.join(' '); }
+          }
         } else if (TERMUX_READS.has(call.name)) {
-          tm.content = await runJob(call.name, call.args || {}, folder);
+          tm.content = await scrub(await runJob(call.name, call.args || {}, folder), folder);
           tm.status = 'done';
         } else if (TERMUX_ACTIONS.has(call.name)) {
           const isJob = call.name === 'start_job';
@@ -417,7 +434,7 @@ export async function runTurn(ctx) {
             tm.status = 'rejected';
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this command. Do not retry it; ask what they want instead.';
           } else {
-            tm.content = isJob ? await runJob(call.name, call.args || {}, folder) : await runTermux(call.args || {}, folder);
+            tm.content = await scrub(isJob ? await runJob(call.name, call.args || {}, folder) : await runTermux(call.args || {}, folder), folder);
             tm.status = 'applied';
             readSeen.clear();
           }
@@ -441,10 +458,12 @@ export async function runTurn(ctx) {
           }
         } else if (GIT_ACTIONS.has(call.name)) {
           const lines = await previewGitAction(call.name, call.args || {}, folder);
-          const riskyGit = call.name === 'git_push' && !!(call.args && (call.args.force || call.args.force_push));
-          tm.plan = { path: 'git', op: call.name, added: 0, removed: 0, diff: lines, more: 0, risky: riskyGit, auto: !!chat.auto && !riskyGit };
+          // Publishing code is always the user's call, even in Auto mode.
+          const riskyGit = call.name === 'git_push';
+          const readOnly = gitActionIsRead(call.name, call.args || {});
+          tm.plan = { path: 'git', op: call.name, added: 0, removed: 0, diff: lines, more: 0, risky: riskyGit, auto: readOnly || (!!chat.auto && !riskyGit) };
           let decision = 'apply';
-          if (!(chat.auto && !riskyGit)) {
+          if (!(readOnly || (chat.auto && !riskyGit))) {
             tm.status = 'pending';
             await db.put('messages', tm);
             ui.onTool(tm);
@@ -454,7 +473,7 @@ export async function runTurn(ctx) {
             tm.status = 'rejected';
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this. Do not retry it; ask what they want instead.';
           } else {
-            tm.content = await runGitAction(call.name, call.args || {}, folder);
+            tm.content = await runGitAction(call.name, call.args || {}, folder, signal);
             readSeen.clear();
             tm.status = 'applied';
           }

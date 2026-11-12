@@ -4,8 +4,10 @@
 import { fs as safFs, httpRaw, secure, subUri } from './native.js';
 import { kvGet, kvSet } from './db.js';
 import { lineDiff } from './tools.js';
+import { isSecretPath, protectionOn } from './secrets.js';
 
 const git = () => window.git;
+const EMPTY = new Set();
 const DIR = '/w';
 const ge = (code, msg) => Object.assign(new Error(msg || code), { code });
 let lfs = null;
@@ -19,13 +21,18 @@ function makeFs(folder) {
   const uri = folder.uri;
   const L = lightning();
   const cache = new Map(); // path -> { st, t }
-  const mk = (isDir, size, mtime) => ({
-    type: isDir ? 'dir' : 'file', mode: isDir ? 0o40000 : 0o100644, size: size || 0, ino: 0, uid: 1, gid: 1, dev: 1,
+  const mk = (isDir, size, mtime, rel) => ({
+    type: isDir ? 'dir' : 'file', mode: isDir ? 0o40000 : (rel && (execSets.get(folder.id) || EMPTY).has(rel) ? 0o100755 : 0o100644), size: size || 0, ino: 0, uid: 1, gid: 1, dev: 1,
     mtimeMs: mtime || 0, ctimeMs: mtime || 0, mtime: new Date(mtime || 0), ctime: new Date(mtime || 0),
     isFile: () => !isDir, isDirectory: () => isDir, isSymbolicLink: () => false,
   });
+  const mkLink = (size, mtime) => ({ ...mk(false, size, mtime), mode: 0o120000, isFile: () => false, isSymbolicLink: () => true });
   const saf = (p) => (p === DIR ? '' : p.slice(DIR.length + 1)).split('/').filter((x) => x && x !== '.').join('/');
   const isSaf = (p) => p === DIR || p.startsWith(DIR + '/');
+  // Android folders cannot hold symlinks. A link is stored as a small file holding its target and remembered here.
+  const linkKey = 'symlinks:' + folder.id; let links = null;
+  const loadLinks = async () => { if (!links) links = new Set(await kvGet(linkKey, [])); return links; };
+  const saveLinks = () => kvSet(linkKey, [...links]);
   const forget = (rel) => { cache.delete(rel); const i = rel.lastIndexOf('/'); cache.delete(i < 0 ? '' : rel.slice(0, i)); };
 
   const api = {
@@ -44,6 +51,7 @@ function makeFs(folder) {
     async unlink(p) {
       if (!isSaf(p)) return L.unlink(p);
       try { await safFs.remove(uri, saf(p)); } catch (e) { throw ge('ENOENT', 'ENOENT: ' + p); }
+      if (links && links.delete(saf(p))) saveLinks();
       forget(saf(p));
     },
     async readdir(p) {
@@ -51,7 +59,8 @@ function makeFs(folder) {
       let list;
       try { list = await safFs.list(uri, saf(p)); } catch (e) { throw ge('ENOENT', 'ENOENT: ' + p); }
       const t = Date.now();
-      list.forEach((e) => cache.set(e.path, { st: mk(e.isDir, e.size, e.modified), t }));
+      await loadLinks();
+      list.forEach((e) => cache.set(e.path, { st: !e.isDir && links.has(e.path) ? mkLink(e.size, e.modified) : mk(e.isDir, e.size, e.modified, e.path), t }));
       return list.map((e) => e.name);
     },
     async mkdir(p, opts) {
@@ -71,12 +80,23 @@ function makeFs(folder) {
       let r;
       try { r = await safFs.stat(uri, rel); } catch (e) { throw ge('ENOENT', 'ENOENT: ' + p); }
       if (!r || !r.exists) throw ge('ENOENT', 'ENOENT: ' + p);
-      const st = mk(r.isDir, r.size, r.modified);
+      await loadLinks();
+      const st = !r.isDir && links.has(rel) ? mkLink(r.size, r.modified) : mk(r.isDir, r.size, r.modified, rel);
       cache.set(rel, { st, t: Date.now() });
       return st;
     },
-    async readlink(p) { throw ge('ENOENT', 'not a link: ' + p); },
-    async symlink() { throw ge('EPERM', 'symlinks are not supported'); },
+    async readlink(p) {
+      if (!isSaf(p)) return L.readlink(p);
+      if (!(await loadLinks()).has(saf(p))) throw ge('EINVAL', 'not a link: ' + p);
+      return new TextDecoder().decode(await safFs.readBytes(uri, saf(p)));
+    },
+    async symlink(target, p) {
+      if (!isSaf(p)) return L.symlink(target, p);
+      const rel = saf(p); await loadLinks(); links.add(rel); await saveLinks();
+      const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
+      if (dir) { try { await safFs.mkdir(uri, dir); } catch (e) { /* exists */ } }
+      await safFs.writeBytes(uri, rel, new TextEncoder().encode(String(target))); forget(rel);
+    },
     async chmod() { /* not needed */ },
   };
   api.lstat = api.stat;
@@ -84,8 +104,9 @@ function makeFs(folder) {
 }
 
 // ---------------------------------------------------------------- http client
-const http = {
+const makeHttp = (outer) => ({
   async request({ url, method, headers, body, signal }) {
+    signal = outer || signal;
     let payload = null;
     if (body) {
       const parts = []; let n = 0;
@@ -96,7 +117,8 @@ const http = {
     const r = await httpRaw({ url, method: method || 'GET', headers: headers || {}, body: payload, signal });
     return { url, method, statusCode: r.status, statusMessage: String(r.status), headers: r.headers, body: r.chunks };
   },
-};
+});
+const http = makeHttp(null);
 
 // ---------------------------------------------------------------- settings, tokens
 export async function getGitSettings() { return { name: '', email: '', ...(await kvGet('git', {})) }; }
@@ -120,7 +142,14 @@ async function author() {
 
 // ---------------------------------------------------------------- context
 const modes = new Map(); // folder id -> 'native' (.git inside the project) | 'app' (kept inside the app)
-const ctx = (folder) => ({ fs: makeFs(folder), dir: DIR, gitdir: modes.get(folder.id) === 'native' ? DIR + '/.git' : '/g-' + folder.id });
+const execSets = new Map(); // folder id -> Set of paths that are executable in HEAD (Android folders do not carry the executable bit)
+const caches = new Map(); // folder id -> isomorphic-git object cache (packfiles are read once, not on every call)
+/** Forget cached Git objects, for example after Termux ran git in the same folder. */
+export function resetGitCache(folder) { if (folder) { caches.delete(folder.id); execSets.delete(folder.id); } else { caches.clear(); execSets.clear(); } }
+const ctx = (folder) => {
+  if (!caches.has(folder.id)) caches.set(folder.id, {});
+  return { fs: makeFs(folder), dir: DIR, cache: caches.get(folder.id), gitdir: modes.get(folder.id) === 'native' ? DIR + '/.git' : '/g-' + folder.id };
+};
 /** True when the folder is a Git repository. Detects a .git folder made by Termux or any other tool. */
 export async function isRepo(folder) {
   try { const st = await safFs.stat(folder.uri, '.git/HEAD'); if (st && st.exists) { modes.set(folder.id, 'native'); return true; } } catch (e) { /* no .git */ }
@@ -135,15 +164,39 @@ async function remoteUrl(folder) {
 async function tokenFor(folder, url) {
   return getToken(hostOf(url || (await remoteUrl(folder)) || ''));
 }
-function nice(e) {
-  const m = String((e && e.message) || e);
-  if (/401|403|Authentication|HTTP Error: 40/i.test(m)) return new Error('Access denied. Check your token (Git > Tokens) and that it can access this repository.');
-  if (/404/.test(m)) return new Error('Repository not found. Check the URL and your token.');
-  return e instanceof Error ? e : new Error(m);
+const TOKEN_HELP = 'Add one in Settings > Git > Identity and access tokens. GitHub: a classic token with the "repo" scope, or a fine-grained token with Contents: Read and write.';
+/** Turns Git and network failures into a message that says what is wrong and what to do. */
+function nice(e, { host = '', hasToken = false, action = '' } = {}) {
+  let m = String((e && e.message) || e);
+  const sub = e && Array.isArray(e.errors) ? e.errors.map((x) => String((x && x.message) || x)).join('; ') : '';
+  if (sub) m = sub;
+  const status = (e && e.data && e.data.statusCode) || (/\b(401|403|404|429|5\d\d)\b/.exec(m) || [])[1];
+  const st = Number(status) || 0;
+  const where = host ? ' on ' + host : '';
+  if (/aborted|cancel/i.test(m)) return new Error('Cancelled.');
+  if (st === 401 || /Authentication|HTTP Error: 401|could not read Username/i.test(m)) {
+    return new Error(hasToken ? 'The token was rejected' + where + ': it is wrong, expired or revoked. Make a new token and save it. ' + TOKEN_HELP
+      : 'This needs an access token' + where + ' (the repository is private or the action needs login). ' + TOKEN_HELP);
+  }
+  if (st === 403) {
+    return new Error(hasToken ? 'Access denied' + where + '. The token has no permission for this' + (action === 'push' ? ' (it cannot write; give it the "repo" scope or Contents: Read and write)' : ' repository') + ', or the branch is protected. If the repository belongs to an organization, authorize the token for it.'
+      : 'Access denied' + where + '. ' + TOKEN_HELP);
+  }
+  if (st === 404) return new Error('Repository not found' + where + '. Check the URL. If it is private, save a token that can see it. ' + TOKEN_HELP);
+  if (st === 429) return new Error('Too many requests' + where + '. Wait a minute and try again.');
+  if (st >= 500) return new Error('The server' + where + ' had a problem (HTTP ' + st + '). Try again later.');
+  if (/exceeds.*file size limit|GH001|large files detected|too large/i.test(m)) return new Error('Push refused: a file is larger than the host allows (GitHub: 100 MB). Remove it from the commit or use Git LFS on a computer. ' + m.slice(0, 200));
+  if (/protected branch|GH006|pre-receive hook declined|hook declined/i.test(m)) return new Error('Push refused by the server: the branch is protected or a rule blocked it. Push to another branch and open a pull request. ' + m.slice(0, 200));
+  if (/Failed to fetch|NetworkError|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|timed? ?out|offline|Load failed/i.test(m)) return new Error('No connection to ' + (host || 'the server') + '. Check the internet and try again.');
+  if (/ENOSPC|quota|no space/i.test(m)) return new Error('The phone is out of storage space.');
+  if (/permission|EACCES|SecurityException/i.test(m)) return new Error('Android denied access to the folder. Open the folder again from the folder chip to grant access.');
+  return e instanceof Error && !sub ? e : new Error(m);
 }
+/** The saved token for a remote. A missing token is reported by nice() when the server answers 401 or 403. */
+async function needToken(url) { const host = hostOf(url); return { host, token: await getToken(host) }; }
 
 // ---------------------------------------------------------------- operations
-export async function clone(folder, url, { token, depth = 1, branch, onProgress } = {}) {
+export async function clone(folder, url, { token, depth = 1, branch, onProgress, signal } = {}) {
   const host = hostOf(url);
   if (!host) throw new Error('Enter a valid https:// repository URL.');
   const entries = await safFs.list(folder.uri, '');
@@ -153,13 +206,13 @@ export async function clone(folder, url, { token, depth = 1, branch, onProgress 
   modes.set(folder.id, 'native');
   try {
     await git().clone({
-      ...ctx(folder), http, url, singleBranch: true, ...(depth ? { depth } : {}), ...(branch ? { ref: branch } : {}),
+      ...ctx(folder), http: makeHttp(signal), url, singleBranch: true, ...(depth ? { depth } : {}), ...(branch ? { ref: branch } : {}),
       onAuth: authFor(t), onProgress: (p) => onProgress && onProgress(p),
     });
   } catch (e) {
     try { await safFs.remove(folder.uri, '.git'); } catch (x) { /* ignore */ }
-    modes.delete(folder.id);
-    throw nice(e);
+    modes.delete(folder.id); resetGitCache(folder);
+    throw nice(e, { host, hasToken: !!t, action: 'clone' });
   }
 }
 /** Clone into a new sub-folder named after the repository. Returns the new project folder. */
@@ -206,6 +259,7 @@ async function headText(folder, path) {
   } catch (e) { return null; }
 }
 export async function diffFile(folder, path) {
+  if (isSecretPath(path) && await protectionOn()) return { lines: [{ t: 'ctx', text: 'Protected file: contents are hidden.' }], added: 0, removed: 0, more: 0 };
   const before = await headText(folder, path);
   let after = null;
   try { const r = await safFs.readText(folder.uri, path, 1048576); after = r.binary ? null : r.text; } catch (e) { after = null; }
@@ -217,45 +271,67 @@ export async function discard(folder, path) {
   await safFs.writeText(folder.uri, path, before);
 }
 
+/** Remember which files are executable in HEAD so editing them does not silently drop the executable bit. */
+async function loadExecs(folder) {
+  if (execSets.has(folder.id)) return;
+  const set = new Set();
+  try {
+    const c = ctx(folder);
+    await git().resolveRef({ ...c, ref: 'HEAD' });
+    const found = await git().walk({ ...c, trees: [git().TREE({ ref: 'HEAD' })], map: async (fp, [e]) => ((e && fp !== '.' && (await e.type()) === 'blob' && (await e.mode()) === 0o100755) ? fp : undefined) });
+    (function flat(x) { if (Array.isArray(x)) x.forEach(flat); else if (typeof x === 'string') set.add(x); })(found);
+  } catch (e) { /* no commits yet */ }
+  execSets.set(folder.id, set);
+}
 export async function commit(folder, message, paths) {
+  await loadExecs(folder);
   const c = ctx(folder); const au = await author();
   if (!message || !message.trim()) throw new Error('Write a commit message.');
   const ch = await status(folder);
-  const list = paths ? ch.filter((x) => paths.includes(x.path)) : ch;
-  if (!list.length) throw new Error('Nothing to commit.');
+  const prot = await protectionOn();
+  let list = paths ? ch.filter((x) => paths.includes(x.path)) : ch;
+  // New secret files are never added to a commit by accident (they would be published on push).
+  const skipped = prot ? list.filter((x) => x.kind === 'new' && isSecretPath(x.path)).map((x) => x.path) : [];
+  if (skipped.length) list = list.filter((x) => !skipped.includes(x.path));
+  if (!list.length) throw new Error(skipped.length ? 'Only secret files changed (' + skipped.join(', ') + '). They are never committed automatically. Add them to .gitignore.' : 'Nothing to commit.');
   for (const f of list) {
     if (f.kind === 'deleted') await git().remove({ ...c, filepath: f.path });
     else await git().add({ ...c, filepath: f.path });
   }
   const oid = await git().commit({ ...c, message: message.trim(), author: au });
-  return { oid, count: list.length };
+  execSets.delete(folder.id);
+  return { oid, count: list.length, skipped };
 }
-export async function push(folder, { force = false, onProgress } = {}) {
+export async function push(folder, { force = false, onProgress, signal } = {}) {
   const c = ctx(folder);
   const url = await remoteUrl(folder);
   if (!url) throw new Error('No remote set. Add a remote URL in Git > Remote.');
+  const { host, token } = await needToken(url);
   const branch = await currentBranch(folder);
   try {
-    const r = await git().push({ ...c, http, remote: 'origin', ref: branch, remoteRef: branch, force, onAuth: authFor(await tokenFor(folder, url)), onProgress: (p) => onProgress && onProgress(p) });
-    if (r && r.ok === false) throw new Error(r.error || 'Push was rejected.');
+    const r = await git().push({ ...c, http: makeHttp(signal), remote: 'origin', ref: branch, remoteRef: branch, force, onAuth: authFor(token), onProgress: (p) => onProgress && onProgress(p) });
+    if (r && r.ok === false) {
+      const refErr = r.refs && Object.values(r.refs).map((x) => x && x.error).filter(Boolean).join('; ');
+      throw new Error(refErr || r.error || 'Push was rejected.');
+    }
     return r;
   } catch (e) {
-    if (/not a simple fast-forward|rejected|non-fast-forward/i.test(String(e.message))) throw new Error('Push rejected: the remote has newer commits. Pull first.');
-    throw nice(e);
+    if (/not a simple fast-forward|non-fast-forward|fetch first|stale info/i.test(String(e.message))) throw new Error('Push rejected: the remote has newer commits. Pull first.');
+    throw nice(e, { host, hasToken: !!token, action: 'push' });
   }
 }
-export async function pull(folder, { onProgress } = {}) {
+export async function pull(folder, { onProgress, signal } = {}) {
   const c = ctx(folder); const au = await author();
   const url = await remoteUrl(folder);
   if (!url) throw new Error('No remote set. Add a remote URL in Git > Remote.');
   const branch = await currentBranch(folder);
   try {
-    await git().pull({ ...c, http, remote: 'origin', ref: branch, singleBranch: true, author: au, committer: au, onAuth: authFor(await tokenFor(folder, url)), onProgress: (p) => onProgress && onProgress(p) });
+    await git().pull({ ...c, http: makeHttp(signal), remote: 'origin', ref: branch, singleBranch: true, author: au, committer: au, onAuth: authFor(await tokenFor(folder, url)), onProgress: (p) => onProgress && onProgress(p) });
   } catch (e) {
     const n = (e && e.code) || '';
     if (/MergeConflict|MergeNotSupported/i.test(n) || /conflict/i.test(String(e.message))) throw new Error('Merge conflict. Resolve it by asking the agent to fix the conflicting files, or discard your local change and pull again.');
     if (/CheckoutConflict/i.test(n)) throw new Error('Local changes would be overwritten. Commit or discard them first.');
-    throw nice(e);
+    throw nice(e, { host: hostOf(url), hasToken: !!(await tokenFor(folder, url)), action: 'pull' });
   }
 }
 export async function checkout(folder, ref) { await git().checkout({ ...ctx(folder), ref }); }
@@ -285,13 +361,13 @@ export async function remoteInfo(folder) {
   try { path = new URL(url).pathname.replace(/^\/|\.git$/g, ''); } catch (e) { /* ignore */ }
   return { url, host, path };
 }
-export async function fetchRemote(folder, { onProgress } = {}) {
+export async function fetchRemote(folder, { onProgress, signal } = {}) {
   const url = await remoteUrl(folder);
   if (!url) throw new Error('No remote set. Add one in the Remote tab.');
   const branch = await currentBranch(folder);
   try {
-    await git().fetch({ ...ctx(folder), http, remote: 'origin', ref: branch, singleBranch: true, tags: false, onAuth: authFor(await tokenFor(folder, url)), onProgress: (p) => onProgress && onProgress(p) });
-  } catch (e) { throw nice(e); }
+    await git().fetch({ ...ctx(folder), http: makeHttp(signal), remote: 'origin', ref: branch, singleBranch: true, tags: false, onAuth: authFor(await tokenFor(folder, url)), onProgress: (p) => onProgress && onProgress(p) });
+  } catch (e) { throw nice(e, { host: hostOf(url), hasToken: !!(await tokenFor(folder, url)), action: 'fetch' }); }
 }
 /** { ahead, behind } against origin/<branch> as of the last fetch, or null when unknown. */
 export async function aheadBehind(folder) {

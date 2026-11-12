@@ -245,3 +245,7 @@ padding:calc(var(--sat) + 12px) 12px calc(var(--sab) + 12px);transform:translate
 .msg.event::before,.msg.event::after{content:"";flex:1;height:1px;background:var(--line)}
 .msg.event .ic{width:14px;height:14px}
 .row-item .rbtn{margin-left:4px}
+
+.acts .icon-btn,.row-item .icon-btn{position:relative}
+.acts .icon-btn::after,.row-item .icon-btn::after{content:"";position:absolute;inset:-4px}
+.tool .tf .btn.sm{min-height:36px}

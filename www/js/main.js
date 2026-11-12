@@ -7,6 +7,7 @@ import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
 import * as G from './git.js';
+import { isSecretPath, isEnvLike, maskEnv, protectionOn } from './secrets.js';
 import { SUPPORT_EMAIL, APP_VERSION } from './config.js';
 
 const S = {
@@ -291,7 +292,7 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
 function planCard(m) {
   const done = m.steps.filter((x) => x.status === 'done').length;
   return '<div class="tool plan"><div class="th">' + ICON('list') + '<span class="nm">Plan</span><span class="pa">' + done + ' of ' + m.steps.length + ' done</span></div><div class="steps">' +
@@ -362,6 +363,7 @@ async function send(regenerate) {
   const ui = {
     onUser: (m) => renderMsg(m), onAssistant: (m) => renderMsg(m), onDelta: (m) => renderMsg(m),
     onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); },
+    requestSecret: (info, signal) => askSecret(info, signal),
     onNotice: (t) => toast(t), onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
       S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
@@ -514,7 +516,7 @@ async function openFiles(path = '') {
     $$('[data-p]', body).forEach((r) => r.onclick = async () => {
       if (r.dataset.d === '1') return openFiles(r.dataset.p);
       const p = r.dataset.p; const b2 = sheet(p, { back: () => openFiles(path) });
-      try { const t = await fs.readText(S.folder.uri, p, 200000); b2.innerHTML = t.binary ? '<div class="note">Binary file, ' + fmtBytes(t.size) + '</div>' : '<pre class="out" style="white-space:pre-wrap;word-break:break-word;font-size:12px">' + esc(t.text) + '</pre>'; }
+      try { const t = await fs.readText(S.folder.uri, p, 200000); const hide = isSecretPath(p) && await protectionOn(); b2.innerHTML = t.binary ? '<div class="note">Binary file, ' + fmtBytes(t.size) + '</div>' : (hide ? '<div class="note" style="text-align:left">Protected file. Its values are hidden here and from the agent. Open it in a file editor to change it.</div>' : '') + '<pre class="out" style="white-space:pre-wrap;word-break:break-word;font-size:12px">' + esc(hide ? (isEnvLike(p) ? maskEnv(t.text) : '<hidden>') : t.text) + '</pre>'; }
       catch (e) { b2.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
     });
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message || 'Could not read the folder') + '</div>'; }
@@ -565,6 +567,7 @@ function openSettings() {
     '<label class="field"><span>Custom instructions</span><textarea id="setInstr" placeholder="Tone, language, rules...">' + esc(st.instructions) + '</textarea></label>' +
     '<div class="h3">Files</div>' +
     '<div class="field"><span>Approvals in new chats</span>' + seg('setAutoDef', [['0', 'Ask first'], ['1', 'Auto']], st.autoDefault ? '1' : '0') + '<small>Auto runs file changes, zip, commits and everyday commands without asking. Deleting data, sudo, force push, publishing and similar risky actions still ask. You can switch any chat with the chip above the messages. Backups and Undo always work.</small></div>' +
+    '<div class="field"><span>Protect secret files</span>' + seg('setProt', [['1', 'On'], ['0', 'Off']], st.protectSecrets !== false ? '1' : '0') + '<small>.env files, keys and credentials stay hidden from the agent and the chat. The agent can still run your project with them. Secret values are removed from terminal output, and new secret files are never committed automatically.</small></div>' +
     '<div class="h3">Appearance</div>' + '<div class="field">' + seg('setTheme', [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], st.theme) + '</div>' +
     '<div class="h3">Memory</div><div class="field">' + seg('setLearn', [['1', 'Learn about me'], ['0', 'Off']], st.autoLearn ? '1' : '0') + '<small>Short notes saved on this phone and shared with the model so it knows you.</small></div><div id="memList"></div>' +
     '<button id="memAdd" class="btn" style="width:100%">' + ICON('plus') + '<span class="lbl">Add a note</span></button>' +
@@ -579,7 +582,7 @@ function openSettings() {
     '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
-  bindSeg('setAutoDef', (v) => save({ autoDefault: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
+  bindSeg('setProt', (v) => save({ protectSecrets: v === '1' })); bindSeg('setAutoDef', (v) => save({ autoDefault: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
   const rdTerm = () => drawTerm(rdTerm);
   bindSeg('setTerm', async (v) => { await save({ termux: v === '1' }); rdTerm(); updateTermChip(); });
   bindSeg('setTheme', (v) => { save({ theme: v }); applyTheme(); });
@@ -648,8 +651,11 @@ async function openTerminal() {
   const seg = (v) => '<div class="seg" id="tSeg">' + [['0', 'Off'], ['1', 'On']].map(([k, l]) => '<button type="button" class="btn sm' + (k === v ? ' on' : '') + '" data-v="' + k + '"><span class="lbl">' + l + '</span></button>').join('') + '</div>';
   const draw = () => {
     body.innerHTML = '<p class="note" style="text-align:left;margin-top:0">Let the agent run commands in Termux, inside this project, like on a computer. Every command asks for your approval first.</p>' +
-      '<div class="field"><span>Terminal for the agent</span>' + seg(S.settings.termux ? '1' : '0') + '</div><div id="termBox"></div>';
+      '<div class="field"><span>Terminal for the agent</span>' + seg(S.settings.termux ? '1' : '0') + '</div>' +
+      '<div class="field"><span>Git token for Termux</span><div class="seg" id="tTok">' + [['1', 'Lend'], ['0', 'Never']].map(([k, l]) => '<button type="button" class="btn sm' + ((S.settings.gitTokenTermux !== false ? '1' : '0') === k ? ' on' : '') + '" data-v="' + k + '"><span class="lbl">' + l + '</span></button>').join('') +
+      '</div><small>When a git clone, pull, fetch or push runs in Termux, your saved token is lent to that one command. It is not stored in Termux and the model never sees it.</small></div><div id="termBox"></div>';
     $$('#tSeg .btn', body).forEach((b) => b.onclick = async () => { await save({ termux: b.dataset.v === '1' }); updateTermChip(); draw(); });
+    $$('#tTok .btn', body).forEach((b) => b.onclick = async () => { await save({ gitTokenTermux: b.dataset.v === '1' }); draw(); });
     drawTerm(draw);
   };
   draw();
@@ -730,7 +736,7 @@ async function loadGitState(folder) {
 
 async function openGit(tab, keepMsg) {
   if (!S.folder) { toast('Open a folder first.'); return; }
-  const folder = S.folder;
+  const folder = S.folder; G.resetGitCache(folder);
   if (!(await G.isRepo(folder))) return openGitStart(folder);
   if (tab) GS.tab = tab;
   const body = sheet('Git');
@@ -846,6 +852,26 @@ function syncCommit(st) {
   const n = st.changes.filter((c) => GS.sel.has(c.path)).length; const b = $('#gCommit'); if (!b) return;
   b.disabled = !n; b.querySelector('.lbl').textContent = n ? 'Commit ' + n + ' staged' : 'Stage files first';
 }
+/** Private input for a secret value. Resolves with the text, or null on Skip. The value never touches the chat. */
+function askSecret(info, signal) {
+  return new Promise((res) => {
+    $('#dlgTitle').textContent = 'Add ' + info.name;
+    $('#dlgText').innerHTML = (info.description ? '<div style="margin-bottom:8px">' + esc(info.description) + '</div>' : '') +
+      '<div style="margin-bottom:8px;font-size:12.5px">Saved to <b>' + esc(info.file) + '</b> in this project. The agent never sees the value and it is not shown in the chat.</div>' +
+      '<div style="display:flex;gap:6px"><input id="dlgInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1;min-width:0;height:42px;border:1px solid var(--line);border-radius:12px;padding:0 12px;background:var(--card);outline:0" placeholder="Value"><button id="dlgEye" type="button" class="icon-btn" aria-label="Show value">' + ICON('eye') + '</button></div>';
+    $('#dlgYes').firstElementChild.textContent = 'Save'; $('#dlgNo').firstElementChild.textContent = 'Skip'; $('#dialog').classList.remove('hidden');
+    setTimeout(() => { const i = $('#dlgInput'); if (i) i.focus(); }, 60);
+    $('#dlgEye').onclick = () => { const i = $('#dlgInput'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; $('#dlgEye').setAttribute('aria-label', show ? 'Hide value' : 'Show value'); };
+    const done = (v) => {
+      const t = $('#dlgInput') ? $('#dlgInput').value : '';
+      $('#dialog').classList.add('hidden'); $('#dlgText').textContent = ''; $('#dlgNo').firstElementChild.textContent = 'Cancel'; $('#dlgYes').onclick = $('#dlgNo').onclick = null;
+      res(v && t.trim() ? t.trim() : null);
+    };
+    $('#dlgYes').onclick = () => { if (!$('#dlgInput').value.trim()) { $('#dlgInput').focus(); return; } done(true); };
+    $('#dlgNo').onclick = () => done(false);
+    if (signal) signal.addEventListener('abort', () => { if (!$('#dialog').classList.contains('hidden')) done(false); }, { once: true });
+  });
+}
 function askText(title, placeholder, value = '') {
   return new Promise((res) => {
     $('#dlgTitle').textContent = title; $('#dlgText').innerHTML = '<input id="dlgInput" style="width:100%;height:42px;border:1px solid var(--line);border-radius:12px;padding:0 12px;background:var(--card);outline:0" placeholder="' + esc(placeholder) + '" autocapitalize="off" autocomplete="off">';
@@ -949,8 +975,8 @@ async function runClone(parent, v, say) {
   say('Cloning...');
   const f = await G.cloneInto(parent, v.url, { token: v.token, name: v.name, depth: v.full ? 0 : 1, id: uid(), onProgress: (p) => say('Cloning ' + pct(p)) });
   S.folders.push(f); await A.saveFolders(S.folders);
-  GS.keepSel = false; closeSheet(); await newChat(f); await persistChat(); loadChats();
-  toast('Cloned into ' + f.name); openGit('changes');
+  GS.keepSel = false; closeSheet(); await applyFolder(f);
+  if (S.folder && S.folder.id === f.id) { toast('Cloned into ' + f.name); openGit('changes'); }
 }
 /** Projects > Clone: ask for the repository, then for the folder it should go into. */
 async function cloneFlow() {
@@ -1004,6 +1030,10 @@ async function importBackup() {
 
 // ------------------------------------------------------------ wiring
 function wire() {
+  // After startup, a failed action shows a message instead of covering the app with an error page.
+  const oops = (e) => { const r = e && (e.reason || e.error) || e; const msg = String((r && r.message) || r || 'Unknown error').slice(0, 140); console.error(r); toast('Something went wrong: ' + msg); };
+  window.addEventListener('unhandledrejection', (e) => { if (window.__stage !== 'ready') return; e.preventDefault(); oops(e); });
+  window.addEventListener('error', (e) => { if (window.__stage !== 'ready' || (e.target && (e.target.src || e.target.href))) return; oops(e); });
   $('#menuBtn').onclick = openDrawer; $('#scrim').onclick = closeDrawer;
   $('#dNew').onclick = () => newChat(S.folder); $('#topNewBtn').onclick = () => newChat(S.folder);
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;

@@ -1,5 +1,6 @@
 // File tools the model can use inside the folder the user chose.
 // Every path is relative to that folder; anything that could leave it is rejected.
+import { isSecretPath, isEnvLike, maskEnv, protectionOn, PROTECTED_MSG, ENV_TOOL } from './secrets.js';
 import { fs } from './native.js';
 import { cleanRel, fmtBytes } from './util.js';
 
@@ -55,6 +56,7 @@ export const TOOLS = [
     description: 'Delete a file. The user must approve it.',
     parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
   },
+  ENV_TOOL,
 ];
 
 export const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'delete_file']);
@@ -74,7 +76,8 @@ export async function runRead(name, args, folder) {
     const entries = (await fs.list(folder.uri, rel)).filter((e) => e.name !== '.git');
     entries.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
     if (!entries.length) return '(empty folder)';
-    const shown = entries.slice(0, 300).map((e) => (e.isDir ? e.name + '/' : e.name + '  (' + fmtBytes(e.size) + ')'));
+    const prot = await protectionOn();
+    const shown = entries.slice(0, 300).map((e) => (e.isDir ? e.name + '/' : e.name + '  (' + fmtBytes(e.size) + ')' + (prot && isSecretPath(e.name) ? '  [protected: hidden from me]' : '')));
     return clip(shown.join('\n') + (entries.length > 300 ? '\n... ' + (entries.length - 300) + ' more' : ''));
   }
 
@@ -92,12 +95,13 @@ export async function runRead(name, args, folder) {
     try { re = new RegExp(String(args.pattern), args.ignore_case === false ? '' : 'i'); }
     catch (e) { re = new RegExp(String(args.pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); }
     const { files } = await fs.walk(folder.uri, base, 3000);
+    const prot = await protectionOn();
     const results = [];
     let scanned = 0;
     const started = Date.now();
     for (const f of files) {
       if (results.length >= 60 || scanned >= 150 || Date.now() - started > 8000) break;
-      if (BINARY_EXT.test(f.path) || f.size > 200000) continue;
+      if (BINARY_EXT.test(f.path) || f.size > 200000 || (prot && isSecretPath(f.path))) continue;
       scanned++;
       try {
         const r = await fs.readText(folder.uri, f.path, 200000);
@@ -115,6 +119,11 @@ export async function runRead(name, args, folder) {
     const rel = cleanRel(args.path);
     if (!rel) throw new Error('path is required');
     if (BINARY_EXT.test(rel)) throw new Error('This looks like a binary file; only text files can be read.');
+    if (isSecretPath(rel) && await protectionOn()) {
+      if (!isEnvLike(rel)) return PROTECTED_MSG;
+      const raw = await fs.readText(folder.uri, rel, 200000);
+      return 'Variable names only (values are hidden):\n' + maskEnv(raw.text) + '\n[' + PROTECTED_MSG + ']';
+    }
     const r = await fs.readText(folder.uri, rel, 1048576);
     if (r.binary) throw new Error('This is a binary file; only text files can be read.');
     const lines = r.text.split('\n');
@@ -186,6 +195,7 @@ export async function planWrite(name, args, folder) {
   if (!rel) throw new Error('path is required');
   if (rel === '.git' || rel.startsWith('.git/')) throw new Error('The .git folder is managed by Git; use the git tools instead.');
   if (BINARY_EXT.test(rel)) throw new Error('Binary files cannot be changed here.');
+  if (isSecretPath(rel) && await protectionOn()) throw new Error('"' + rel + '" is a protected secret file, so I cannot change or delete it (that would show its contents). To add a missing variable use request_env_var. ' + PROTECTED_MSG);
 
   let before = null;
   const st = await fs.stat(folder.uri, rel);

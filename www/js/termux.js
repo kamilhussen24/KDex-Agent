@@ -1,6 +1,7 @@
 // Terminal tool: runs a shell command in Termux. Off by default; every command needs the user's approval.
 import { Termux } from './native.js';
-import { db } from './db.js';
+import { db, kvGet } from './db.js';
+import { getToken, getGitSettings, remoteInfo, resetGitCache, listTokenHosts } from './git.js';
 import { cleanRel } from './util.js';
 
 export const TERMUX_TOOLS = [
@@ -93,15 +94,48 @@ export async function previewTermux(args, folder) {
 
 function clip(s, n) { s = String(s || ''); return s.length > n ? '[... ' + (s.length - n) + ' characters cut]\n' + s.slice(-n) : s; }
 
+const GIT_NET = /(^|[\s;&|(])git\s+(?:-[^\s]+\s+)*(clone|push|pull|fetch|ls-remote|submodule|remote\s+update)\b/;
+const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+/**
+ * For git commands that talk to a server, lend the saved access token to this one command through GIT_ASKPASS.
+ * The token is never written into Termux files, never shown to the model, and is scrubbed from the output.
+ */
+async function withGitToken(command, folder) {
+  const s = await kvGet('settings', {});
+  if (s.gitTokenTermux === false || !GIT_NET.test(command)) return { command, secret: null, host: '' };
+  let host = ''; const m = /https?:\/\/([^\/\s'"]+)/i.exec(command);
+  if (m) host = m[1].replace(/^[^@]*@/, '');
+  else { const info = folder ? await remoteInfo(folder).catch(() => null) : null; host = info ? info.host : ''; }
+  if (!host) { const hs = await listTokenHosts(); if (hs.length === 1) host = hs[0]; } // only one account saved: unambiguous
+  const token = host ? await getToken(host) : null;
+  const id = await getGitSettings().catch(() => ({}));
+  const env = [];
+  if (id.name) env.push('GIT_AUTHOR_NAME=' + shq(id.name), 'GIT_COMMITTER_NAME=' + shq(id.name));
+  if (id.email) env.push('GIT_AUTHOR_EMAIL=' + shq(id.email), 'GIT_COMMITTER_EMAIL=' + shq(id.email));
+  if (!token) return { command: (env.length ? 'export ' + env.join(' ') + '; ' : '') + command, secret: null, host };
+  const user = /gitlab/.test(host) ? 'oauth2' : /bitbucket/.test(host) ? 'x-token-auth' : 'git';
+  const pre = 'mkdir -p "$HOME/.kdex" && printf \'%s\\n\' \'#!/bin/sh\' \'case "$1" in Username*) echo "$KDEX_GIT_USER";; *) echo "$KDEX_GIT_TOKEN";; esac\' > "$HOME/.kdex/askpass" && chmod 700 "$HOME/.kdex/askpass"; ' +
+    'export GIT_ASKPASS="$HOME/.kdex/askpass" GIT_TERMINAL_PROMPT=0 KDEX_GIT_USER=' + shq(user) + ' KDEX_GIT_TOKEN=' + shq(token) + (env.length ? ' ' + env.join(' ') : '') + '; ';
+  return { command: pre + command, secret: token, host };
+}
+
 export async function runTermux(args, folder) {
-  const command = String(args.command || '').trim();
+  const original = String(args.command || '').trim();
   const cwd = await workdir(args, folder);
   const secs = Math.max(5, Math.min(600, parseInt(args.timeout_seconds, 10) || 120));
-  const r = await Termux.run(command, cwd, secs * 1000);
+  const w = await withGitToken(original, folder);
+  const r = await Termux.run(w.command, cwd, secs * 1000);
+  if (GIT_NET.test(original) && folder) resetGitCache(folder); // the repository may have changed behind the app's back
+  if (w.secret) { const hide = (x) => String(x || '').split(w.secret).join('***'); r.stdout = hide(r.stdout); r.stderr = hide(r.stderr); r.errmsg = hide(r.errmsg); }
+  let hint = '';
+  if (GIT_NET.test(original) && Number(r.exitCode) !== 0 && /Authentication failed|could not read (Username|Password)|403|401|Permission denied|not found/i.test(String(r.stderr) + String(r.stdout))) {
+    hint = w.secret ? '\n[hint] The saved token for ' + w.host + ' was used and the server refused it: it may be expired, or lack write permission (GitHub: repo scope, or Contents: Read and write). Tell the user to fix it in Settings > Git > Identity and access tokens.'
+      : '\n[hint] No access token is saved' + (w.host ? ' for ' + w.host : ' (the host could not be told)') + ', or the setting that lends it to Termux is off. Tell the user to add one in Settings > Git > Identity and access tokens.';
+  }
   const out = clip(r.stdout, 12000); const err = clip(r.stderr, 4000);
   const ok = Number(r.exitCode) === 0;
   return (out ? out.replace(/\s+$/, '') + '\n' : '') + (err ? '[stderr]\n' + err.replace(/\s+$/, '') + '\n' : '') + (!out && !err ? '[no output]\n' : '') +
-    '[exit code ' + r.exitCode + (r.errmsg ? '; ' + r.errmsg : '') + '] ' + (ok ? 'Command succeeded.' : 'Command FAILED. Read the output above before answering.');
+    '[exit code ' + r.exitCode + (r.errmsg ? '; ' + r.errmsg : '') + '] ' + (ok ? 'Command succeeded.' : 'Command FAILED. Read the output above before answering.') + hint;
 }
 
 // ---------------------------------------------------------------- always allow

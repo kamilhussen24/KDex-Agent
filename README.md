@@ -129,6 +129,29 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 ## v1.8.1
 - The assistant now knows Termux runs on a phone (ARM, limited memory and storage, no root, no sudo/Docker/apt) and keeps installs small: it checks space and memory first, prefers `pkg` packages and light tools, and says so when a task is too heavy for a phone.
 
+## v1.13.0
+
+- New agent tool `request_env_var`: when a project needs an environment variable that is missing, the agent asks for it by name. A private box opens (masked, with a show button), you type the value, and it is written to `.env`. The value never reaches the chat or the model. Existing variables are never changed.
+- Adding a variable also keeps `.env` out of Git (`.gitignore`) and lists the name, without a value, in `.env.example` when that file exists.
+
+## v1.12.0
+
+- Secret files are protected (Settings > Files > Protect secret files, on by default). `.env*`, keys (.pem, .key), credentials and similar files stay hidden from the agent and the chat. For `.env` files the agent sees variable names only. It cannot read, search or change them, but it can still run the project and tests that use them.
+- Secret values are removed from terminal output (shown as ***), new secret files are never committed automatically, and the Files viewer masks them.
+- After startup, a failed action shows a short message instead of a full-screen error page. The startup error page now follows dark mode and has a Reload button.
+- Bigger touch areas for the copy, regenerate, report and row buttons (the look is unchanged).
+- UI audit (tests/ui-audit.py): every screen at 320, 360 and 412 px wide in light and dark; no clipped text, no off-screen controls, icons centred on their labels.
+
+## v1.11.0
+
+- Git: repositories with symlinks now clone (a link is kept as a small file holding its target, and stays a link in commits). Editing an executable file no longer drops its executable bit.
+- Git errors say what is wrong: token missing, rejected, no write permission, repository not found or private, file over 100 MB, protected branch, no connection, out of storage. Messages tell where to fix it.
+- Git is faster on big repositories (object cache) and Stop now cancels a running clone, pull, fetch or push.
+- Terminal: git clone, pull, fetch and push in Termux borrow the saved token for that one command only (GIT_ASKPASS). It is never stored in Termux, never shown to the model, and removed from output. Settings: Terminal > Git token for Termux (Lend or Never).
+- Every git push asks, even in Auto mode.
+- New agent tools: git_branch, git_fetch, git_remote. The agent now knows what the built-in Git can and cannot do, and when to use real git in Termux.
+- Cloning from a chat now uses the current chat instead of opening a new one.
+
 ## v1.10.0
 
 - Folder is no longer fixed to a chat. A folder chip sits above every chat ("Add folder" when none). Tap it to add, switch or remove the folder without losing the conversation.
