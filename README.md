@@ -230,3 +230,9 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 ### v1.21.0 – direct file access
 - New optional "All files access" permission (asked once, also in Settings > Fast file access). With it the app reads and writes shared storage through normal file paths, like Termux, instead of Android folder access, which needs a content query per step. Files, search, edits and Git become much faster.
 - Without the permission, or for folders outside shared storage, the previous folder access is used unchanged.
+
+### v1.21.1
+- Fetch icon now matches Pull and Push (same arrow style, size and weight).
+
+### v1.21.2
+- Fetch icon is now a cloud with a down arrow, in the same weight and size as Pull and Push.

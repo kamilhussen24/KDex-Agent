@@ -867,7 +867,7 @@ function gitHead(st) {
   return (
     '<div class="gsum"><div class="top2">' + ICON('branch') + '<div class="nm">' + esc(st.branch || '') + '</div>' + (abTxt ? '<span class="ab">' + abTxt + '</span>' : (st.remote && st.ab && st.ab.noRemoteBranch ? '<span class="ab">not pushed</span>' : '')) + '</div>' +
     '<div class="rm">' + (st.remote ? esc(st.remote.host + '/' + st.remote.path) : 'No remote yet') + '</div>' +
-    '<div class="seg"><button id="gFetch" class="btn sm">' + ICON('refresh') + '<span class="lbl">Fetch</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button></div></div><div id="gMsg"></div>' +
+    '<div class="seg"><button id="gFetch" class="btn sm">' + ICON('fetch') + '<span class="lbl">Fetch</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button></div></div><div id="gMsg"></div>' +
     (st.needToken && st.remote.host ? '<div class="warnbar"><span>No access token saved for ' + esc(st.remote.host) + '. You need one to push or to use a private repository.</span><button id="gTok" class="btn sm"><span class="lbl">Add token</span></button></div>' : ''));
 }
 
