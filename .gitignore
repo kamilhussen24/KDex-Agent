@@ -2,4 +2,3 @@ node_modules/
 android/
 *.keystore
 *.jks
-tests/

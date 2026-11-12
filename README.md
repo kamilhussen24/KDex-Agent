@@ -219,3 +219,6 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 
 ### v1.19.2
 - Fixed `scripts/fix-blocked-push.sh` flagging itself.
+
+### v1.19.3
+- Fetch button now has its icon like Pull and Push.
