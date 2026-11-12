@@ -1,21 +1,87 @@
-MIT License
+KDex Agent License (Source-Available) - Version 1.0
 
-Copyright (c) 2026 Kamil Hussen (KDex)
+Copyright (c) 2026 Kamil Hussen (KDex). All rights reserved, except for the
+permissions granted below.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Official Repository: https://github.com/kamilhussen24/KDex-Agent
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. DEFINITIONS
+"Software" means KDex Agent: the source code, build scripts, documentation,
+images, icons and logo in the Official Repository, and every compiled form of
+them (for example an APK or AAB). "Licensor" means Kamil Hussen (KDex).
+"You" means the person using the Software. "Official Release" means a build
+published by the Licensor in the Releases section of the Official Repository.
+"Derivative" means any modified, adapted or renamed version of the Software,
+or any work that contains a substantial part of it.
 
+2. WHAT YOU MAY DO
+You may, free of charge:
+  a) read, study and learn from the source code;
+  b) install and use an Official Release, or a build you made yourself from
+     the source, for any lawful purpose, including your own work, whether or
+     not that work is paid;
+  c) modify the source code for your own private use and experiments;
+  d) fork the Official Repository on GitHub in order to propose improvements
+     to the Licensor through pull requests;
+  e) share links to the Official Repository and to its Official Releases.
+
+3. WHAT YOU MAY NOT DO (without the Licensor's prior written permission)
+  a) Distribute or publish the Software or any Derivative, in source or
+     compiled form, modified or unmodified. This includes app stores, file
+     sharing sites, messaging channels, mirrors and other repositories. A
+     fork made under 2(d) is allowed only to prepare a pull request and must
+     not be promoted or distributed as a product.
+  b) Present the Software or any Derivative as your own work, publish it
+     under another name, or remove or change any copyright, license or
+     attribution notice.
+  c) Sell, rent, sublicense, host as a service, or otherwise earn money from
+     the Software itself or from a Derivative, or include it in a commercial
+     product. (Using the app as a tool in your own work is allowed; see 2(b).)
+  d) Use the names "KDex", "KDex Agent" or the logo and icons to identify
+     another product, or in a way that suggests the Licensor endorses it.
+  e) Use the Software in a way that breaks the law or the rights of others.
+
+4. CONTRIBUTIONS
+If you submit a contribution (code, text, images or other material) to the
+Official Repository, you confirm that you have the right to submit it, and you
+grant the Licensor a perpetual, worldwide, irrevocable, royalty-free license
+to use, modify, publish, distribute and sublicense it as part of the Software,
+including under other license terms. You keep credit for your contribution in
+the repository history. You receive no other rights because of a contribution.
+
+5. THIRD-PARTY COMPONENTS
+The Software includes components made by others (for example Capacitor, Eclipse
+JGit, isomorphic-git, fflate and the Inter font). Each is covered by its own
+license, listed in the app under Settings > About > Licenses and in the
+repository. This License does not change those licenses.
+
+6. EARLIER VERSIONS
+Versions 1.38.0 and earlier were published under the MIT License. A copy of
+such a version that you received under the MIT License stays under the MIT
+License. All later versions are covered only by this License.
+
+7. TERMINATION
+Your permissions end automatically if you break this License. When that
+happens you must stop using the Software and delete all copies you distributed
+or published. Permissions for people who received the Software from you under
+this License continue only if they did not take part in the breach.
+
+8. NO WARRANTY
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NON-INFRINGEMENT. The Software can read and change files on your
+device and can send data to AI providers you choose. You are responsible for
+what you ask it to do and for keeping backups.
+
+9. LIMITATION OF LIABILITY
+TO THE FULLEST EXTENT ALLOWED BY LAW, THE LICENSOR IS NOT LIABLE FOR ANY CLAIM,
+DAMAGES, LOSS OF DATA OR OTHER LIABILITY ARISING FROM OR IN CONNECTION WITH THE
+SOFTWARE OR ITS USE, WHETHER IN CONTRACT, TORT OR OTHERWISE.
+
+10. GENERAL
+This License is governed by the laws of Bangladesh. If a part of it cannot be
+enforced, the rest stays in force. Not enforcing a right is not giving it up.
+
+11. PERMISSIONS BEYOND THIS LICENSE
+To ask for permission for something this License does not allow, open an issue
+in the Official Repository or contact the Licensor through https://kamildex.com

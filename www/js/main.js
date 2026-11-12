@@ -693,10 +693,10 @@ async function autoUpdateCheck() {
   if (r.newer && (await kvGet('updToldFor', '')) !== r.latest) { await kvSet('updToldFor', r.latest); toast('Update ' + r.latest + ' is available. See Settings > About.'); }
 }
 function openLicenses() {
-  const body = sheet('Open source licenses', { back: () => openSettings() });
+  const body = sheet('Licenses', { back: () => openSettings() });
   const item = (n, l, t) => '<div class="kv" style="display:block"><b>' + esc(n) + '</b> <span style="color:var(--mut)">' + esc(l) + '</span><div style="color:var(--mut);font-size:13px;margin-top:2px">' + esc(t) + '</div></div>';
-  body.innerHTML = '<div class="note" style="text-align:left">KDex Agent is free software. Source: <a class="link" href="' + REPO_URL + '" target="_blank" rel="noopener">GitHub</a></div>' +
-    item('KDex Agent', 'MIT', 'Copyright (c) 2026 Kamil Hussen (KDex)') + item('Capacitor', 'MIT', 'Ionic and contributors') + item('Inter font', 'SIL OFL 1.1', 'The Inter Project Authors') + item('Eclipse JGit', 'EDL (BSD-3-Clause)', 'Eclipse Foundation and contributors') + item('AndroidX libraries', 'Apache 2.0', 'Google');
+  body.innerHTML = '<div class="note" style="text-align:left">KDex Agent is source-available. Source: <a class="link" href="' + REPO_URL + '" target="_blank" rel="noopener">GitHub</a></div>' +
+    item('KDex Agent', 'KDex Agent License', 'Copyright (c) 2026 Kamil Hussen (KDex). You may use it and send improvements; you may not redistribute or sell it.') + item('Capacitor', 'MIT', 'Ionic and contributors') + item('Inter font', 'SIL OFL 1.1', 'The Inter Project Authors') + item('Eclipse JGit', 'EDL (BSD-3-Clause)', 'Eclipse Foundation and contributors') + item('AndroidX libraries', 'Apache 2.0', 'Google');
 }
 function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').classList.add('hidden'); S.sheetStack = []; }
 
@@ -955,7 +955,7 @@ function openSettings() {
     '<div class="h3">Git</div><button id="gitId" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Identity and access tokens</span></button>' +
     '<div class="h3">Help</div><button id="diagBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Diagnostics log</span></button>' +
     '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div><div class="kv"><span>Developer</span><span>Kamil Hussen (KDex)</span></div><div class="kv"><span>Source code</span><span><a class="link" href="' + REPO_URL + '" target="_blank" rel="noopener">GitHub</a></span></div><div class="kv"><span>Updates</span><span id="updState">Not checked</span></div>' +
-    '<div id="updBox" style="margin-top:10px"></div><button id="licBtn" class="btn" style="width:100%;margin-top:8px"><span class="lbl">Open source licenses</span></button>';
+    '<div id="updBox" style="margin-top:10px"></div><button id="licBtn" class="btn" style="width:100%;margin-top:8px"><span class="lbl">Licenses</span></button>';
   drawUpdate(body); $('#licBtn', body).onclick = openLicenses;
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));

@@ -124,11 +124,11 @@ jobs:
       - name: Write release notes
         if: needs.check.outputs.release == 'true'
         run: |
-          VER="${{ needs.check.outputs.tag }}"
-          awk -v h="## $VER" '$0==h{f=1;next} /^## /{f=0} f' README.md > notes.md
-          [ -s notes.md ] || echo "KDex Agent $VER" > notes.md
+          TAG="${{ needs.check.outputs.tag }}"; VER="${TAG#v}"
+          awk -v h="## [$VER]" 'index($0,h)==1{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "KDex Agent $TAG" > notes.md
           echo "" >> notes.md
-          echo "Install: download KDex-Agent-release.apk below and open it. Your chats and settings stay." >> notes.md
+          echo "Install: download KDex-Agent-release.apk below and open it. Your chats and settings stay. See CHANGELOG.md for all changes." >> notes.md
 
       - name: Create tag and release
         if: needs.check.outputs.release == 'true'
