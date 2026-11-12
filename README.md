@@ -129,6 +129,13 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 ## v1.8.1
 - The assistant now knows Termux runs on a phone (ARM, limited memory and storage, no root, no sudo/Docker/apt) and keeps installs small: it checks space and memory first, prefers `pkg` packages and light tools, and says so when a task is too heavy for a phone.
 
+## v1.10.0
+
+- Folder is no longer fixed to a chat. A folder chip sits above every chat ("Add folder" when none). Tap it to add, switch or remove the folder without losing the conversation.
+- The model is told when the folder changes. "Always allow" permissions are cleared because they belonged to the old folder. Undo uses the folder each change was made in.
+- Switching a chat that already has a folder asks: use here, or start a new chat. Each folder in the list also has a New chat button.
+- Settings > Data: "Delete all conversations" (with confirmation). Folders, settings, memory and keys are kept.
+
 ## v1.9.0
 
 - New logo everywhere: launcher icon (square and round), splash screen, setup screen, empty chat, drawer header, favicon and store icon.

@@ -73,7 +73,7 @@ const ABOUT =
   'What the app can do: chat in any language; read, search, create, edit and delete files in the project with approval, automatic backups and Undo; unzip and zip archives; ' +
   'full Git (status, diff, commit, push, pull, branches, clone, publish to GitHub or GitLab) with approval for every action; run shell commands through Termux when the user turns Terminal on; ' +
   'a live task checklist; background jobs such as local web servers (through Termux); optional thinking levels (Off, Low, Medium, High) from the bulb button; attach images and text files; remember short notes about the user; show token usage in Settings. ' +
-  'Where things are: Settings from the menu (providers, models, token saving, thinking, terminal, git identity), Projects from the folder button, Files, Git and Changes chips above the chat. ' +
+  'Where things are: Settings from the menu (providers, models, token saving, thinking, terminal, git identity), the folder chip above the chat (add, switch or remove the project folder at any time; the conversation stays), and the Files, Git and Changes chips. ' +
   'If asked who you are or what you can do, answer from this description in the user\'s language. Do not claim to be a specific underlying model unless the user asks which model is selected; then say it depends on the model they chose in the top bar. ' +
   'For any task with 3 or more steps, first call update_plan with the steps, then call it again as each step starts and finishes, so the user can follow progress. Skip it for quick one-step answers. ' +
   'Never invent abilities: if something is not listed here, say you cannot do it in this app.\n\n' +
@@ -112,7 +112,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
       'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval).'
     );
   } else {
-    parts.push('No project folder is open, so you have no file tools. If the user wants you to work on files, tell them to open a folder from Projects.');
+    parts.push('No project folder is open, so you have no file tools. If the user wants you to work on files, tell them to tap the Add folder chip above the chat (the folder can be added or changed at any time without losing this conversation).');
   }
   if (custom && custom.trim()) parts.push('User instructions:\n' + custom.trim());
   if (memory.length) parts.push('What you know about the user from earlier chats (use it naturally, do not recite it):\n' + memory.map((m) => '- ' + m.text).join('\n'));
@@ -197,8 +197,14 @@ async function summarize(chat, rt, dropped) {
 
 async function buildContext(chat, rt, folder, settings, memory) {
   const termuxPathCtx = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
-  const all = (await db.byIndex('messages', 'chatId', chat.id)).sort((a, b) => a.id - b.id)
+  const raw = (await db.byIndex('messages', 'chatId', chat.id)).sort((a, b) => a.id - b.id)
     .filter((m) => !(m.role === 'assistant' && m.status === 'error'));
+  // Folder-change events are shown to the user as dividers; the model gets them as a note on the next user message.
+  const all = []; let pend = '';
+  for (const m of raw) {
+    if (m.role === 'event') { pend += (pend ? ' ' : '') + m.text; continue; }
+    if (m.role === 'user' && pend) { all.push({ ...m, text: '[' + pend + ']\n' + (m.text || '') }); pend = ''; } else all.push(m);
+  }
   const budget = BUDGETS[settings.mode] || BUDGETS.balanced;
   let lastUser = -1;
   all.forEach((m, i) => { if (m.role === 'user') lastUser = i; });

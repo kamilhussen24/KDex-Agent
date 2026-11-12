@@ -30,6 +30,16 @@ function confirmBox(title, text, yes = 'OK') {
     $('#dlgYes').onclick = () => done(true); $('#dlgNo').onclick = () => done(false);
   });
 }
+/** Dialog with two actions plus Cancel. Resolves 0 (first), 1 (second) or -1 (cancel). */
+function choiceBox(title, text, labels) {
+  return new Promise((res) => {
+    $('#dlgTitle').textContent = title; $('#dlgText').textContent = text;
+    $('#dlgYes').firstElementChild.textContent = labels[0]; $('#dlgAlt').firstElementChild.textContent = labels[1]; $('#dlgAlt').classList.remove('hidden');
+    $('#dialog').classList.remove('hidden');
+    const done = (v) => { $('#dialog').classList.add('hidden'); $('#dlgAlt').classList.add('hidden'); $('#dlgYes').onclick = $('#dlgNo').onclick = $('#dlgAlt').onclick = null; res(v); };
+    $('#dlgYes').onclick = () => done(0); $('#dlgAlt').onclick = () => done(1); $('#dlgNo').onclick = () => done(-1);
+  });
+}
 function applyTheme() {
   const t = S.settings.theme;
   const dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -208,7 +218,7 @@ async function openChat(id) {
 }
 function renderEmpty() {
   $('#messages').innerHTML = '<div class="empty"><img src="img/logo.png" alt="" width="64" height="64"><h2>How can I help?</h2><div>' +
-    (S.folder ? 'Working in <b>' + esc(S.folder.name) + '</b>. Ask me to read, search or change files.' : 'Open a folder from Projects to let me work on your files.') + '</div></div>';
+    (S.folder ? 'Working in <b>' + esc(S.folder.name) + '</b>. Ask me to read, search or change files.' : 'Chat freely, or tap <b>Add folder</b> above to let me work on your files. You can add or change the folder any time.') + '</div></div>';
 }
 async function persistChat() {
   if (!S.chat) return;
@@ -219,9 +229,9 @@ async function persistChat() {
 
 // ------------------------------------------------------------ context bar (folder chip)
 function drawCtx() {
-  const bar = $('#ctxBar');
-  if (S.folder) { bar.classList.remove('hidden'); $('#chipFolderName').textContent = S.folder.name; updateChangesChip(); updateGitChip(); }
-  else bar.classList.add('hidden');
+  $('#chipFolderName').textContent = S.folder ? S.folder.name : 'Add folder';
+  $$('#ctxBar .nf').forEach((b) => b.classList.toggle('hidden', !S.folder));
+  if (S.folder) { updateChangesChip(); updateGitChip(); }
   updateTermChip();
 }
 async function updateGitChip() {
@@ -269,6 +279,8 @@ function renderMsg(m) {
     const nd = el.querySelector('details.think'); if (nd && wasOpen) nd.open = true;
     if (nd) nd.addEventListener('toggle', () => { el.dataset.open = nd.open ? '1' : ''; });
     if (!h) el.style.display = 'none'; else el.style.display = '';
+  } else if (m.role === 'event') {
+    el.className = 'msg event'; el.innerHTML = ICON('folder') + '<span>' + esc(m.label || '') + '</span>';
   } else if (m.role === 'tool') {
     el.className = 'msg tool-wrap';
     el.innerHTML = toolCard(m);
@@ -426,35 +438,67 @@ function sheet(title, opts = {}) {
 }
 function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').classList.add('hidden'); S.sheetStack = []; }
 
+/** Use `f` (or no folder) in the current chat. Messages stay; the model is told about the change. */
+async function applyFolder(f) {
+  const c = S.chat; if (!c) return;
+  const cur = S.folder;
+  if ((cur && f && cur.id === f.id) || (!cur && !f)) { closeSheet(); return; }
+  const had = (await db.byIndex('messages', 'chatId', c.id)).some((x) => x.role === 'user');
+  if (had && cur && f) {
+    const r = await choiceBox('Change folder?', 'This chat is working in "' + cur.name + '". Use "' + f.name + '" here, or start a new chat for it?', ['Use here', 'New chat']);
+    if (r === 1) { closeSheet(); await newChat(f); await persistChat(); loadChats(); return; }
+    if (r !== 0) return;
+  }
+  if (S.running) stopRun();
+  S.folder = f; c.folderId = f ? f.id : null;
+  c.allow = []; // "Always allow" belongs to the old folder
+  if (had) {
+    const ev = { chatId: c.id, role: 'event', status: 'done', at: Date.now(),
+      label: f ? 'Folder: ' + f.name : 'Folder removed',
+      text: f ? 'The user changed the project folder. You now work in "' + f.name + '"' + (cur ? ' (before: "' + cur.name + '")' : ' (before: no folder)') + '. File results from earlier messages may belong to another location, so read again before relying on them.'
+        : 'The user removed the project folder. You have no file or terminal tools in this chat now.' };
+    ev.id = await db.put('messages', ev); renderMsg(ev); scrollEnd(true);
+    await persistChat(); loadChats();
+  } else if ($('.empty', $('#messages'))) renderEmpty();
+  drawCtx(); updateApproveBar(); closeSheet();
+  toast(f ? 'Using ' + f.name + ' in this chat' : 'Folder removed from this chat');
+}
+
 async function openProjects() {
-  const body = sheet('Projects');
+  const body = sheet('Folder for this chat');
   const draw = () => {
     body.innerHTML = '<button id="pOpen" class="btn primary" style="width:100%;margin-bottom:8px">' + ICON('folder') + '<span class="lbl">Open a folder...</span></button>' +
       '<button id="pClone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('branch') + '<span class="lbl">Clone a repository...</span></button>' +
-      '<button id="pNone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('plus') + '<span class="lbl">Chat without a folder</span></button>' +
+      (S.folder ? '<button id="pDetach" class="btn" style="width:100%;margin-bottom:8px">' + ICON('x') + '<span class="lbl">Remove folder from this chat</span></button>' : '') +
+      '<button id="pNone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('plus') + '<span class="lbl">New chat without a folder</span></button>' +
       '<div class="safe">' + ICON('lock') + '<span>I can only touch the folder you pick. A backup is saved before every change.</span></div>' +
       (S.folders.length ? '<div class="h3">Your folders</div>' : '') +
-      S.folders.map((f) => '<div class="row-item" data-f="' + f.id + '">' + ICON('folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">Tap to start a chat here</div></div><button class="icon-btn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button></div>').join('') +
+      S.folders.map((f) => '<div class="row-item" data-f="' + f.id + '">' + ICON('folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">' + (S.folder && S.folder.id === f.id ? 'Used in this chat' : 'Tap to use in this chat') + '</div></div>' +
+        '<button class="icon-btn rbtn" data-nf="' + f.id + '" aria-label="New chat in this folder">' + ICON('plus') + '</button><button class="icon-btn rbtn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button></div>').join('') +
       '<div class="note" style="margin-top:12px">Android does not allow picking the whole storage or the Download folder. Choose a subfolder, for example one you create for a project.</div>';
     $('#pOpen').onclick = async () => {
       try {
         const r = await fs.pickFolder(); if (!r || !r.uri) return;
         let f = S.folders.find((x) => x.uri === r.uri);
         if (!f) { f = { id: uid(), name: r.name || 'Folder', uri: r.uri }; S.folders.push(f); await A.saveFolders(S.folders); }
-        closeSheet(); await newChat(f); await persistChat(); loadChats();
+        await applyFolder(f);
       } catch (e) { if (!/cancel/i.test(e.message || '')) toast(e.message || 'Could not open the folder'); }
     };
     $('#pClone').onclick = cloneFlow;
+    if ($('#pDetach')) $('#pDetach').onclick = () => applyFolder(null);
     $('#pNone').onclick = () => { closeSheet(); newChat(null); };
     $$('[data-f]', body).forEach((r) => r.onclick = async (e) => {
-      if (e.target.closest('[data-rmf]')) return;
-      const f = S.folders.find((x) => x.id === r.dataset.f); closeSheet(); await newChat(f); await persistChat(); loadChats();
+      if (e.target.closest('[data-rmf]') || e.target.closest('[data-nf]')) return;
+      await applyFolder(S.folders.find((x) => x.id === r.dataset.f));
     });
+    $$('[data-nf]', body).forEach((b) => b.onclick = async () => { const f = S.folders.find((x) => x.id === b.dataset.nf); closeSheet(); await newChat(f); await persistChat(); loadChats(); });
     $$('[data-rmf]', body).forEach((b) => b.onclick = async () => {
       const f = S.folders.find((x) => x.id === b.dataset.rmf);
       if (!await confirmBox('Remove folder?', 'This only removes "' + f.name + '" from the list and releases access. Your files are not deleted.', 'Remove')) return;
       try { await fs.releaseFolder(f.uri); } catch (e) { /* ignore */ }
-      S.folders = S.folders.filter((x) => x.id !== f.id); await A.saveFolders(S.folders); draw();
+      S.folders = S.folders.filter((x) => x.id !== f.id); await A.saveFolders(S.folders);
+      if (S.folder && S.folder.id === f.id) { S.folder = null; if (S.chat) S.chat.folderId = null; drawCtx(); }
+      draw();
     });
   };
   draw();
@@ -495,7 +539,7 @@ async function openChanges() {
   draw();
 }
 async function undoOne(id) {
-  try { await A.undoChange(id, S.folder); toast('Undone'); } catch (e) { toast(e.message || 'Could not undo'); }
+  try { const bk = await db.get('backups', id); const bf = (bk && S.folders.find((x) => x.id === bk.folderId)) || S.folder; if (!bf) throw new Error('The folder of this change is no longer available.'); await A.undoChange(id, bf); toast('Undone'); } catch (e) { toast(e.message || 'Could not undo'); }
   updateChangesChip();
   const msgs = await db.byIndex('messages', 'chatId', S.chat.id);
   msgs.filter((m) => m.backupId === id).forEach((m) => { m.status = 'undone'; m.content += ' (undone by the user)'; db.put('messages', m); renderMsg(m); });
@@ -527,6 +571,7 @@ function openSettings() {
     '<div class="h3">Data</div>' +
     '<button id="usageBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Token usage</span></button>' +
     '<button id="expBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Export this chat as text</span></button>' +
+    '<button id="delAll" class="btn danger" style="width:100%;margin-bottom:8px"><span class="lbl">Delete all conversations</span></button>' +
     '<button id="bkOut" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Back up all data to a folder</span></button>' +
     '<button id="bkIn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Restore from a backup</span></button>' +
     '<div class="h3">Terminal (Termux)</div><div class="field">' + seg('setTerm', [['0', 'Off'], ['1', 'On']], st.termux ? '1' : '0') + '<small>Lets the agent run shell commands in Termux after you approve each one. Advanced.</small></div><div id="termBox"></div>' +
@@ -566,6 +611,12 @@ function openSettings() {
   mem();
   $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
   $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
+  $('#delAll').onclick = async () => {
+    if (!await confirmBox('Delete all conversations?', 'Every chat, its messages and its change backups are removed from this phone. Your folders, files, settings, memory notes and keys are not touched. This cannot be undone.', 'Delete all')) return;
+    if (S.running) stopRun();
+    for (const st of ['messages', 'backups', 'chats']) for (const row of await db.all(st)) await db.del(st, row.id);
+    closeSheet(); await newChat(S.folder); await loadChats(); toast('All conversations deleted');
+  };
   $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message)); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message));
   $('#gitId').onclick = () => openGitIdentity(openSettings);
 }

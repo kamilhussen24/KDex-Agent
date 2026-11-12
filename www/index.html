@@ -78,13 +78,13 @@ setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too lo
       <button id="topNewBtn" class="icon-btn" type="button" aria-label="New chat"><svg class="ic"><use href="#i-plus"/></svg></button>
     </header>
 
-    <div id="ctxBar" class="ctxbar hidden">
-      <button id="chipFolder" class="chip" type="button"><svg class="ic"><use href="#i-folder"/></svg><span id="chipFolderName" class="lbl"></span></button>
-      <button id="chipFiles" class="chip" type="button"><svg class="ic"><use href="#i-file"/></svg><span class="lbl">Files</span></button>
-      <button id="chipGit" class="chip" type="button"><svg class="ic"><use href="#i-branch"/></svg><span id="chipGitLbl" class="lbl">Git</span></button>
-      <button id="chipAuto" class="chip" type="button"><svg class="ic"><use href="#i-shield"/></svg><span id="chipAutoLbl" class="lbl">Ask first</span></button>
-      <button id="chipTerm" class="chip" type="button"><svg class="ic"><use href="#i-terminal"/></svg><span id="chipTermLbl" class="lbl">Terminal</span></button>
-      <button id="chipChanges" class="chip" type="button"><svg class="ic"><use href="#i-edit"/></svg><span id="chipChangesLbl" class="lbl">Changes</span></button>
+    <div id="ctxBar" class="ctxbar">
+      <button id="chipFolder" class="chip" type="button"><svg class="ic"><use href="#i-folder"/></svg><span id="chipFolderName" class="lbl">Add folder</span></button>
+      <button id="chipFiles" class="chip nf" type="button"><svg class="ic"><use href="#i-file"/></svg><span class="lbl">Files</span></button>
+      <button id="chipGit" class="chip nf" type="button"><svg class="ic"><use href="#i-branch"/></svg><span id="chipGitLbl" class="lbl">Git</span></button>
+      <button id="chipAuto" class="chip nf" type="button"><svg class="ic"><use href="#i-shield"/></svg><span id="chipAutoLbl" class="lbl">Ask first</span></button>
+      <button id="chipTerm" class="chip nf" type="button"><svg class="ic"><use href="#i-terminal"/></svg><span id="chipTermLbl" class="lbl">Terminal</span></button>
+      <button id="chipChanges" class="chip nf" type="button"><svg class="ic"><use href="#i-edit"/></svg><span id="chipChangesLbl" class="lbl">Changes</span></button>
     </div>
 
     <div id="messages" class="messages"></div>
@@ -128,7 +128,7 @@ setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too lo
   </section>
 
   <section id="setup" class="setup hidden"></section>
-  <div id="dialog" class="dialog hidden"><div class="dialog-card"><div id="dlgTitle" class="dlg-title"></div><div id="dlgText" class="dlg-text"></div><div class="dlg-actions"><button id="dlgNo" class="btn" type="button"><span class="lbl">Cancel</span></button><button id="dlgYes" class="btn primary" type="button"><span class="lbl">OK</span></button></div></div></div>
+  <div id="dialog" class="dialog hidden"><div class="dialog-card"><div id="dlgTitle" class="dlg-title"></div><div id="dlgText" class="dlg-text"></div><div class="dlg-actions"><button id="dlgNo" class="btn" type="button"><span class="lbl">Cancel</span></button><button id="dlgAlt" class="btn hidden" type="button"><span class="lbl"></span></button><button id="dlgYes" class="btn primary" type="button"><span class="lbl">OK</span></button></div></div></div>
   <div id="toast" class="toast hidden"></div>
 </div>
 <script src="vendor/capacitor.js"></script>
