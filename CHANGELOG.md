@@ -7,6 +7,24 @@ for its version.
 
 ## [Unreleased]
 
+## [1.45.0]
+
+### Added
+- **Project instructions:** a `KDEX.md` file in the project folder is read at the start of every message (up to 4000 characters).
+- **Project map** tool: every file with its functions, classes and routes in one call.
+- **Project checks** tool: finds the project's lint, test and build commands so the agent can run the lightest one and fix errors.
+- **Loop guard:** the agent stops and asks when it repeats the same step with the same result, or fails four times in a row.
+- **Undo all** bar after a task that changed two or more files, with a Review shortcut.
+- **GitHub tools:** read Actions runs, explain why a build failed from the log, list issues and pull requests (read-only; uses the saved Git token without exposing it).
+- **Termux setup checker:** shows which programs are installed and how much space is free, with install commands.
+- **Everyday tools:** calculator, unit converter, `remember` (saves a note), clipboard read and write, alarm and timer in the phone's Clock app.
+- **Image generation** (Settings > Images): creates a picture with your own image-model key and saves it in the project folder, after your approval.
+- Screenshot-to-fix and file-conversion guidance for the agent.
+
+### Changed
+- Redirects are now followed by the app itself in `web_fetch` and the GitHub tools, so each hop is checked and tokens are never sent to another host.
+- Added the `SET_ALARM` permission for the Clock app.
+
 ## [1.44.2]
 
 ### Fixed

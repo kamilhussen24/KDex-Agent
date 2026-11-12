@@ -241,3 +241,36 @@ const EGRESS = new RegExp([
   '\\b(requests|httpx|aiohttp)\\.(post|put|patch|delete|request)\\b|urllib\\.request|http\\.client|\\bsocket\\.|net\\.connect|fetch\\([^)]*method',
 ].join('|'), 'i');
 export function isRiskyCommand(command) { const c = String(command || ''); return DANGER.test(c) || RISKY.test(c) || EGRESS.test(c); }
+
+// ------------------------------------------------------------------ setup checker
+export const CHECK_TOOLS_TOOL = {
+  name: 'check_tools',
+  description: 'Check which common programs are installed in Termux (git, node, python, curl, zip, ImageMagick, poppler for PDF text, ffmpeg, sqlite, jq and more) and how much storage and memory are free. It changes nothing. Use it before a task that needs a program, or when a command fails with "not found".',
+  parameters: { type: 'object', properties: {} },
+};
+const CHECK_LIST = [
+  ['git', 'git'], ['node', 'nodejs'], ['npm', 'nodejs'], ['python3', 'python'], ['pip', 'python-pip'], ['curl', 'curl'], ['unzip', 'unzip'], ['zip', 'zip'],
+  ['convert', 'imagemagick'], ['pdftotext', 'poppler'], ['ffmpeg', 'ffmpeg'], ['sqlite3', 'sqlite'], ['jq', 'jq'], ['php', 'php', 1], ['go', 'golang', 1], ['rustc', 'rust', 1],
+];
+export async function checkTools(folder) {
+  const base = await getTermuxPath(folder);
+  if (!base) throw new Error('The Termux path of this folder is unknown. Set it in Settings > Terminal.');
+  const names = CHECK_LIST.map((x) => x[0]).join(' ');
+  const cmd = 'for t in ' + names + '; do if command -v "$t" >/dev/null 2>&1; then echo "OK $t"; else echo "MISSING $t"; fi; done; ' +
+    'echo "VERSIONS"; git --version 2>&1 | head -1; node --version 2>&1 | head -1; python3 --version 2>&1 | head -1; ' +
+    'echo "SPACE"; df -h . 2>/dev/null | tail -1; free -m 2>/dev/null | sed -n 2p';
+  const r = await Termux.run(cmd, base, 30000);
+  if (Number(r.exitCode) !== 0 && !String(r.stdout || '').includes('OK ') && !String(r.stdout || '').includes('MISSING ')) {
+    throw new Error('Could not reach Termux: ' + String(r.errmsg || r.stderr || 'no answer').slice(0, 200) + '. Check Settings > Terminal (permission, allow-external-apps, Termux open).');
+  }
+  const out = String(r.stdout || '');
+  const ok = []; const missing = [];
+  for (const l of out.split('\n')) { const m = /^(OK|MISSING) (\S+)/.exec(l); if (m) (m[1] === 'OK' ? ok : missing).push(m[2]); }
+  const pkgs = [...new Set(missing.filter((n) => !(CHECK_LIST.find((x) => x[0] === n) || [])[2]).map((n) => (CHECK_LIST.find((x) => x[0] === n) || [])[1]).filter(Boolean))];
+  const heavy = missing.filter((n) => (CHECK_LIST.find((x) => x[0] === n) || [])[2]);
+  const tail = out.split('VERSIONS')[1] || '';
+  return 'Installed: ' + (ok.join(', ') || 'none') + '\nMissing: ' + (missing.join(', ') || 'none') +
+    (pkgs.length ? '\nInstall with: pkg install -y ' + pkgs.join(' ') + '  (install only what the task needs; run it with run_command after the user agrees)' : '') +
+    (heavy.length ? '\nBig installs (only if the task truly needs them; ' + heavy.join(', ') + ' are 40 to 600 MB): php, golang, rust.' : '') +
+    '\n' + tail.replace('SPACE', 'Storage and memory:').trim();
+}

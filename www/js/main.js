@@ -480,7 +480,7 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file', project_map: 'folder', project_checks: 'list', check_tools: 'terminal', github_runs: 'branch', github_run_log: 'branch', github_issues: 'branch', calculate: 'list', convert_units: 'list', remember: 'file', clipboard_read: 'file', clipboard_write: 'file', set_alarm: 'list', set_timer: 'list', generate_image: 'file' };
 function planCard(m) {
   const done = m.steps.filter((x) => x.status === 'done').length;
   return '<div class="tool plan"><div class="th">' + ICON('list') + '<span class="nm">Plan</span><span class="pa">' + done + ' of ' + m.steps.length + ' done</span></div><div class="steps">' +
@@ -517,12 +517,13 @@ function toolCard(m) {
   if (m.plan) {
     h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') +
       (m.plan.more ? '<span class="dl c">... ' + m.plan.more + ' more lines</span>' : '') + '</div>';
-    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
-    if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : m.plan.web ? 'Read' : 'Apply') + '</span></button>' +
+    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal' || m.plan.path === 'device' || m.plan.path === 'image') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
+    if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : m.plan.web ? 'Read' : m.plan.path === 'image' ? 'Create' : m.plan.path === 'device' ? 'Allow' : 'Apply') + '</span></button>' +
       ((m.plan.path === 'terminal' || m.plan.web) && m.plan.allowKeys && m.plan.allowKeys.length ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.map((k) => k.replace(/^web:/, '')).join(', ')) + ' in this chat</button>' : '');
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
     h += '</div>';
     if (m.plan.path === 'terminal' && m.content && st !== 'pending') h += '<pre class="out">' + esc(m.content.slice(-3000)) + '</pre>';
+    if (m.preview && m.preview.length) h += '<div class="genimg"><img alt="Generated picture" src="data:' + m.preview[0].mime + ';base64,' + m.preview[0].data + '"></div>';
   } else if (m.status === 'error' || m.status === 'cancelled') {
     h += '<pre class="out">' + esc((m.content || '').slice(0, 400)) + '</pre>';
   }
@@ -587,6 +588,7 @@ async function send(regenerate) {
   const files = attach.filter((a) => !a.img);
   if (!regenerate) { input.value = ''; autoGrow(); S.attach = []; drawChips(); }
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
+  const tu = $('#turnUndo'); if (tu) tu.remove();
   delete S.chat.fresh; await persistChat(); loadChats();
   S.abort = new AbortController(); setRunning(true);
   Work.start('Working on your request'); const t0 = Date.now();
@@ -612,7 +614,23 @@ async function send(regenerate) {
     const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
     m.id = await db.put('messages', m); renderMsg(m);
   }
-  Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); updateChangesChip(); loadChats(); drawRing();
+  Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); updateChangesChip(); loadChats(); drawRing(); showTurnUndo(t0);
+}
+/** After a task that changed two or more files: one tap to undo the whole task, or review the list. */
+async function showTurnUndo(since) {
+  const old = $('#turnUndo'); if (old) old.remove();
+  if (!S.chat) return;
+  const live = (await db.byIndex('backups', 'chatId', S.chat.id)).filter((b) => !b.undone && b.at >= since).sort((a, b) => b.id - a.id);
+  if (live.length < 2) return;
+  const el = document.createElement('div'); el.id = 'turnUndo'; el.className = 'turnundo';
+  el.innerHTML = '<span class="grow">' + live.length + ' changes made</span><button class="btn sm" data-a="review"><span class="lbl">Review</span></button><button class="btn sm danger" data-a="undo">' + ICON('undo') + '<span class="lbl">Undo all</span></button>';
+  $('#messages').appendChild(el); scrollEnd(true);
+  $('[data-a=review]', el).onclick = openChanges;
+  $('[data-a=undo]', el).onclick = async () => {
+    if (!await confirmBox('Undo this whole task?', 'The ' + live.length + ' changes made in this task are rolled back, newest first. Other earlier changes stay.', 'Undo all')) return;
+    for (const b of live) await undoOne(b.id);
+    el.remove(); updateChangesChip();
+  };
 }
 async function regenerate() {
   if (S.running) return;
@@ -1015,6 +1033,9 @@ function openSettings() {
     '<div class="field"><span>Default thinking</span>' + seg('setThink', [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], st.defaultThink) + '</div>' +
     '<label class="field"><span>Max steps per message</span><input id="setSteps" type="number" min="1" max="60" value="' + st.maxSteps + '"><small>Stops runaway tool loops.</small></label>' +
     '<label class="field"><span>Custom instructions</span><textarea id="setInstr" placeholder="Tone, language, rules...">' + esc(st.instructions) + '</textarea></label>' +
+    '<div class="h3">Images</div>' +
+    '<label class="field"><span>Image provider</span><select id="setImgProv"><option value="">Off</option>' + S.providers.filter((p) => p.type !== 'anthropic').map((p) => '<option value="' + esc(p.id) + '"' + (p.id === st.imageProvider ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
+    '<label class="field"><span>Image model</span><input id="setImgModel" value="' + esc(st.imageModel || '') + '" placeholder="gpt-image-1" autocapitalize="off" autocomplete="off"><small>Lets the agent create pictures such as thumbnails and backgrounds with your own key. It always asks first, because each picture uses credits. Examples: gpt-image-1 or dall-e-3 (OpenAI), imagen-3.0-generate-002 (Gemini). Anthropic models cannot make pictures.</small></label>' +
     '<div class="h3">Files</div>' +
     '<div class="field"><span>Approvals in new chats</span>' + seg('setAutoDef', [['0', 'Ask first'], ['1', 'Auto']], st.autoDefault ? '1' : '0') + '<small>Auto runs file changes, zip, commits and everyday commands without asking. Deleting data, sudo, force push, publishing and similar risky actions still ask. You can switch any chat with the chip above the messages. Backups and Undo always work.</small></div>' +
     '<div class="field"><span>Protect secret files</span>' + seg('setProt', [['1', 'On'], ['0', 'Off']], st.protectSecrets !== false ? '1' : '0') + '<small>.env files, keys and credentials stay hidden from the agent and the chat. The agent can still run your project with them. Secret values are removed from terminal output, and new secret files are never committed automatically.</small></div>' +
@@ -1050,6 +1071,8 @@ function openSettings() {
   bindSeg('setTheme', (v) => { save({ theme: v }); applyTheme(); });
   bindSeg('setQuiet', (v) => save({ quietToasts: v === '1' }));
   $('#setModel').onchange = (e) => save({ defaultModel: e.target.value });
+  $('#setImgProv').onchange = (e) => save({ imageProvider: e.target.value });
+  $('#setImgModel').onchange = (e) => save({ imageModel: e.target.value.trim() });
   $('#setSteps').onchange = (e) => save({ maxSteps: Math.max(1, Math.min(60, Number(e.target.value) || 20)) });
   $('#setInstr').onchange = (e) => save({ instructions: e.target.value });
   $('#addProv').onclick = () => showSetup(false);

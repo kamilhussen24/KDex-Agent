@@ -98,7 +98,7 @@ async function download(u, signal) {
   const timer = setTimeout(stop, 25000);
   try {
     for (let hop = 0; hop < 6; hop++) {
-      const r = await httpRaw({ url, method: 'GET', signal: ac.signal, headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36', 'Accept': 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5', 'Accept-Language': 'en,bn;q=0.8' } });
+      const r = await httpRaw({ url, method: 'GET', noRedirect: true, signal: ac.signal, headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36', 'Accept': 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5', 'Accept-Language': 'en,bn;q=0.8' } });
       if ([301, 302, 303, 307, 308].includes(r.status) && r.headers.location) {
         for await (const c of r.chunks) { void c; break; }
         url = checkUrl(new URL(r.headers.location, url).href).href.replace(/^http:/i, 'https:'); continue;

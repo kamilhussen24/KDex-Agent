@@ -459,3 +459,10 @@ a.link{color:var(--ink);font-weight:600;text-decoration:none}
 .wcard .wwhy{padding:0 14px 12px;font-size:13px;color:var(--mut)}
 .wcard .wtip{padding:10px 14px;background:var(--bg2);font-size:13px;line-height:1.45;border-top:1px solid var(--line)}
 .wcard .wtip .btn{margin-top:8px}
+
+.tool .genimg{border-top:1px solid var(--line);padding:8px 12px;background:var(--bg)}
+.tool .genimg img{display:block;max-width:100%;max-height:260px;margin:0 auto;border-radius:8px}
+.turnundo{display:flex;align-items:center;gap:8px;margin:6px 0 10px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card);font-size:13px;color:var(--mut)}
+.turnundo .grow{flex:1;min-width:0}
+.turnundo .btn{min-height:32px;flex:none;white-space:nowrap}
+.turnundo .btn .lbl{white-space:nowrap}

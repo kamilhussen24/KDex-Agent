@@ -277,6 +277,89 @@ public class KdexNativePlugin extends Plugin {
         call.resolve();
     }
 
+    // ------------------------------------------------------------------ clipboard, alarms and timers
+
+    @PluginMethod
+    public void clipboardRead(final PluginCall call) {
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                    String text = "";
+                    if (cm != null && cm.hasPrimaryClip()) {
+                        android.content.ClipData data = cm.getPrimaryClip();
+                        if (data != null && data.getItemCount() > 0) {
+                            CharSequence cs = data.getItemAt(0).coerceToText(getContext());
+                            if (cs != null) text = cs.toString();
+                        }
+                    }
+                    JSObject ret = new JSObject();
+                    ret.put("text", text);
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    call.reject(String.valueOf(e.getMessage()));
+                }
+            }
+        });
+    }
+
+    @PluginMethod
+    public void clipboardWrite(final PluginCall call) {
+        final String text = call.getString("text", "");
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (cm == null) { call.reject("Clipboard is not available"); return; }
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("KDex Agent", text));
+                    call.resolve();
+                } catch (Exception e) {
+                    call.reject(String.valueOf(e.getMessage()));
+                }
+            }
+        });
+    }
+
+    /** Sets an alarm in the phone's Clock app (no screen shown). It rings at the next time that matches hour and minute. */
+    @PluginMethod
+    public void setAlarm(PluginCall call) {
+        try {
+            final int hour = call.getInt("hour", 0).intValue();
+            final int minute = call.getInt("minute", 0).intValue();
+            Intent i = new Intent(android.provider.AlarmClock.ACTION_SET_ALARM);
+            i.putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour);
+            i.putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute);
+            i.putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, call.getString("message", "KDex Agent reminder"));
+            i.putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true);
+            getActivity().startActivity(i);
+            call.resolve();
+        } catch (android.content.ActivityNotFoundException e) {
+            call.reject("No Clock app was found on this phone");
+        } catch (Exception e) {
+            call.reject(String.valueOf(e.getMessage()));
+        }
+    }
+
+    /** Starts a countdown timer in the phone's Clock app (no screen shown). */
+    @PluginMethod
+    public void setTimer(PluginCall call) {
+        try {
+            final int seconds = call.getInt("seconds", 60).intValue();
+            Intent i = new Intent(android.provider.AlarmClock.ACTION_SET_TIMER);
+            i.putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds);
+            i.putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, call.getString("message", "KDex Agent timer"));
+            i.putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true);
+            getActivity().startActivity(i);
+            call.resolve();
+        } catch (android.content.ActivityNotFoundException e) {
+            call.reject("No Clock app was found on this phone");
+        } catch (Exception e) {
+            call.reject(String.valueOf(e.getMessage()));
+        }
+    }
+
     // ------------------------------------------------------------------ streaming HTTP
 
     @PluginMethod
@@ -287,6 +370,7 @@ public class KdexNativePlugin extends Plugin {
         final String body = call.getString("body");
         final String bodyB64 = call.getString("bodyB64");
         final JSObject headers = call.getObject("headers", new JSObject());
+        final boolean noRedirect = Boolean.TRUE.equals(call.getBoolean("noRedirect", false));
         if (id == null || url == null) { call.reject("id and url required"); return; }
         call.resolve();
 
@@ -296,6 +380,7 @@ public class KdexNativePlugin extends Plugin {
                 c = (HttpURLConnection) new URL(url).openConnection();
                 connections.put(id, c);
                 c.setRequestMethod(method);
+                c.setInstanceFollowRedirects(!noRedirect);
                 c.setConnectTimeout(30000);
                 c.setReadTimeout(300000);
                 Iterator<String> it = headers.keys();

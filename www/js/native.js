@@ -55,7 +55,7 @@ function bytesToB64(u8) {
  * Low-level request. Returns { status, headers, chunks } where chunks is an async iterable of Uint8Array.
  * `body` may be a string or a Uint8Array. `signal` (AbortSignal) cancels the request.
  */
-export async function httpRaw({ url, method = 'POST', headers = {}, body = null, signal }) {
+export async function httpRaw({ url, method = 'POST', headers = {}, body = null, signal, noRedirect = false }) {
   if (!plugin) {
     const res = await fetch(url, { method, headers, body, signal });
     const hdrs = {}; res.headers.forEach((v, k) => { hdrs[k] = v; });
@@ -94,7 +94,7 @@ export async function httpRaw({ url, method = 'POST', headers = {}, body = null,
     signal.addEventListener('abort', () => { finished = true; failure = failure || new DOMException('Aborted', 'AbortError'); cancel(); if (wake) { const w = wake; wake = null; w(); } headResolve(); });
   }
 
-  const req = { id, url, method, headers };
+  const req = { id, url, method, headers, noRedirect: !!noRedirect };
   if (body instanceof Uint8Array) req.bodyB64 = bytesToB64(body); else if (body != null) req.body = body;
   await plugin.httpStart(req);
   await headReady;
@@ -286,5 +286,27 @@ export const Termux = {
     if (window.__kdexTermux) return window.__kdexTermux({ command, cwd, timeoutMs });
     if (!plugin) throw new Error('The terminal works only in the Android app.');
     return plugin.termuxRun({ command, cwd, timeoutMs });
+  },
+};
+
+/** Clipboard and Clock app (alarms and timers). On Android these go through the native plugin; in a browser they fall back where possible. */
+export const Device = {
+  async clipRead() {
+    if (plugin) { const r = await plugin.clipboardRead(); return String((r && r.text) || ''); }
+    if (navigator.clipboard && navigator.clipboard.readText) return navigator.clipboard.readText();
+    throw new Error('The clipboard cannot be read here.');
+  },
+  async clipWrite(text) {
+    if (plugin) { await plugin.clipboardWrite({ text: String(text) }); return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(String(text)); return; }
+    throw new Error('The clipboard cannot be written here.');
+  },
+  async alarm(hour, minute, message) {
+    if (!plugin) throw new Error('Alarms work only in the Android app.');
+    await plugin.setAlarm({ hour, minute, message });
+  },
+  async timer(seconds, message) {
+    if (!plugin) throw new Error('Timers work only in the Android app.');
+    await plugin.setTimer({ seconds, message });
   },
 };

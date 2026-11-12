@@ -7,11 +7,15 @@ import { TOOLS, WRITE_TOOLS, BINARY_EXT, runRead, planWrite, applyWrite, undoBac
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo, resetGitCache } from './git.js';
 import { protectionOn, isSecretPath, scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
-import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand } from './termux.js';
+import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand, CHECK_TOOLS_TOOL, checkTools } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { VIEW_TOOL, loadFolderImage } from './image.js';
 import { WEB_TOOL, checkUrl, fetchPage } from './web.js';
 import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction, gitActionIsRead } from './gittools.js';
+import { EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, EXTRA_FOLDER_NAMES, EXTRA_ANY_NAMES, runExtra } from './extras.js';
+import { GITHUB_TOOLS, GITHUB_NAMES, runGithub } from './github.js';
+import { DEVICE_TOOLS, DEVICE_NAMES, previewDevice, runDevice } from './device.js';
+import { IMAGE_TOOL, imageSetup, requestImage, targetPath, previewOf } from './imagegen.js';
 
 const CONTEXT_FULL = /context.{0,25}(length|window|limit)|maximum context|too many tokens|prompt is too long|input is too long|input.{0,20}too long|reduce the length|exceeds? (the )?(model|token|context)|token limit|string too long/i;
 export const BUDGETS = { economy: 3000, balanced: 9000, full: 60000 };
@@ -31,7 +35,7 @@ const PLAN_TOOL = {
     required: ['steps'],
   },
 };
-export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true, quietToasts: true };
+export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true, quietToasts: true, imageProvider: '', imageModel: '' };
 
 export async function getSettings() {
   return { ...defaults, ...(await kvGet('settings', {})) };
@@ -89,6 +93,7 @@ const ABOUT =
   '- New chat: the + button (no folder). Add or change a project folder: the folder button above the chat. Attach photos or text files: the paperclip. Delete one chat: its trash icon in the menu list; delete everything: Settings > Data > Delete all conversations.\n' +
   '- Save tokens: Settings > Chat > Token saving (Economy, Balanced, Full); older messages are summarised automatically and reading each file once also saves cost. Memory and learning: Settings > Memory. Theme: Settings > Appearance. Token usage: Settings > Data > Token usage.\n' +  '- Connect a model: Settings > Add provider, pick the service, paste the API key, choose models (a few popular ones are listed; any other model id can be typed). Thinking: bulb button (Off, Low, Medium, High). Token usage: Settings > Token usage.\n' +
   '- Open a project: folder button > Open a folder, then pick the folder. Only that folder is accessible.\n' +
+  '- Project instructions: a file named KDEX.md in the project folder is read at the start of every message of that chat (rules such as language, test command, files not to touch; up to 4000 characters). Pictures: Settings > Images (choose the provider and image model; each picture asks first).\n' +
   '- Approvals: the chip above the chat switches Ask first and Auto. Auto runs everyday actions and still asks for risky ones (rm, sudo, every git push, publishing). File changes keep backups and Undo.\n' +
   '- Git: the Git chip. Folder without Git: Clone, New repo (publishes to GitHub or GitLab) or Local only. Pushing, and private repositories, need a name, email and access token: Settings > Git > Identity and access tokens (GitHub classic token with the repo scope, or fine-grained with Contents: Read and write). The built-in Git supports https only, one branch at a time, no Git LFS, no submodules and no SSH, and it is slow on very large repositories. When Terminal is on, real git in Termux (pkg install git) handles those cases, and the app lends it the saved token automatically for clone, fetch, pull and push.\n' +
 
@@ -100,6 +105,23 @@ const ABOUT =
   'Understand the request first. For anything with several steps, think it through, then act. Be proactive: when the request is clear enough, start working and choose sensible defaults yourself (for example Python and SQLite for a small bot), saying in one line which you chose. Ask a question only when a wrong guess would be costly or the task cannot start without the answer, and then ask one short question, never a list of questions. Be concise: no filler, no repeating the question, no pasting whole files. ' +
   'Keep tokens low: read only what you need, read each file once, use search to find lines, prefer small edits. ' +
   'Never claim something worked unless a tool result shows it. If a tool fails, read the error, fix the cause and try again once or twice, then explain plainly what is blocking you.';
+
+
+const WORK_TOOLS_GUIDE =
+  'WORKING TOOLS. project_map shows every file with its functions and line numbers in one call: use it first on an unfamiliar or big project, then read only the parts you need. ' +
+  'project_checks lists the project\'s lint, test and build commands (it runs nothing); after changing code, call it once, then run the lightest suitable one with run_command when the terminal is on, fix real errors and repeat at most 3 times. Never claim a check passed unless you ran it. ' +
+  'github_runs, github_run_log and github_issues read the project\'s GitHub builds, issues and pull requests: when the user says a build failed or asks what is open, use them instead of guessing. ' +
+  'SCREENSHOTS: when the user attaches a screenshot of the app or a page and asks for a change or a fix, find the code behind what is visible by searching for its visible text, labels and class names, compare the code with the picture, make the smallest fix, and say what you changed. Do not ask for the file name. ' +
+  'If you notice you are repeating the same step or the same error, stop, say plainly what is blocking you and ask the user; the app also stops repeated loops itself.\n';
+const TERMINAL_TOOLS_GUIDE =
+  'check_tools tells which programs are installed in Termux and how much space is free: use it before a task that needs a program and when something is "not found". ' +
+  'FILE CONVERSION recipes (install the package first if check_tools says it is missing): PDF to text: pdftotext -layout in.pdf out.txt (pkg install poppler). Shrink or convert pictures: convert in.png -resize 1280x out.jpg (pkg install imagemagick). CSV or JSON tables: python3 with the csv and json modules. Zip: the zip and unzip tools. Keep results in the project folder and tell the user the file name.\n';
+const IMAGE_GUIDE =
+  'IMAGES: generate_image makes a new picture and saves it in the folder (the user approves each one; it costs their credits). Write a rich English prompt (subject, style, colours, light, composition) and say when empty space is needed for text. Pictures with words inside come out misspelled, so put real text on top afterwards with HTML/CSS, Pillow or ImageMagick (terminal) and view_image to check the result. To make something like an attached picture, look at it first, describe its style in the prompt, and do not copy a protected work or a real person\'s face.\n';
+const DAILY_GUIDE =
+  'EVERYDAY TOOLS (available in every chat). calculate does exact math: use it for every sum, percentage, split or margin instead of working it out yourself. convert_units converts length, weight, volume, temperature, area, speed, data size and time; for money get a live rate first (see LIVE INFORMATION) then use calculate. ' +
+  'remember saves one short lasting fact about the user when they ask you to remember something. clipboard_write copies a finished text so the user can paste it; clipboard_read only when they say to use what they copied. ' +
+  'set_timer starts a countdown ("remind me in 20 minutes") and set_alarm sets a clock alarm within the next 24 hours; both use the phone\'s Clock app. Say plainly if a reminder is further away than 24 hours: it cannot be set from here.';
 
 const PMAP_SKIP = /(^|\/)(node_modules|\.git|dist|build|out|target|__pycache__|\.venv|venv|\.next|\.gradle|\.idea|coverage|vendor)(\/|$)/;
 const PMAP_KEYS = ['package.json', 'requirements.txt', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle', 'composer.json', 'Makefile', 'Dockerfile', 'README.md'];
@@ -137,7 +159,24 @@ async function projectMap(folder) {
   return text;
 }
 
-function systemPrompt(folder, memory, summary, custom, termuxPath, pmap) {
+
+/** The project's own instructions: KDEX.md in the folder root (up to 4000 characters, read fresh every turn). */
+async function readKdex(folder) {
+  for (const name of ['KDEX.md', 'kdex.md']) {
+    try {
+      const st = await fs.stat(folder.uri, name);
+      if (!st || !st.exists || st.isDir) continue;
+      const r = await fs.readText(folder.uri, name, 20000);
+      if (r.binary) continue;
+      const t = r.text.trim();
+      if (!t) return '';
+      return t.length > 4000 ? t.slice(0, 4000) + '\n[KDEX.md is longer than 4000 characters; only the start is used. Tell the user to shorten it.]' : t;
+    } catch (e) { /* no file or unreadable */ }
+  }
+  return '';
+}
+
+function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, imgOn) {
   const parts = [ABOUT, 'LANGUAGE AND LENGTH: reply in the language of the user\'s latest message: an English message gets English; Bengali, or Bengali typed in English letters, gets Bengali. Never switch language on your own. Keep every reply as short as the question allows: a greeting such as "Hi" gets one short line in the same language, without emoji, without a feature list and without describing the app. Longer answers only when the task needs them; this saves the user money.'];
   if (folder) {
     parts.push(
@@ -164,6 +203,9 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap) {
   } else {
     parts.push('NO FOLDER in this chat. You have no file or terminal tools here, but you can still do everyday work: answer, write, explain, review attached photos and text files (code, notes, CSV, JSON, Word .docx, Excel .xlsx, PowerPoint .pptx; PDF is not supported, so ask for the text or a photo of the page), and write code. When the user needs a finished file (a script, a document, a config, a small page), call make_file with its name and full content; the chat shows a Download button. Never paste a long file into the reply when make_file fits. For real project work (several files, running commands, Git), tell the user to tap the folder button above the chat and pick the project folder, then continue.');
   }
+  if (folder) parts.push(WORK_TOOLS_GUIDE + (termuxPath ? TERMINAL_TOOLS_GUIDE : '') + (imgOn ? IMAGE_GUIDE : ''));
+  parts.push(DAILY_GUIDE);
+  if (folder && kdex) parts.push('PROJECT INSTRUCTIONS (from KDEX.md in the project folder, written by the user; follow them for this project, unless they ask for something unsafe):\n' + kdex);
   if (folder && pmap) parts.push('PROJECT MAP (made automatically, may be slightly out of date; use list_dir to confirm before relying on it):\n' + pmap);
   if (custom && custom.trim()) parts.push('User instructions:\n' + custom.trim());
   if (memory.length) parts.push('What you know about the user from earlier chats (use it naturally, do not recite it):\n' + memory.map((m) => '- ' + m.text).join('\n'));
@@ -289,7 +331,9 @@ async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
     return toNeutral(m, { compact: i < lastUser, keepImages: i >= keepImgFrom, model: rt.model && rt.model.id });
   });
   const pmap = folder ? await projectMap(folder) : '';
-  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx, pmap), messages: msgs };
+  const kdex = folder ? await readKdex(folder) : '';
+  const imgOn = !!(folder && settings.imageProvider && settings.imageModel);
+  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx, pmap, kdex, imgOn), messages: msgs };
 }
 
 /** How full the chat history is compared with the token budget of the chosen mode (what the next message would send). */
@@ -379,12 +423,14 @@ export async function runTurn(ctx) {
 
   const hasGit = folder ? await isRepo(folder).catch(() => false) : false;
   const termuxPath = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
-  const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL], termuxPath ? TERMUX_TOOLS : []);
-  const tools = folder ? (hasGit ? base.concat(GIT_TOOLS) : base) : [PLAN_TOOL, FILE_TOOL, WEB_TOOL];
+  const imgOn = !!(folder && settings.imageProvider && settings.imageModel);
+  const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
+  const tools = folder ? (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS) : base) : [PLAN_TOOL, FILE_TOOL, WEB_TOOL].concat(EXTRA_ANY_TOOLS, DEVICE_TOOLS);
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
   const readSeen = new Set(); let ranTools = false; let scale = 1;
+  const seenSigs = new Map(); let errRun = 0; let stuck = '';
   for (;;) {
     if (signal.aborted) return;
     steps++;
@@ -480,7 +526,7 @@ export async function runTurn(ctx) {
       ui.onTool(tm);
       try {
         if (call.bad) throw new Error('The tool arguments were not valid JSON. Try again with valid arguments.');
-        if (!folder && call.name !== 'update_plan' && call.name !== 'make_file' && call.name !== 'web_fetch') throw new Error('No project folder is open. Tell the user to tap the folder button above the chat and pick the project folder.');
+        if (!folder && call.name !== 'update_plan' && call.name !== 'make_file' && call.name !== 'web_fetch' && !EXTRA_ANY_NAMES.has(call.name) && !DEVICE_NAMES.has(call.name)) throw new Error('No project folder is open. Tell the user to tap the folder button above the chat and pick the project folder.');
         if (call.name === 'update_plan') {
           const steps = (Array.isArray(call.args && call.args.steps) ? call.args.steps : []).slice(0, 20).map((x) => ({ text: String((x && x.text) || '').slice(0, 160), status: ['todo', 'doing', 'done'].includes(x && x.status) ? x.status : 'todo' })).filter((x) => x.text);
           tm.steps = steps; tm.args = steps.filter((x) => x.status === 'done').length + '/' + steps.length + ' done';
@@ -493,6 +539,45 @@ export async function runTurn(ctx) {
           if (body.length > 400000) throw new Error('The file is too large for a download card (limit about 400 KB).');
           tm.file = { name: nm, size: body.length }; tm.fileContent = body; tm.args = nm;
           tm.content = 'The file ' + nm + ' is ready. The chat now shows a Download button for it; tell the user to tap Download (or Copy).'; tm.status = 'done';
+        } else if (EXTRA_ANY_NAMES.has(call.name) || EXTRA_FOLDER_NAMES.has(call.name)) {
+          if (EXTRA_FOLDER_NAMES.has(call.name) && !folder) throw new Error('This needs a project folder.');
+          tm.content = await runExtra(call.name, call.args, folder); tm.status = 'done';
+        } else if (GITHUB_NAMES.has(call.name)) {
+          tm.content = await runGithub(call.name, call.args, folder, signal); tm.status = 'done';
+        } else if (call.name === 'check_tools') {
+          if (!termuxPath) throw new Error('The terminal is off or its path is unknown, so programs cannot be checked. Ask the user to turn Terminal on in Settings.');
+          tm.content = await checkTools(folder); tm.status = 'done';
+        } else if (DEVICE_NAMES.has(call.name)) {
+          const pv = previewDevice(call.name, call.args);
+          tm.plan = { path: 'device', op: pv.op, added: 0, removed: 0, diff: pv.lines, more: 0, risky: pv.risky, auto: !pv.risky && !!chat.auto };
+          let decision = 'apply';
+          if (!tm.plan.auto) { tm.status = 'pending'; await db.put('messages', tm); ui.onTool(tm); decision = await ui.requestApproval(tm, signal); }
+          if (decision !== 'apply') { tm.status = 'rejected'; tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user did not allow this. Do not retry it; ask what they want instead.'; }
+          else { tm.content = await runDevice(call.name, call.args); tm.status = 'applied'; }
+        } else if (call.name === 'generate_image') {
+          if (!imgOn) throw new Error('Image generation is not set up. Tell the user to open Settings > Images, choose the provider and type the image model name, for example gpt-image-1.');
+          const setup = await imageSetup(settings, await getProviders());
+          const iargs = call.args || {};
+          const planned = await targetPath(iargs, folder, 'png');
+          tm.args = planned;
+          tm.plan = { path: 'image', op: 'creates a picture with ' + setup.model + ' (' + setup.provider.name + '; uses your credits)', added: 0, removed: 0, diff: [{ t: 'ctx', text: String(iargs.prompt || '').slice(0, 700) }, { t: 'ctx', text: 'saves as ' + planned }], more: 0, risky: false, auto: !!chat.auto };
+          let decision = 'apply';
+          if (!tm.plan.auto) { tm.status = 'pending'; await db.put('messages', tm); ui.onTool(tm); decision = await ui.requestApproval(tm, signal); }
+          if (decision !== 'apply') { tm.status = 'rejected'; tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user did not allow making this picture. Do not retry it; ask what they want instead.'; }
+          else {
+            tm.status = 'running'; ui.onTool(tm);
+            const img = await requestImage(iargs, setup, signal);
+            const rel = await targetPath(iargs, folder, img.ext);
+            await fs.writeBytes(folder.uri, rel, img.bytes);
+            const bk = { chatId: chat.id, folderId: folder.id, path: rel, existed: false, content: '', op: 'create', at: Date.now(), undone: false };
+            bk.id = await db.put('backups', bk);
+            pruneBackups(chat.id).catch(() => {});
+            kvSet('pmap:' + folder.id, null).catch(() => {});
+            const pv = await previewOf(img.bytes, img.ext);
+            if (pv) tm.preview = [{ mime: pv.mime, data: pv.data }];
+            tm.args = rel; tm.backupId = bk.id; tm.status = 'applied';
+            tm.content = 'Saved the picture as ' + rel + ' (' + Math.round(img.bytes.length / 1024) + ' KB). The chat card shows it to the user. Use view_image on it only if you need to check it yourself.';
+          }
         } else if (call.name === 'view_image') {
           if (await protectionOn() && isSecretPath(String((call.args && call.args.path) || ''))) throw new Error('That file is protected and hidden from you.');
           const im = await loadFolderImage(folder, call.args && call.args.path);
@@ -649,8 +734,22 @@ export async function runTurn(ctx) {
       }
       await db.put('messages', tm);
       ui.onTool(tm);
+      // Loop guard: the same call giving the same result three times, or four errors in a row, means the model is stuck.
+      if (!signal.aborted && tm.status !== 'rejected' && tm.status !== 'cancelled') {
+        const sig = call.name + '|' + JSON.stringify(call.args || {}).slice(0, 300) + '|' + tm.status + '|' + String(tm.content || '').slice(0, 200);
+        const n = (seenSigs.get(sig) || 0) + 1; seenSigs.set(sig, n);
+        errRun = tm.status === 'error' ? errRun + 1 : 0;
+        if (!stuck && n >= 3 && !WRITE_TOOLS.has(call.name)) stuck = 'I got the same result from the same step three times';
+        else if (!stuck && errRun >= 4) stuck = 'four steps in a row failed';
+      }
     }
     if (signal.aborted) return;
+    if (stuck) {
+      const note = { chatId: chat.id, role: 'assistant', text: 'I stopped because I seem to be going in circles (' + stuck + '). Tell me what to try differently, or say "continue" if you want me to try again.', model: rt.model.id, status: 'done', at: Date.now() };
+      note.id = await db.put('messages', note);
+      ui.onAssistant(note);
+      return;
+    }
   }
 }
 
@@ -662,6 +761,13 @@ function previewArgs(call) {
   if (a.path != null) return String(a.path);
   if (a.dest != null) return String(a.dest);
   if (a.query != null) return String(a.query);
+  if (a.expression != null) return String(a.expression).slice(0, 60);
+  if (a.note != null) return String(a.note).slice(0, 60);
+  if (a.time != null) return String(a.time);
+  if (a.minutes != null || a.seconds != null) return (a.minutes != null ? a.minutes + ' min' : '') + (a.seconds != null ? ' ' + a.seconds + ' s' : '');
+  if (a.prompt != null) return String(a.prompt).slice(0, 60);
+  if (a.text != null) return String(a.text).slice(0, 60);
+  if (a.from != null) return a.value + ' ' + a.from + ' > ' + a.to;
   if (a.pattern != null) return String(a.pattern);
   return '';
 }
