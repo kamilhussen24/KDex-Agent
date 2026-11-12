@@ -271,3 +271,11 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - AI checks its own work: after changing files it reads the result back and runs the lightest test, lint or build when the terminal is available, then reports what it really checked.
 - Project map: on each turn the AI gets a short map of the open folder (main file types, top folders, root files, package.json scripts). It is cached for 20 minutes and refreshed after any change. Secret files and folders such as node_modules and .git are left out.
 - Git error cards no longer have Copy link, Copy details or Open token settings buttons (they did not work reliably in the Android WebView). The text states where to fix it, and can be selected with a long press. Pull now and Retry stay.
+
+### v1.26.0 – quieter app, clearer feedback
+- Quiet mode (Settings > Appearance > Notifications, default Quiet): popups that only repeat what the screen already shows are hidden (Token saved, Using folder, Auto mode changed, Git repository found, Committed, Fetched and similar). Errors, warnings and results of long tasks (push, pull, clone) still show. Choose "All" to see every popup again.
+- Copy buttons now show "Copied" on the button itself (or a tick on icon buttons) instead of a popup.
+- Git > Suggest: dimmed when no model is connected. Tapping it shows a red line right above the buttons ("Connect a model first: Settings > Add provider.") that clears after 5 seconds. Other suggest errors use the same line.
+- Git > History: shows 10 commits, "Show 10 more" up to 30, then "End of history" or "Showing the latest 30".
+- Git identity and tokens: Save returns to the previous screen. A token that is empty-host or too short or contains spaces stays on the screen with the reason under the Save button.
+- Terminal setup card: every command in its own single-line box (scrolls sideways, one tap selects the whole command).

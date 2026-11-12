@@ -356,3 +356,8 @@ html[data-theme=dark] .toast.pill.ok .tic{color:#4ade80}html[data-theme=dark] .t
 /* open by path */
 .opmsg{min-height:20px;margin:8px 2px 0;font-size:13px;line-height:1.4;color:var(--mut);white-space:pre-line;overflow-wrap:anywhere}
 .opmsg.good{color:var(--ok)}.opmsg.err{color:var(--bad)}
+
+.ghint{font-size:12.5px;line-height:1.4;color:var(--bad);margin:2px 2px 6px}.ghint:empty{display:none}
+.btn.dim{opacity:.55}
+.card.tmsetup p{margin:0 0 8px}
+pre.cmd{margin:0 0 8px;padding:10px 12px;background:var(--code);border:1px solid var(--line);border-radius:10px;font:12.5px/1.4 ui-monospace,Menlo,Consolas,monospace;color:var(--fg);white-space:pre;overflow-x:auto;-webkit-user-select:all;user-select:all;-webkit-overflow-scrolling:touch}

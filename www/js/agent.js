@@ -28,7 +28,7 @@ const PLAN_TOOL = {
     required: ['steps'],
   },
 };
-export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true };
+export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true, quietToasts: true };
 
 export async function getSettings() {
   return { ...defaults, ...(await kvGet('settings', {})) };

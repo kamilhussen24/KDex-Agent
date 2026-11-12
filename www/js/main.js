@@ -30,6 +30,16 @@ function toastKind(t) {
   if (/^(saved|saving|copied|done|cloned|undone|restored|reported|remembered|token saved|key updated|provider saved|git removed|git identity saved|repository created|all conversations deleted|committed|pushed|pulled|fetched)/i.test(t)) return 'ok';
   return 'info';
 }
+/** Confirmations the screen already shows (a chip changes, a sheet closes). Hidden in Quiet mode. */
+const QUIET_RE = /^(saved$|provider saved|key updated|token saved|git identity saved|git removed|using .+ in this chat|folder removed from this chat|auto: risky|asking before every|git repository found|cancelled|undone|fetched|committed|discarded|branch created|switched branch|branch deleted|commit undone|remote saved|remote switched|\d+ model\(s\) added)/i;
+/** Shows "Copied" on the button itself for a moment, instead of a popup. */
+function flashCopied(el, ok) {
+  if (!ok || !el) { toast('Could not copy'); return; }
+  const lbl = el.querySelector && el.querySelector('.lbl');
+  if (lbl) { const o = lbl.textContent; lbl.textContent = 'Copied'; setTimeout(() => { lbl.textContent = o; }, 1400); return; }
+  const u = el.querySelector && el.querySelector('use');
+  if (u) { const o = u.getAttribute('href'); u.setAttribute('href', '#i-check'); setTimeout(() => u.setAttribute('href', o), 1400); }
+}
 const TOAST_ICON = { ok: 'check', err: 'alert', warn: 'alert', info: 'info' };
 /** Shortens one very long word (a URL, a path) in the middle, so both its start and its end stay visible. */
 const midCut = (t) => String(t).replace(/\S{38,}/g, (w) => w.slice(0, 20) + '\u2026' + w.slice(-14));
@@ -60,6 +70,7 @@ function swipeable(el) {
 /** Notification: a short pill for one line, a card when there is a detail. Tap a card to see the full text and copy it. `opts.action = { label, fn }` adds a button. */
 function toast(t, opts = {}) {
   const el = $('#toast'); const text = String(t == null ? '' : t).trim(); if (!text) return;
+  if (!opts.kind && !opts.action && (!S.settings || S.settings.quietToasts !== false) && QUIET_RE.test(text)) return;
   const kind = opts.kind || toastKind(text);
   let title = text; let detail = '';
   const cut = /^(.{3,60}?)(?: \u00b7 |: )(.+)$/.exec(text);
@@ -629,7 +640,7 @@ async function openProjects() {
       if (e.target.closest('[data-rmf]') || e.target.closest('[data-nf]') || e.target.closest('[data-cp]')) return;
       await applyFolder(S.folders.find((x) => x.id === r.dataset.f));
     });
-    $$('[data-cp]', body).forEach((b) => b.onclick = async () => { toast(await copyText(paths[b.dataset.cp]) ? 'Path copied' : 'Could not copy'); });
+    $$('[data-cp]', body).forEach((b) => b.onclick = async () => { flashCopied(b, await copyText(paths[b.dataset.cp])); });
     $$('[data-nf]', body).forEach((b) => b.onclick = async () => { const f = S.folders.find((x) => x.id === b.dataset.nf); closeSheet(); await newChat(f); await persistChat(); loadChats(); });
     $$('[data-rmf]', body).forEach((b) => b.onclick = async () => {
       const f = S.folders.find((x) => x.id === b.dataset.rmf);
@@ -785,6 +796,7 @@ function openSettings() {
     '<div class="field"><span>Approvals in new chats</span>' + seg('setAutoDef', [['0', 'Ask first'], ['1', 'Auto']], st.autoDefault ? '1' : '0') + '<small>Auto runs file changes, zip, commits and everyday commands without asking. Deleting data, sudo, force push, publishing and similar risky actions still ask. You can switch any chat with the chip above the messages. Backups and Undo always work.</small></div>' +
     '<div class="field"><span>Protect secret files</span>' + seg('setProt', [['1', 'On'], ['0', 'Off']], st.protectSecrets !== false ? '1' : '0') + '<small>.env files, keys and credentials stay hidden from the agent and the chat. The agent can still run your project with them. Secret values are removed from terminal output, and new secret files are never committed automatically.</small></div>' +
     '<div class="h3">Appearance</div>' + '<div class="field">' + seg('setTheme', [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], st.theme) + '</div>' +
+    '<div class="field"><span>Notifications</span>' + seg('setQuiet', [['1', 'Quiet'], ['0', 'All']], st.quietToasts !== false ? '1' : '0') + '<small>Quiet shows only errors, warnings and the results of long tasks.</small></div>' +
     '<div class="h3">Memory</div><div class="field">' + seg('setLearn', [['1', 'Learn about me'], ['0', 'Off']], st.autoLearn ? '1' : '0') + '<small>Short notes saved on this phone and shared with the model so it knows you.</small></div><div id="memList"></div>' +
     '<button id="memAdd" class="btn" style="width:100%">' + ICON('plus') + '<span class="lbl">Add a note</span></button>' +
     '<div class="h3">Data</div>' +
@@ -811,6 +823,7 @@ function openSettings() {
   const rdTerm = () => drawTerm(rdTerm);
   bindSeg('setTerm', async (v) => { await save({ termux: v === '1' }); rdTerm(); updateTermChip(); });
   bindSeg('setTheme', (v) => { save({ theme: v }); applyTheme(); });
+  bindSeg('setQuiet', (v) => save({ quietToasts: v === '1' }));
   $('#setModel').onchange = (e) => save({ defaultModel: e.target.value });
   $('#setSteps').onchange = (e) => save({ maxSteps: Math.max(1, Math.min(60, Number(e.target.value) || 20)) });
   $('#setInstr').onchange = (e) => save({ instructions: e.target.value });
@@ -860,7 +873,15 @@ async function drawTerm(redraw) {
       (S.folder ? '<div class="kv"><span>Path of "' + esc(S.folder.name) + '"</span><span style="word-break:break-all;text-align:right">' + esc(path || 'unknown') + '</span></div>' : '<div class="note">Open a project to see its Termux path.</div>') +
       '<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">' + (stt.granted ? '' : '<button id="tmPerm" class="btn sm"><span class="lbl">Grant permission</span></button>') +
       '<button id="tmTest" class="btn sm"><span class="lbl">Test connection</span></button>' + (S.folder ? '<button id="tmPath" class="btn sm"><span class="lbl">Change path</span></button>' : '') + '</div><div id="tmMsg"></div>' +
-      '<div class="card"><div class="t">One-time setup</div><p>1. Install Termux from F-Droid or GitHub (not Google Play).<br>2. In Termux run: <code>mkdir -p ~/.termux &amp;&amp; echo "allow-external-apps=true" &gt;&gt; ~/.termux/termux.properties</code>, then restart Termux.<br>3. Tap Grant permission here (Run commands in Termux environment).<br>4. Pick your project folder through Termux\'s own storage entry, or run <code>termux-setup-storage</code> and pick a folder in shared storage.</p></div>';
+      '<div class="card tmsetup"><div class="t">One-time setup</div>' +
+      '<p>1. Install Termux from F-Droid or GitHub (not Google Play).</p>' +
+      '<p>2. Open Termux and run these two commands, one after the other:</p>' +
+      '<pre class="cmd">mkdir -p ~/.termux</pre>' +
+      '<pre class="cmd">echo "allow-external-apps=true" &gt;&gt; ~/.termux/termux.properties</pre>' +
+      '<p>Then close Termux completely and open it again.</p>' +
+      '<p>3. Tap Grant permission here (Run commands in Termux environment).</p>' +
+      '<p>4. Pick your project folder through Termux\'s own storage entry, or run this in Termux and pick a folder in shared storage:</p>' +
+      '<pre class="cmd">termux-setup-storage</pre></div>';
     const msg = (h) => { $('#tmMsg').innerHTML = h; };
     if ($('#tmPerm')) $('#tmPerm').onclick = async () => { try { await Termux.permission(); } catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); } redraw(); };
     if ($('#tmTest')) $('#tmTest').onclick = async () => {
@@ -912,7 +933,7 @@ async function openDiagnostics() {
   body.innerHTML = '<div class="row" style="display:flex;gap:8px;margin-bottom:12px"><button id="dgCopy" class="btn" style="flex:1"><span class="lbl">Copy log</span></button><button id="dgClear" class="btn danger" style="flex:1"><span class="lbl">Clear</span></button></div>' +
     (list.length ? '<div class="diag">' + list.slice(0, 120).map((e) => '<div class="dg ' + esc(e.k) + '"><span class="dt">' + esc(dt(e.t)) + '</span><span class="dm">' + esc(e.m) + '</span></div>').join('') + '</div>' : '<div class="note">Nothing logged yet. Errors and failed Git actions appear here.</div>') +
     '<div class="note" style="margin-top:12px;text-align:left">Stays on this phone. Tokens and keys are masked before they are saved.</div>';
-  $('#dgCopy').onclick = async () => { await copyText(D.format(list, info)); toast('Copied'); };
+  $('#dgCopy').onclick = async () => { flashCopied($('#dgCopy'), await copyText(D.format(list, info))); };
   $('#dgClear').onclick = async () => { await D.clear(); openDiagnostics(); };
 }
 async function openUsage() {
@@ -1069,7 +1090,7 @@ function renderGitTab(folder, st, head, body) {
         '<div class="gbar"><span class="h4">Changes (' + unstaged.length + ')</span><span>' + (unstaged.length ? '<button id="gStageAll" class="linkbtn">Stage all</button>' : '') + '<button id="gDiscardAll" class="linkbtn danger" style="margin-left:14px">Discard all</button></span></div>' +
         (unstaged.map((c) => row(c, false)).join('') || '<div class="note" style="text-align:left">Everything is staged.</div>');
       foot.classList.remove('hidden');
-      foot.innerHTML = '<textarea id="gMessage" rows="1" placeholder="Commit message"></textarea><div class="row"><button id="gSuggest" class="btn" aria-label="Suggest a message">' + ICON('bulb') + '<span class="lbl">Suggest</span></button><button id="gCommit" class="btn primary"><span class="lbl"></span></button></div>';
+      foot.innerHTML = '<textarea id="gMessage" rows="1" placeholder="Commit message"></textarea><div id="gHint" class="ghint"></div><div class="row"><button id="gSuggest" class="btn' + (S.models.length ? '' : ' dim') + '" aria-label="Suggest a message">' + ICON('bulb') + '<span class="lbl">Suggest</span></button><button id="gCommit" class="btn primary"><span class="lbl"></span></button></div>';
     }
   } else if (GS.tab === 'branches') {
     h += '<button id="gNew" class="btn" style="width:100%;margin:10px 0 8px">' + ICON('plus') + '<span class="lbl">New branch from here</span></button>' +
@@ -1079,7 +1100,7 @@ function renderGitTab(folder, st, head, body) {
   } else if (GS.tab === 'history') {
     h += (st.history.length ? '<button id="gUndo" class="btn" style="width:100%;margin:10px 0 4px">' + ICON('undo') + '<span class="lbl">Undo last commit (keep changes)</span></button>' : '') +
       (st.history.map((x) => '<div class="hist"><div class="t">' + esc(x.commit.message.trim().split('\n')[0]) + '</div><div class="s">' + esc(x.commit.author.name) + ' · ' + x.oid.slice(0, 7) + ' · ' + ago(x.commit.author.timestamp * 1000) + '</div></div>').join('') || '<div class="note">No commits yet.</div>') +
-      (st.history.length >= GS.hist ? '<button id="gMore" class="btn" style="width:100%;margin-top:10px"><span class="lbl">Show 10 more</span></button>' : '');
+      (st.history.length >= GS.hist && GS.hist < 30 ? '<button id="gMore" class="btn" style="width:100%;margin-top:10px"><span class="lbl">Show 10 more</span></button>' : st.history.length ? '<div class="note">' + (st.history.length >= 30 ? 'Showing the latest 30. See older ones on GitHub.' : 'End of history') + '</div>' : '');
   } else {
     h += repoCard(st);
     h += '<div class="h3">Remote</div><div class="card"><div class="t" style="word-break:break-all">' + (st.remote ? esc(st.remote.url) : 'No remote set') + '</div><div style="margin-top:10px"><button id="gRemote" class="btn sm"><span class="lbl">' + (st.remote ? 'Change URL' : 'Set remote URL') + '</span></button></div></div>';
@@ -1144,8 +1165,10 @@ function bindGit(folder, st, body) {
     syncCommit(st);
     const ta = $('#gMessage'); ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 96) + 'px'; };
     $('#gSuggest').onclick = async () => {
+      const hint = (m) => { const h = $('#gHint'); if (!h) return; h.textContent = m; clearTimeout(h._t); h._t = setTimeout(() => { h.textContent = ''; }, 5000); };
+      if (!S.models.length) { hint('Connect a model first: Settings > Add provider.'); return; }
       const b = $('#gSuggest'); b.disabled = true; const l = b.querySelector('.lbl'); l.textContent = 'Thinking...';
-      try { ta.value = await A.suggestCommitMessage(currentModelId(), folder); ta.oninput(); } catch (e) { errLine(e.message); }
+      try { ta.value = await A.suggestCommitMessage(currentModelId(), folder); ta.oninput(); } catch (e) { hint(e.message || 'Could not suggest a message.'); }
       b.disabled = false; l.textContent = 'Suggest';
     };
     $('#gCommit').onclick = async () => {
@@ -1169,7 +1192,7 @@ function bindGit(folder, st, body) {
   $$('[data-sw]', body).forEach((b) => b.onclick = () => run('Switching branch', () => G.checkout(folder, b.dataset.sw)));
   $$('[data-mg]', body).forEach((b) => b.onclick = async () => { if (await confirmBox('Merge branch?', 'Merge "' + b.dataset.mg + '" into "' + st.branch + '"?', 'Merge')) run('Merging', () => G.mergeBranch(folder, b.dataset.mg)); });
   $$('[data-db]', body).forEach((b) => b.onclick = async () => { if (await confirmBox('Delete branch?', 'Delete "' + b.dataset.db + '" from this phone. The remote copy is not touched.', 'Delete')) run('Deleting branch', () => G.deleteBranch(folder, b.dataset.db)); });
-  if ($('#gMore')) $('#gMore').onclick = () => { GS.hist = Math.min(GS.hist + 10, 50); openGit('history'); };
+  if ($('#gMore')) $('#gMore').onclick = () => { GS.hist = Math.min(GS.hist + 10, 30); openGit('history'); };
   if ($('#gUndo')) $('#gUndo').onclick = async () => { if (await confirmBox('Undo last commit?', 'The commit is removed from this branch. Its changes come back as uncommitted changes. Nothing is lost.', 'Undo commit')) run('Undoing commit', () => G.undoLastCommit(folder)); };
   if ($('#gRemote')) $('#gRemote').onclick = async () => { const u = await askText(st.remote ? 'Change remote URL' : 'Set remote URL', 'https://github.com/user/repo.git', st.remote ? st.remote.url : ''); if (u) run('Saving remote', () => G.setRemote(folder, u), true); };
   if ($('#gPublish')) $('#gPublish').onclick = () => openGitStart(folder, 'new');
@@ -1308,10 +1331,13 @@ async function openGitIdentity(back) {
     '<label class="field"><span>Token</span><input id="tTok" type="password" autocomplete="off" autocapitalize="off"><small>GitHub: Settings > Developer settings > Personal access tokens (needs repo access). GitLab: a token with write_repository.</small></label>' +
     '<button id="tSave" class="btn primary" style="width:100%"><span class="lbl">Save</span></button><div id="tMsg"></div>';
   $('#tSave').onclick = async () => {
-    await G.saveGitSettings({ name: $('#gName').value.trim(), email: $('#gEmail').value.trim() });
     const h = $('#tHost').value.trim().toLowerCase(); const t = $('#tTok').value.trim();
+    const bad = (m) => { $('#tMsg').innerHTML = '<div class="ghint">' + esc(m) + '</div>'; };
+    if (t && !h) { bad('Enter the host, for example github.com.'); return; }
+    if (t && (t.length < 20 || /\s/.test(t))) { bad('That does not look like an access token. Copy it again from the website.'); return; }
+    await G.saveGitSettings({ name: $('#gName').value.trim(), email: $('#gEmail').value.trim() });
     if (t && h) { await G.saveToken(h, t); await G.rememberHost(h); }
-    toast('Saved'); openGitIdentity(back);
+    if (back) back(); else closeSheet();
   };
   $$('[data-rh]', body).forEach((b) => b.onclick = async () => { await G.forgetHost(b.dataset.rh); openGitIdentity(back); });
 }
@@ -1427,7 +1453,7 @@ function wire() {
     if (t) {
       if (t.dataset.tool === 'getfile' || t.dataset.tool === 'copyfile') {
         const fm = await db.get('messages', Number(t.dataset.id)); if (!fm || !fm.file) return;
-        if (t.dataset.tool === 'copyfile') { toast(await copyText(fm.fileContent) ? 'Copied' : 'Could not copy'); return; }
+        if (t.dataset.tool === 'copyfile') { flashCopied(t, await copyText(fm.fileContent)); return; }
         await saveOut(fm.file.name, fm.fileContent); return;
       }
       if (t.dataset.tool === 'undo') { await undoOne(Number(t.dataset.b)); return; }
@@ -1437,7 +1463,7 @@ function wire() {
     if (a) {
       if (a.dataset.act === 'regen') regenerate();
       else if (a.dataset.act === 'report') reportReply(Number(a.closest('.msg').dataset.id));
-      else { const el = a.closest('.msg'); const m = await db.get('messages', Number(el.dataset.id)); toast(await copyText(m.text || '') ? 'Copied' : 'Could not copy'); }
+      else { const el = a.closest('.msg'); const m = await db.get('messages', Number(el.dataset.id)); flashCopied(a, await copyText(m.text || '')); }
     }
   });
   $('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(false); } });
