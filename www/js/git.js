@@ -406,6 +406,7 @@ export async function push(folder, { force = false, onProgress, signal } = {}) {
   if (!url) throw new Error('No remote set. Add a remote URL in Git > Remote.');
   const { host, token } = await needToken(url);
   const branch = await currentBranch(folder);
+  if (!branch || /detached/.test(branch)) throw new Error('HEAD is detached, so there is no branch to push. Switch to a branch in the Branches tab first.');
   const mc = collect();
   try {
     const nat = await viaNative(folder, 'push', { token: token || '', user: userFor(host), branch, force: force ? '1' : '0' }, { onProgress, signal });
@@ -437,6 +438,7 @@ export async function pull(folder, { onProgress, signal } = {}) {
   const url = await remoteUrl(folder);
   if (!url) throw new Error('No remote set. Add a remote URL in Git > Remote.');
   const branch = await currentBranch(folder);
+  if (!branch || /detached/.test(branch)) throw new Error('HEAD is detached, so there is no branch to pull into. Switch to a branch in the Branches tab first.');
   try {
     const nat = await viaNative(folder, 'pull', { token: (await tokenFor(folder, url)) || '', user: userFor(hostOf(url)), name: au.name, email: au.email }, { onProgress, signal });
     if (nat) {

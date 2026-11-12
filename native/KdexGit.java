@@ -177,7 +177,22 @@ public class KdexGit {
 
     private static Object pull(Map<String, String> a, String id, Consumer<Object[]> sink) throws Exception {
         try (Git git = open(arg(a, "dir"))) {
-            PullResult r = git.pull().setCredentialsProvider(creds(a)).setProgressMonitor(new Monitor(id, sink)).setTimeout(60).call();
+            // A merge commit made by pull takes its author from the repository config; without this it would be "root@localhost".
+            StoredConfig cfg = git.getRepository().getConfig();
+            String oldName = cfg.getString("user", null, "name"), oldEmail = cfg.getString("user", null, "email");
+            String name = arg(a, "name"), email = arg(a, "email");
+            boolean temp = !name.isEmpty() && !email.isEmpty() && (oldName == null || oldEmail == null);
+            if (temp) { cfg.setString("user", null, "name", oldName == null ? name : oldName); cfg.setString("user", null, "email", oldEmail == null ? email : oldEmail); cfg.save(); }
+            PullResult r;
+            try {
+                r = git.pull().setCredentialsProvider(creds(a)).setProgressMonitor(new Monitor(id, sink)).setTimeout(60).call();
+            } finally {
+                if (temp) {
+                    if (oldName == null) cfg.unset("user", null, "name");
+                    if (oldEmail == null) cfg.unset("user", null, "email");
+                    cfg.save();
+                }
+            }
             MergeResult mr = r.getMergeResult();
             String status = mr == null ? "" : String.valueOf(mr.getMergeStatus());
             List<Object> conflicts = new ArrayList<>();

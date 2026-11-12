@@ -7,6 +7,12 @@ for its version.
 
 ## [Unreleased]
 
+## [1.42.1]
+
+### Fixed
+- Pull: the merge commit Git makes when both sides changed now uses your Git name and email (it used the phone's system user before).
+- Push and pull on a detached HEAD now say clearly to switch to a branch first.
+
 ## [1.42.0]
 
 ### Security
