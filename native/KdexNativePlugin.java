@@ -554,6 +554,7 @@ public class KdexNativePlugin extends Plugin {
 
     // ------------------------------------------------------------------ Keep working in the background
     private volatile boolean workActive = false;
+    private volatile boolean inForeground = true;
 
     @PluginMethod
     public void workStart(PluginCall call) {
@@ -581,8 +582,50 @@ public class KdexNativePlugin extends Plugin {
     }
 
     @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        inForeground = true;
+        try { ((android.app.NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE)).cancel(4103); } catch (Throwable t) { /* ignore */ }
+    }
+
+    /** Short haptic tap, and when the app is in the background a notification saying the work finished. Everything here is best effort. */
+    @PluginMethod
+    public void workDone(PluginCall call) {
+        try {
+            boolean ok = !Boolean.FALSE.equals(call.getBoolean("ok", true));
+            try {
+                android.os.Vibrator v = (android.os.Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+                if (v != null) {
+                    long[] pattern = ok ? new long[]{0, 35} : new long[]{0, 60, 70, 60};
+                    if (Build.VERSION.SDK_INT >= 26) v.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1)); else v.vibrate(pattern, -1);
+                }
+            } catch (Throwable t) { /* no vibrator or no permission */ }
+            if (!inForeground) {
+                android.app.NotificationManager nm = (android.app.NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null) {
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        android.app.NotificationChannel ch = new android.app.NotificationChannel("kdex_done", "Work finished", android.app.NotificationManager.IMPORTANCE_DEFAULT);
+                        ch.setDescription("Tells you when KDex Agent has finished");
+                        nm.createNotificationChannel(ch);
+                    }
+                    Intent open = getContext().getPackageManager().getLaunchIntentForPackage(getContext().getPackageName());
+                    PendingIntent pi = open == null ? null : PendingIntent.getActivity(getContext(), 1, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                    android.app.Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new android.app.Notification.Builder(getContext(), "kdex_done") : new android.app.Notification.Builder(getContext());
+                    b.setContentTitle(ok ? "KDex Agent finished" : "KDex Agent needs you")
+                            .setContentText(call.getString("text", ok ? "Your request is done." : "Something went wrong. Open the app to see."))
+                            .setSmallIcon(ok ? android.R.drawable.stat_notify_chat : android.R.drawable.stat_sys_warning).setAutoCancel(true);
+                    if (pi != null) b.setContentIntent(pi);
+                    nm.notify(4103, b.build());
+                }
+            }
+        } catch (Throwable t) { /* optional */ }
+        call.resolve();
+    }
+
+    @Override
     protected void handleOnPause() {
         super.handleOnPause();
+        inForeground = false;
         if (workActive && getActivity() != null) {
             getActivity().runOnUiThread(() -> {
                 try { getBridge().getWebView().resumeTimers(); } catch (Throwable t) { /* ignore */ }

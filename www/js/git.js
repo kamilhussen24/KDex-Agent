@@ -340,7 +340,9 @@ const SECRET_PATTERNS = [
 /** Looks for keys and tokens in the files about to be committed. Returns [{ path, kind, line }]; the secret itself is never returned. */
 export async function scanSecrets(folder, changes) {
   const out = [];
-  const list = changes.filter((c) => c.kind !== 'deleted').slice(0, 300);
+  const all = changes.filter((c) => c.kind !== 'deleted');
+  const list = all.slice(0, 300);
+  out.skipped = Math.max(0, all.length - list.length);
   for (const c of list) {
     try {
       const r = await safFs.readText(folder.uri, c.path, 400000);

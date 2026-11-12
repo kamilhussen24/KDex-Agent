@@ -244,6 +244,8 @@ export async function gitNative(uri, op, args = {}, { onProgress, signal } = {})
 export const Work = {
   async start(text) { if (plugin) { try { await plugin.workStart({ text }); } catch (e) { /* optional */ } } },
   async stop() { if (plugin) { try { await plugin.workStop(); } catch (e) { /* optional */ } } },
+  /** A light vibration, and a notification when the app is in the background. */
+  async done(ok, text) { if (plugin) { try { await plugin.workDone({ ok: ok !== false, text: text || '' }); } catch (e) { /* optional */ } } else if (navigator.vibrate) { try { navigator.vibrate(ok === false ? [60, 70, 60] : 35); } catch (e) { /* ignore */ } } },
 };
 
 /** "All files access": lets the app use normal file paths, which is much faster than Android's folder access. */

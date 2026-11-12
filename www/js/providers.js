@@ -281,20 +281,49 @@ async function* anthropicStream(o) {
 }
 
 const RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 529]);
-/** One reply stream. A failure before anything arrived (rate limit, busy server, dropped network) is retried twice, so a short hiccup does not cost the user a message. */
+const NET_RE = /network|fetch|failed|timeout|timed out|connection|reset|offline|socket|unknownhost|unable to resolve|aborted by software/i;
+const MAX_WAIT_MS = 10 * 60 * 1000;
+/** Resolves after `ms`, as soon as the network comes back, or when the request is cancelled. */
+function pause(ms, signal) {
+  return new Promise((res) => {
+    let t = null;
+    const done = () => { clearTimeout(t); window.removeEventListener('online', done); if (signal) signal.removeEventListener('abort', done); res(); };
+    t = setTimeout(done, ms);
+    window.addEventListener('online', done, { once: true });
+    if (signal) signal.addEventListener('abort', done, { once: true });
+  });
+}
+/**
+ * One reply stream. Busy servers and rate limits are retried a few times. A dropped connection waits for the network to
+ * return (up to 10 minutes) and then asks again, also when it dropped in the middle of a reply: a { t: 'restart' } event
+ * tells the caller to discard the partial reply, so the work continues instead of failing.
+ */
 export async function* stream(opts) {
   const run = () => (opts.provider.type === 'anthropic' ? anthropicStream(opts) : openaiStream(opts));
-  for (let attempt = 0; ; attempt++) {
+  let busy = 0; let waited = 0; let drops = 0;
+  for (;;) {
     let started = false;
     try {
       for await (const ev of run()) { started = true; yield ev; }
+      if (drops) yield { t: 'notice', text: 'Back online: continued' };
       return;
     } catch (e) {
       const aborted = opts.signal && opts.signal.aborted;
-      const transient = e && (RETRY_STATUS.has(e.status) || (!e.status && /network|fetch|failed|timeout|timed out|connection|reset|offline/i.test(String(e.message))));
-      if (started || aborted || !transient || attempt >= 2) throw e;
-      yield { t: 'notice', text: 'The provider is busy or the connection dropped. Trying again...' };
-      await new Promise((r) => setTimeout(r, attempt ? 4000 : 1500));
+      if (aborted) throw e;
+      const isNet = !e.status && NET_RE.test(String((e && e.message) || e));
+      const isBusy = RETRY_STATUS.has(e.status);
+      if (!isNet && !isBusy) throw e;
+      if (started) yield { t: 'restart' };
+      if (isBusy) {
+        if (++busy > 2) throw e;
+        yield { t: 'notice', text: 'The provider is busy: trying again' };
+        await pause(busy === 1 ? 1500 : 4000, opts.signal);
+      } else {
+        if (waited >= MAX_WAIT_MS) throw new Error('No connection for 10 minutes, so the request was stopped. Check the internet and send it again.');
+        if (drops === 0 || drops % 6 === 0) yield { t: 'notice', text: 'No connection: waiting to reconnect' };
+        const wait = Math.min(2000 * Math.pow(1.6, drops), 15000); drops++;
+        const t0 = Date.now(); await pause(wait, opts.signal); waited += Date.now() - t0;
+      }
       if (opts.signal && opts.signal.aborted) throw e;
     }
   }

@@ -363,6 +363,9 @@ export async function runTurn(ctx) {
           asst.reasoning = ev.text;
         } else if (ev.t === 'usage') {
           usage = ev;
+        } else if (ev.t === 'restart') {
+          asst.text = ''; asst.thought = ''; asst.calls = []; delete asst.raw; delete asst.reasoning; thinkStart = 0; usage = null;
+          ui.onDelta(asst);
         } else if (ev.t === 'notice') {
           ui.onNotice(ev.text);
         }

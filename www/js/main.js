@@ -29,22 +29,34 @@ function toastKind(t) {
   return 'info';
 }
 const TOAST_ICON = { ok: 'check', err: 'alert', warn: 'alert', info: 'info' };
-/** Notification: a short pill for one line, a card when there is a detail. `opts.action = { label, fn }` adds a button. */
+/** Shortens one very long word (a URL, a path) in the middle, so both its start and its end stay visible. */
+const midCut = (t) => String(t).replace(/\S{38,}/g, (w) => w.slice(0, 20) + '\u2026' + w.slice(-14));
+/** Notification: a short pill for one line, a card when there is a detail. Tap a card to see the full text and copy it. `opts.action = { label, fn }` adds a button. */
 function toast(t, opts = {}) {
   const el = $('#toast'); const text = String(t == null ? '' : t).trim(); if (!text) return;
   const kind = opts.kind || toastKind(text);
   let title = text; let detail = '';
-  const cut = /^(.{3,60}?)(?: · |: )(.+)$/.exec(text);
+  const cut = /^(.{3,60}?)(?: \u00b7 |: )(.+)$/.exec(text);
   if (cut) { title = cut[1]; detail = cut[2]; } else if (text.length > 70) { const m = /^(.{20,70}?[.!?])\s+(.+)$/.exec(text); if (m) { title = m[1]; detail = m[2]; } }
   const card = !!detail || !!opts.action;
-  el.className = 'toast ' + kind + (card ? ' card' : ' pill');
-  el.innerHTML = '<span class="tic">' + ICON(TOAST_ICON[kind]) + '</span><span class="ttx"><span class="tt1">' + esc(title) + '</span>' + (detail ? '<span class="tt2">' + esc(detail) + '</span>' : '') + '</span>' + (opts.action ? '<button type="button" class="tact">' + esc(opts.action.label) + '</button>' : '');
+  let open = false;
+  const draw = () => {
+    el.className = 'toast ' + kind + (card ? ' card' : ' pill') + (open ? ' open show' : ' show');
+    el.innerHTML = '<span class="tic">' + ICON(TOAST_ICON[kind]) + '</span><span class="ttx"><span class="tt1">' + esc(open ? title : midCut(title)) + '</span>' + (detail ? '<span class="tt2">' + esc(open ? detail : midCut(detail)) + '</span>' : '') + '</span>' +
+      (opts.action ? '<button type="button" class="tact" data-a="1">' + esc(opts.action.label) + '</button>' : '') + (open ? '<button type="button" class="tact" data-c="1">Copy</button>' : '');
+  };
+  draw(); el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
   el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
-  void el.offsetWidth; el.classList.add('show');
   const hide = () => { el.classList.remove('show'); toastH = setTimeout(() => el.classList.add('hidden'), 220); };
-  clearTimeout(toastT); clearTimeout(toastH);
-  el.onclick = (e) => { if (e.target.closest('.tact')) { try { opts.action.fn(); } catch (x) { /* ignore */ } } hide(); };
-  toastT = setTimeout(hide, kind === 'err' || card ? 4200 : 2400);
+  const arm = (ms) => { clearTimeout(toastT); toastT = setTimeout(hide, ms); };
+  clearTimeout(toastH);
+  el.onclick = async (e) => {
+    if (e.target.closest('[data-a]')) { try { opts.action.fn(); } catch (x) { /* ignore */ } hide(); return; }
+    if (e.target.closest('[data-c]')) { const ok = await copyText(text); const b = el.querySelector('[data-c]'); if (b) b.textContent = ok ? 'Copied' : 'Failed'; arm(1800); return; }
+    if (card && !open) { open = true; draw(); el.classList.add('show'); arm(9000); return; }
+    hide();
+  };
+  arm(kind === 'err' || card ? 4200 : 2400);
   if (kind === 'err') D.log('error', text);
 }
 window.__toast = toast;
@@ -443,9 +455,10 @@ async function send(regenerate) {
   };
   try {
     await A.runTurn({ chat: S.chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder: S.folder, modelId: currentModelId(), think: S.think, signal: S.abort.signal, ui, regenerate: !!regenerate });
+    if (!S.abort || !S.abort.signal.aborted) Work.done(true, 'Your request is done.');
     D.log('run', 'Agent run finished in ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
   } catch (e) {
-    D.log('error', 'Agent run failed: ' + (e.message || e));
+    D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120));
     toast(e.message || 'Something went wrong');
     const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
     m.id = await db.put('messages', m); renderMsg(m);
@@ -1025,9 +1038,11 @@ function bindGit(folder, st, body) {
     $('#gCommit').onclick = async () => {
       let paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p));
       const found = await G.scanSecrets(folder, st.changes.filter((c) => paths.includes(c.path)));
+      const unchecked = found.skipped || 0;
+      if (unchecked && !found.length) toast('Secret scan checked the first 300 files: ' + unchecked + ' more were not checked. Review them before pushing.', { kind: 'warn' });
       if (found.length) {
         const names = [...new Set(found.map((f) => f.path))];
-        const detail = found.slice(0, 4).map((f) => f.path + ' (' + f.kind + ', line ' + f.line + ')').join('\n') + (found.length > 4 ? '\n+' + (found.length - 4) + ' more' : '');
+        const detail = found.slice(0, 4).map((f) => f.path + ' (' + f.kind + ', line ' + f.line + ')').join('\n') + (found.length > 4 ? '\n+' + (found.length - 4) + ' more' : '') + (unchecked ? '\n\n' + unchecked + ' more files were not checked.' : '');
         D.log('git', 'Secret scan flagged ' + found.length + ' place(s) before commit');
         const pick = await choiceBox('Possible secret found', 'These files look like they contain a key or token. Once pushed, it is public.\n\n' + detail, ['Leave them out', 'Commit anyway']);
         if (pick === -1) return;

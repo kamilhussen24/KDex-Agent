@@ -246,3 +246,9 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 
 ### v1.22.1 – notifications
 - All notifications share one design: a short pill for one-line messages, a card with a title and detail for longer ones. Success, warning, error and info each have their own icon and colour, in light and dark. Tap to dismiss; errors stay a little longer.
+
+### v1.22.2 – dependable and clearer
+- **Network loss:** if the connection drops, the agent waits (up to 10 minutes) for it to return and asks again, also when it drops in the middle of a reply (the partial reply is discarded and requested again). Busy or rate-limited servers are retried twice.
+- **Work finished:** a light vibration when the agent finishes or fails, and a notification when the app is in the background (tap it to return). Needs the new VIBRATE permission (normal, no prompt).
+- **Notifications:** long details wrap to two lines, long URLs and paths are shortened in the middle, and tapping a card shows the full text with a Copy button.
+- **Secret scan:** if more than 300 files are selected, you are told that the rest were not checked.

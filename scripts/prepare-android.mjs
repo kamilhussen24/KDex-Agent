@@ -68,7 +68,7 @@ if (!m.includes('MANAGE_EXTERNAL_STORAGE')) {
   m = m.replace('<application', '<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <application');
 }
 // Keep working with the screen off: foreground service (notification) + wake lock
-for (const perm of ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_DATA_SYNC', 'POST_NOTIFICATIONS', 'WAKE_LOCK']) {
+for (const perm of ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_DATA_SYNC', 'POST_NOTIFICATIONS', 'WAKE_LOCK', 'VIBRATE']) {
   if (!m.includes('android.permission.' + perm + '"')) m = m.replace('<application', '<uses-permission android:name="android.permission.' + perm + '" />\n    <application');
 }
 if (!m.includes('KdexWorkService')) m = m.replace('</application>', '    <service android:name=".KdexWorkService" android:exported="false" android:foregroundServiceType="dataSync" />\n    </application>');
