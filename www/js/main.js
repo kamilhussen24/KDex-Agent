@@ -4,6 +4,7 @@ import { db, kvGet, kvSet } from './db.js';
 import { secure, fs, App, Termux, AllFiles, Work, setBars, isNative } from './native.js';
 import * as D from './diag.js';
 import { highlight, langOf } from './highlight.js';
+import { diffHtml, buildDiff } from './diffview.js';
 import { PRESETS, QUICK_FILL, listModels, popularModels } from './providers.js';
 import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
@@ -60,6 +61,8 @@ function toast(t, opts = {}) {
   if (kind === 'err') D.log('error', text);
 }
 window.__toast = toast;
+window.__errLine = errLine;
+window.__errTest = (t) => { const d = explainGitError(t); return d; };
 function confirmBox(title, text, yes = 'OK') {
   return new Promise((res) => {
     $('#dlgTitle').textContent = title; $('#dlgText').textContent = text; $('#dlgYes').firstElementChild.textContent = yes;
@@ -644,23 +647,43 @@ async function openFileView(p, body) {
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
 
+const OPS = { create: ['plus', 'Created', 'Delete'], edit: ['edit', 'Edited', 'Undo'], overwrite: ['edit', 'Replaced', 'Undo'], delete: ['trash', 'Deleted', 'Restore'] };
+/** Everything the agent changed in this chat, with one-tap Undo or Restore. Tap a row to see what changed. */
 async function openChanges() {
   if (!S.chat) return;
   const body = sheet('Changes');
   const draw = async () => {
     const all = (await db.byIndex('backups', 'chatId', S.chat.id)).sort((a, b) => b.id - a.id);
     const live = all.filter((b) => !b.undone);
-    body.innerHTML = (live.length ? '<button id="undoAll" class="btn danger" style="width:100%;margin-bottom:10px">' + ICON('undo') + '<span class="lbl">Undo all (' + live.length + ')</span></button>' : '') +
-      (all.length ? all.map((b) => '<div class="row-item">' + ICON(b.op === 'delete' ? 'trash' : 'edit') + '<div class="grow"><div class="t">' + esc(b.path) + '</div><div class="s">' + esc(b.op) + ' · ' + ago(b.at) + (b.undone ? ' · undone' : '') + '</div></div>' +
-        (b.undone ? '' : '<button class="btn sm" data-u="' + b.id + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>') + '</div>').join('') : '<div class="note">No changes in this chat yet.</div>') +
-      '<div class="safe">' + ICON('lock') + '<span>Backup saved before every change.</span></div>';
+    const row = (b) => {
+      const o = OPS[b.op] || OPS.edit;
+      return '<div class="hrow' + (b.undone ? ' gone' : '') + '"><span class="hdot ' + (b.op === 'delete' ? 'del' : b.op === 'create' ? 'add' : '') + '">' + ICON(o[0]) + '</span>' +
+        '<div class="grow" data-v="' + b.id + '"><div class="t">' + esc(baseOf(b.path)) + '</div><div class="s">' + (dirOf(b.path) ? esc(dirOf(b.path)) + ' \u00b7 ' : '') + (b.undone ? 'Undone' : o[1]) + ' \u00b7 ' + ago(b.at) + '</div></div>' +
+        (b.undone ? '' : '<button class="btn sm" data-u="' + b.id + '">' + ICON('undo') + '<span class="lbl">' + o[2] + '</span></button>') + '</div>';
+    };
+    body.innerHTML = (live.length > 1 ? '<button id="undoAll" class="btn danger" style="width:100%;margin-bottom:10px">' + ICON('undo') + '<span class="lbl">Undo all ' + live.length + ' changes</span></button>' : '') +
+      (all.length ? all.map(row).join('') : '<div class="note">No changes in this chat yet. Files the agent edits, creates or deletes appear here.</div>') +
+      '<div class="safe">' + ICON('lock') + '<span>A backup is saved before every change.</span></div>';
     $$('[data-u]', body).forEach((b) => b.onclick = async () => { await undoOne(Number(b.dataset.u)); draw(); });
+    $$('[data-v]', body).forEach((r) => r.onclick = () => openChangeDiff(Number(r.dataset.v)));
     if ($('#undoAll')) $('#undoAll').onclick = async () => {
       if (!await confirmBox('Undo all changes?', 'Every change from this chat is rolled back, newest first.', 'Undo all')) return;
       for (const b of live) await undoOne(b.id); draw();
     };
   };
   draw();
+}
+/** What one change did: the saved copy from before against the file as it is now. */
+async function openChangeDiff(id) {
+  const bk = await db.get('backups', id); if (!bk) return;
+  const body = sheet(bk.path, { back: openChanges });
+  body.innerHTML = '<div class="busy"><span class="spin"></span>Loading...</div>';
+  try {
+    const f = S.folders.find((x) => x.id === bk.folderId) || S.folder;
+    if (isSecretPath(bk.path) && await protectionOn()) { body.innerHTML = '<div class="note" style="text-align:left">Protected file. Its contents are hidden here and from the agent.</div>'; return; }
+    let now = ''; try { const r = await fs.readText(f.uri, bk.path, 1048576); now = r.binary ? '' : r.text; } catch (e) { now = ''; }
+    body.innerHTML = diffHtml(bk.existed ? bk.content : '', bk.op === 'delete' ? '' : now);
+  } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
 async function undoOne(id) {
   try { const bk = await db.get('backups', id); const bf = (bk && S.folders.find((x) => x.id === bk.folderId)) || S.folder; if (!bf) throw new Error('The folder of this change is no longer available.'); await A.undoChange(id, bf); toast('Undone'); } catch (e) { toast(e.message || 'Could not undo'); }
@@ -858,13 +881,36 @@ function busyLine(text, frac, onCancel) {
   el.innerHTML = '<div class="busy2"><div class="bl"><span class="spin"></span><span class="bt">' + esc(text) + '</span>' + (onCancel ? '<button class="linkbtn" id="gCancel">Cancel</button>' : '') + '</div><div class="bar' + (frac == null ? ' ind' : '') + '"><i' + (frac == null ? '' : ' style="width:' + w + '%"') + '></i></div></div>';
   if (onCancel) $('#gCancel').onclick = onCancel;
 }
-function errLine(text) {
+/** Turns a Git error into a title, a plain explanation and, where there is one, a button that fixes it. */
+function explainGitError(text) {
+  const t = String(text);
+  if (/newer commits|Pull first/i.test(t)) return { title: 'Push rejected', body: 'The remote has newer commits. Pull them first, then push again.', fix: 'pull' };
+  if (/token was rejected|needs an access token|Access denied/i.test(t)) return { title: /rejected/i.test(t) ? 'Token rejected' : /Access denied/i.test(t) ? 'Access denied' : 'Token needed', body: t, fix: 'token' };
+  if (/No connection/i.test(t)) return { title: 'No connection', body: 'Check the internet, then try again.', fix: 'retry' };
+  if (/Merge conflict/i.test(t)) return { title: 'Merge conflict', body: t.replace(/^Merge conflict\.?\s*/i, '') || 'Some files changed in both places.' };
+  if (/Local changes would be overwritten/i.test(t)) return { title: 'Local changes in the way', body: 'Commit or discard your changes first, then try again.' };
+  if (/Push refused|Push was rejected|protected branch|secret/i.test(t)) { const m = /^(.{8,70}?[.:])\s+(.+)$/s.exec(t); return m ? { title: m[1].replace(/[.:]$/, ''), body: m[2] } : { title: 'Push refused', body: t }; }
+  const m = /^(.{8,70}?[.!?])\s+(.+)$/s.exec(t);
+  return m ? { title: m[1].replace(/[.]$/, ''), body: m[2] } : { title: 'Git could not finish', body: t };
+}
+function errLine(text, opts = {}) {
   const el = $('#gMsg'); if (!el) return;
   if (!text) { el.innerHTML = ''; return; }
+  const x = explainGitError(text);
   const urls = [...new Set(String(text).match(/https?:\/\/[^\s<>"')]+/g) || [])];
-  const html = esc(text).replace(/\n/g, '<br>');
-  el.innerHTML = '<div class="err">' + html + '</div>' + (urls.length ? '<div class="erract">' + urls.slice(0, 2).map((u, i) => '<button class="btn sm" data-cu="' + i + '"><span class="lbl">Copy link</span></button>').join('') + '</div>' : '');
+  const fixBtn = x.fix === 'pull' ? '<button class="btn sm" data-fx="pull">' + ICON('down') + '<span class="lbl">Pull now</span></button>'
+    : x.fix === 'token' ? '<button class="btn sm" data-fx="token">' + ICON('key') + '<span class="lbl">Open token settings</span></button>'
+    : x.fix === 'retry' && opts.retry ? '<button class="btn sm" data-fx="retry">' + ICON('refresh') + '<span class="lbl">Retry</span></button>' : '';
+  el.innerHTML = '<div class="gerr"><span class="gic">' + ICON('alert') + '</span><div class="gtx"><div class="gt1">' + esc(x.title) + '</div><div class="gt2">' + esc(midCut(x.body)).replace(/\n/g, '<br>') + '</div>' +
+    '<div class="erract">' + fixBtn + urls.slice(0, 2).map((u, i) => '<button class="btn sm" data-cu="' + i + '">' + ICON('copy') + '<span class="lbl">Copy link</span></button>').join('') + '<button class="btn sm" data-cd="1">' + ICON('copy') + '<span class="lbl">Copy details</span></button></div></div></div>';
   $$('[data-cu]', el).forEach((b) => b.onclick = async () => toast(await copyText(urls[+b.dataset.cu]) ? 'Link copied. Open it in your browser.' : 'Could not copy'));
+  $('[data-cd]', el).onclick = async () => toast(await copyText(String(text)) ? 'Copied' : 'Could not copy');
+  $$('[data-fx]', el).forEach((b) => b.onclick = () => {
+    const f = S.folder; const k = b.dataset.fx;
+    if (k === 'pull' && f) gitRun('Pulling', (pr, sg) => G.pull(f, { onProgress: pr, signal: sg }));
+    else if (k === 'token') openGitIdentity(() => openGit());
+    else if (k === 'retry' && opts.retry) opts.retry();
+  });
 }
 const DONE = { Fetching: 'Fetched', Pulling: 'Pulled', Pushing: 'Pushed', 'Force pushing': 'Force pushed', Committing: 'Committed', Discarding: 'Discarded', 'Creating branch': 'Branch created', 'Switching branch': 'Switched branch', Merging: 'Merged', 'Deleting branch': 'Branch deleted', 'Undoing commit': 'Commit undone', 'Saving remote': 'Remote saved', 'Switching to HTTPS': 'Remote switched to HTTPS' };
 async function gitRun(label, fn, after, keep) {
@@ -882,7 +928,7 @@ async function gitRun(label, fn, after, keep) {
     const m = (e && e.message) || String(e);
     if (ac.signal.aborted) { await openGit(GS.tab); toast('Cancelled'); return; }
     if (/^Set your Git name/.test(m)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGit()); return; }
-    D.log('git', label + ' failed: ' + m); await openGit(GS.tab, true); errLine(m);
+    D.log('git', label + ' failed: ' + m); await openGit(GS.tab, true); errLine(m, { retry: () => gitRun(label, fn, after, keep) });
   }
 }
 
@@ -951,7 +997,7 @@ function renderGitTab(folder, st, head, body) {
     else if (!st.changes.length) h += '<div class="note" style="margin-top:18px">No changes since the last commit.</div>';
     else {
       const staged = st.changes.filter((c) => GS.sel.has(c.path)); const unstaged = st.changes.filter((c) => !GS.sel.has(c.path));
-      const row = (c, on) => '<div class="gr"><button class="stg' + (on ? ' on' : '') + '" data-sel="' + esc(c.path) + '" aria-label="' + (on ? 'Unstage ' : 'Stage ') + esc(c.path) + '">' + ICON(on ? 'minus' : 'plus') + '</button><div class="grow" data-gf="' + esc(c.path) + '"><div class="t">' + esc(baseOf(c.path)) + '</div>' + (dirOf(c.path) ? '<div class="s">' + esc(dirOf(c.path)) + '</div>' : '') + '</div><span class="kind ' + c.kind + '">' + c.kind + '</span><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard ' + esc(c.path) + '" style="width:34px;height:34px">' + ICON('undo') + '</button></div>';
+      const row = (c, on) => '<div class="gr"><button class="stg' + (on ? ' on' : '') + '" data-sel="' + esc(c.path) + '" aria-label="' + (on ? 'Unstage ' : 'Stage ') + esc(c.path) + '">' + ICON(on ? 'minus' : 'plus') + '</button><div class="grow" data-gf="' + esc(c.path) + '"><div class="t">' + esc(baseOf(c.path)) + '</div>' + (dirOf(c.path) ? '<div class="s">' + esc(dirOf(c.path)) + '</div>' : '') + '<div class="s cnt" data-cnt="' + esc(c.path) + '">' + ((st.counts && st.counts[c.path]) || '') + '</div></div><span class="kind ' + c.kind + '">' + c.kind + '</span><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard ' + esc(c.path) + '" style="width:34px;height:34px">' + ICON('undo') + '</button></div>';
       h += '<div class="gbar"><span class="h4">Staged (' + staged.length + ')</span>' + (staged.length ? '<button id="gUnstageAll" class="linkbtn">Unstage all</button>' : '') + '</div>' +
         (staged.map((c) => row(c, true)).join('') || '<div class="note" style="text-align:left">Nothing staged. Tap + on a file to include it in the next commit.</div>') +
         '<div class="gbar"><span class="h4">Changes (' + unstaged.length + ')</span><span>' + (unstaged.length ? '<button id="gStageAll" class="linkbtn">Stage all</button>' : '') + '<button id="gDiscardAll" class="linkbtn danger" style="margin-left:14px">Discard all</button></span></div>' +
@@ -1015,6 +1061,7 @@ function bindGit(folder, st, body) {
     run('Pushing', (pr, sg) => G.push(folder, { onProgress: pr, signal: sg }), true);
   };
   $$('[data-gf]', body).forEach((r) => r.onclick = () => openGitDiff(folder, r.dataset.gf));
+  fillCounts(folder, st, body);
   const redraw = () => { const m = $('#gMessage') ? $('#gMessage').value : ''; const top = $('#sheetBody').scrollTop; renderGitTab(folder, st, gitHead(st), body); if ($('#gMessage')) $('#gMessage').value = m; $('#sheetBody').scrollTop = top; };
   $$('[data-sel]', body).forEach((c) => c.onclick = () => { GS.sel.has(c.dataset.sel) ? GS.sel.delete(c.dataset.sel) : GS.sel.add(c.dataset.sel); redraw(); });
   if ($('#gStageAll')) $('#gStageAll').onclick = () => { st.changes.forEach((x) => GS.sel.add(x.path)); redraw(); };
@@ -1104,12 +1151,31 @@ function askText(title, placeholder, value = '') {
   });
 }
 
+/** Fills in "+3 −1" under each changed file, a few at a time, so the list opens first and stays smooth. */
+async function fillCounts(folder, st, body) {
+  st.counts = st.counts || {}; const token = (GS.cnt = (GS.cnt || 0) + 1);
+  const todo = st.changes.filter((c) => st.counts[c.path] == null).slice(0, 40);
+  for (const c of todo) {
+    if (GS.cnt !== token || !document.body.contains(body)) return;
+    await new Promise((r) => setTimeout(r, 30));
+    let txt = '';
+    try {
+      const d = await G.diffTexts(folder, c.path);
+      if (d.hidden) txt = 'protected'; else if (d.binary) txt = 'binary';
+      else if (d.before.length + d.after.length <= 300000) { const x = buildDiff(d.before, d.after); txt = x.same ? '' : '+' + x.added + ' \u2212' + x.removed; }
+    } catch (e) { txt = ''; }
+    st.counts[c.path] = txt;
+    const el = body.querySelector('[data-cnt="' + CSS.escape(c.path) + '"]'); if (el) el.textContent = txt;
+  }
+}
 async function openGitDiff(folder, path) {
   const body = sheet(path, { back: () => openGit() });
   body.innerHTML = '<div class="busy"><span class="spin"></span>Loading...</div>';
   try {
-    const d = await G.diffFile(folder, path);
-    body.innerHTML = '<div class="gbar"><span>+' + d.added + ' −' + d.removed + '</span></div><div class="tool"><div class="diff" style="max-height:none">' + d.lines.map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') + '</div></div>';
+    const d = await G.diffTexts(folder, path);
+    if (d.hidden) { body.innerHTML = '<div class="note" style="text-align:left">Protected file. Its contents are hidden here and from the agent.</div>'; return; }
+    if (d.binary) { body.innerHTML = '<div class="note">Binary file' + (d.size ? ', ' + fmtBytes(d.size) : '') + '. Line changes are not shown.</div>'; return; }
+    body.innerHTML = diffHtml(d.before, d.after);
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
 

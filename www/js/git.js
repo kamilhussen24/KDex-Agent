@@ -307,6 +307,14 @@ export async function diffFile(folder, path) {
   try { const r = await safFs.readText(folder.uri, path, 1048576); after = r.binary ? null : r.text; } catch (e) { after = null; }
   return lineDiff(before == null ? '' : before, after == null ? '' : after);
 }
+/** The text of a file in the last commit and now, for the diff screen. */
+export async function diffTexts(folder, path) {
+  if (isSecretPath(path) && await protectionOn()) return { hidden: true };
+  const before = await headText(folder, path);
+  let after = ''; let binary = false; let size = 0;
+  try { const r = await safFs.readText(folder.uri, path, 1048576); if (r.binary) { binary = true; size = r.size || 0; } else after = r.text; } catch (e) { after = ''; }
+  return { before: before == null ? '' : before, after, binary, size, isNew: before == null };
+}
 export async function discard(folder, path) {
   const before = await headText(folder, path);
   if (before === null) { await safFs.remove(folder.uri, path); return; }

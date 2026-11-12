@@ -252,3 +252,8 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - **Work finished:** a light vibration when the agent finishes or fails, and a notification when the app is in the background (tap it to return). Needs the new VIBRATE permission (normal, no prompt).
 - **Notifications:** long details wrap to two lines, long URLs and paths are shortened in the middle, and tapping a card shows the full text with a Copy button.
 - **Secret scan:** if more than 300 files are selected, you are told that the rest were not checked.
+
+### v1.23.0 – diff, history and Git errors
+- **Git diff:** tapping a changed file shows old and new line numbers, green added and red removed lines, changed words highlighted, and unchanged parts folded ("40 unchanged lines"). Very large files (over about 600 KB) and binary files skip the line view. The Changes list shows "+3 −1" under each file, filled in a few files at a time.
+- **Change history:** Settings of each chat's Changes sheet now lists what the agent created, edited or deleted with Undo, Restore (deleted files) and Undo all. Tapping a row shows what changed.
+- **Git errors:** a card with a plain title and explanation, plus a fix button where there is one (Pull now, Open token settings, Retry) and Copy details.

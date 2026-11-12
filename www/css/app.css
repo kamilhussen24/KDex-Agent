@@ -316,3 +316,31 @@ html[data-theme=dark] .toast.card.warn .tic{color:#fbbf24}
 .fv .src{padding:10px 12px;flex:1 0 auto;min-width:0}
 html[data-theme=dark] .toast.pill.ok .tic{color:#15803d}html[data-theme=dark] .toast.pill.err .tic{color:#c62828}html[data-theme=dark] .toast.pill.warn .tic{color:#b45309}html[data-theme=dark] .toast.pill.info .tic{color:#1d4ed8}
 .toast.card.info .tic{background:rgba(255,106,53,.14)}
+/* diff viewer */
+.dsum{display:flex;gap:10px;font-size:13px;font-weight:600;margin-bottom:8px}.dsum .ad{color:var(--ok)}.dsum .rm{color:var(--bad)}
+.dv{border:1px solid var(--line);border-radius:10px;overflow:auto;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;background:var(--code)}
+.dr{display:flex;white-space:pre;min-width:max-content}
+.dr .dn{width:34px;flex:none;text-align:right;padding:0 6px;color:var(--mut);user-select:none}
+.dr .ds{width:16px;flex:none;text-align:center;user-select:none}
+.dr .dt{padding-right:12px}
+.dr.add{background:var(--addbg)}.dr.add .ds{color:var(--ok)}
+.dr.del{background:var(--delbg)}.dr.del .ds{color:var(--bad)}
+.dr mark{color:inherit;border-radius:3px;padding:0 1px}
+.dr mark.wa{background:rgba(31,157,85,.30)}.dr mark.wr{background:rgba(214,69,69,.30)}
+.dfold{background:var(--bg2);color:var(--mut);font:12px/1 -apple-system,system-ui,sans-serif;text-align:center;padding:6px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);position:sticky;left:0}
+/* git error card */
+.gerr{display:flex;gap:10px;align-items:flex-start;background:var(--delbg);border:1px solid rgba(214,69,69,.35);border-radius:12px;padding:12px;margin:8px 0}
+.gerr .gic{width:30px;height:30px;border-radius:50%;background:var(--card);color:var(--bad);display:flex;align-items:center;justify-content:center;flex:none}
+.gerr .gic .ic{width:18px;height:18px}
+.gerr .gtx{min-width:0;flex:1}
+.gerr .gt1{font-weight:600;font-size:14px;color:var(--bad);line-height:1.3}
+.gerr .gt2{font-size:13px;line-height:1.45;margin-top:2px;overflow-wrap:anywhere}
+.gerr .erract{margin:10px 0 0}
+/* change history */
+.hrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.hrow:first-of-type{border-top:0}
+.hrow .grow{min-width:0;flex:1;cursor:pointer}
+.hrow.gone{opacity:.55}
+.hdot{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;background:var(--bg2);color:var(--mut)}
+.hdot .ic{width:16px;height:16px}
+.hdot.add{background:var(--addbg);color:var(--ok)}.hdot.del{background:var(--delbg);color:var(--bad)}
