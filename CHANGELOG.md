@@ -7,6 +7,26 @@ for its version.
 
 ## [Unreleased]
 
+## [1.44.0]
+
+### Added
+- Splash screen with the app logo on white or near-black, following the phone's light or dark mode.
+- After two approvals in one chat, a web page request offers "Allow every website" so it stops asking.
+
+### Changed
+- Reading a web page has its own card: "Read web page", the site and page, a short status (Waiting, Done, Skipped, Couldn't read) and the reason when it fails.
+- The approval bar says "1 waiting for your approval" with an "Allow all" button.
+- The context dialog is shorter.
+
+## [1.43.0]
+
+### Added
+- Chats: a menu button on every chat with Pin, Rename and Delete. Pinned chats stay on top under "Pinned" and survive "Delete all conversations".
+- Folders: the folder list is sorted by last use and shows "Opened ... ago"; a search box appears once there are six or more folders.
+
+### Changed
+- The trash button in the chat list moved into the chat menu, so a chat can no longer be deleted by one stray tap.
+
 ## [1.42.1]
 
 ### Fixed

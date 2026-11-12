@@ -501,11 +501,15 @@ export async function runTurn(ctx) {
           const wu = checkUrl(call.args && call.args.url); const host = wu.hostname.toLowerCase();
           tm.args = wu.href.slice(0, 90);
           const wkey = 'web:' + host;
-          const wAuto = !!chat.auto || (chat.allow || []).includes(wkey);
-          tm.plan = { path: host, op: 'reads this page', added: 0, removed: 0, diff: [{ t: 'ctx', text: wu.href.slice(0, 300) }], more: 0, allowKeys: [wkey], auto: wAuto, risky: false, web: true };
+          const wAuto = !!chat.auto || (chat.allow || []).includes(wkey) || (chat.allow || []).includes('web:*');
+          // After two approvals in one chat, the card offers to allow every website so it stops asking.
+          tm.plan = { path: host, op: 'reads this page', added: 0, removed: 0, diff: [{ t: 'ctx', text: wu.href.slice(0, 300) }], more: 0, allowKeys: [wkey], auto: wAuto, risky: false, web: true, tip: !wAuto && (chat.webAsks || 0) >= 2 ? chat.webAsks : 0 };
           let decision = 'apply';
           if (!wAuto) { tm.status = 'pending'; await db.put('messages', tm); ui.onTool(tm); decision = await ui.requestApproval(tm, signal); }
-          if (decision === 'always') { chat.allow = [...new Set([...(chat.allow || []), wkey])]; await db.put('chats', chat); decision = 'apply'; }
+          if (decision === 'always') { chat.allow = [...new Set([...(chat.allow || []), wkey])]; decision = 'apply'; }
+          if (decision === 'allweb') { chat.allow = [...new Set([...(chat.allow || []), 'web:*'])]; decision = 'apply'; }
+          if (decision === 'apply' && !wAuto) { chat.webAsks = (chat.webAsks || 0) + 1; await db.put('chats', chat); }
+          else if (decision !== 'apply') { /* nothing saved */ }
           if (decision !== 'apply') { tm.status = 'rejected'; tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user did not allow reading this page. Do not retry it; answer without it or ask what they want.'; }
           else { tm.content = await fetchPage(call.args || {}, signal); tm.status = 'applied'; }
         } else if (call.name === 'request_env_var') {

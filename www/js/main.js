@@ -307,11 +307,41 @@ async function loadChats() {
 function drawChatList() {
   const q = $('#chatSearch').value.trim().toLowerCase();
   const list = S.chats.filter((c) => !q || (c.title || '').toLowerCase().includes(q));
-  $('#chatList').innerHTML = list.length ? list.map((c) => {
+  const row = (c) => {
     const f = S.folders.find((x) => x.id === c.folderId);
     return '<div class="chat-item' + (S.chat && S.chat.id === c.id ? ' on' : '') + '" data-id="' + c.id + '"><div class="t">' + esc(c.title || 'New chat') +
-      '<span class="s">' + (f ? esc(f.name) + ' · ' : '') + ago(c.updated) + '</span></div><button class="icon-btn" data-del="' + c.id + '" aria-label="Delete">' + ICON('trash') + '</button></div>';
-  }).join('') : '<div class="note">No chats yet</div>';
+      '<span class="s">' + (f ? esc(f.name) + ' \u00b7 ' : '') + ago(c.updated) + '</span></div>' + (c.pinned ? '<svg class="ic pinmark"><use href="#i-pin"/></svg>' : '') +
+      '<button class="icon-btn" data-menu="' + c.id + '" aria-label="Chat menu">' + ICON('dots') + '</button></div>';
+  };
+  const pinned = list.filter((c) => c.pinned), rest = list.filter((c) => !c.pinned);
+  $('#chatList').innerHTML = list.length
+    ? (pinned.length ? '<div class="chat-head">Pinned</div>' + pinned.map(row).join('') + (rest.length ? '<div class="chat-head">Recent</div>' : '') : '') + rest.map(row).join('')
+    : '<div class="note">' + (q ? 'No chats match' : 'No chats yet') + '</div>';
+}
+function closeRowMenu() { const m = $('#rowMenu'); if (m) m.remove(); }
+/** Small menu next to a chat row: Pin, Rename, Delete. */
+function openRowMenu(btn, id) {
+  closeRowMenu();
+  const c = S.chats.find((x) => x.id === id); if (!c) return;
+  const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
+  m.innerHTML = '<button data-a="pin">' + ICON('pin') + '<span>' + (c.pinned ? 'Unpin' : 'Pin') + '</span></button><button data-a="rename">' + ICON('edit') + '<span>Rename</span></button><button data-a="del" class="danger">' + ICON('trash') + '<span>Delete</span></button>';
+  document.body.appendChild(m);
+  const r = btn.getBoundingClientRect(); const mh = m.offsetHeight, mw = m.offsetWidth;
+  m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw)) + 'px';
+  m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, r.bottom + 4)) + 'px';
+  m.onclick = async (e) => {
+    const b = e.target.closest('[data-a]'); if (!b) return; closeRowMenu();
+    const row = await db.get('chats', id); if (!row) return;
+    if (b.dataset.a === 'pin') { row.pinned = !row.pinned; await db.put('chats', row); if (S.chat && S.chat.id === id) S.chat.pinned = row.pinned; await loadChats(); toast(row.pinned ? 'Pinned' : 'Unpinned'); }
+    else if (b.dataset.a === 'rename') {
+      const v = await askText('Rename chat', 'Chat name', row.title || '');
+      if (!v) return;
+      row.title = v.slice(0, 80); await db.put('chats', row); if (S.chat && S.chat.id === id) S.chat.title = row.title; await loadChats();
+    } else {
+      if (!await confirmBox('Delete chat?', 'This chat and its backups are removed from the phone.', 'Delete')) return;
+      await A.removeChat(id); await loadChats(); if (S.chat && S.chat.id === id) await newChat(null);
+    }
+  };
 }
 async function newChat(folder) {
   if (S.running) stopRun();
@@ -338,7 +368,7 @@ window.__kdexLaunch = handleLaunch;
 async function openChat(id) {
   if (S.running) stopRun();
   const c = await db.get('chats', id); if (!c) return newChat();
-  S.chat = c; S.folder = S.folders.find((f) => f.id === c.folderId) || null; S.think = c.think || 'off';
+  S.chat = c; S.folder = S.folders.find((f) => f.id === c.folderId) || null; S.think = c.think || 'off'; touchFolder(S.folder);
   await db.put('kv', { key: 'lastChat', value: id });
   fillModels(c.model); drawCtx(); drawThink();
   S.els.clear(); S.approvals.clear();
@@ -448,8 +478,27 @@ function planCard(m) {
   return '<div class="tool plan"><div class="th">' + ICON('list') + '<span class="nm">Plan</span><span class="pa">' + done + ' of ' + m.steps.length + ' done</span></div><div class="steps">' +
     m.steps.map((x) => '<div class="stp ' + x.status + '"><span class="dot"></span><span class="tx">' + esc(x.text) + '</span></div>').join('') + '</div></div>';
 }
+/** Plain card for reading a web page: site and page, a short status, and the reason when it fails. */
+function webCard(m) {
+  const st = m.status || 'running';
+  const label = { running: 'Reading', pending: 'Waiting', applied: 'Done', rejected: 'Skipped', error: "Couldn't read", cancelled: 'Stopped' }[st] || st;
+  const cls = st === 'applied' ? 'applied' : st === 'error' || st === 'cancelled' ? 'error' : st === 'pending' ? 'pending' : st;
+  let host = '', page = '';
+  try { const u = new URL((m.plan && m.plan.diff && m.plan.diff[0] && m.plan.diff[0].text) || m.args); host = u.hostname.replace(/^www\./, ''); page = (u.pathname + u.search).replace(/^\/$/, ''); } catch (e) { host = String(m.args || '').slice(0, 60); }
+  if (page.length > 50) page = page.slice(0, 49) + '\u2026';
+  let h = '<div class="tool wcard"><div class="th">' + ICON('globe') + '<span class="nm">Read web page</span><span class="st ' + cls + '">' + esc(label) + '</span></div>' +
+    '<div class="wsite"><b>' + esc(host) + '</b>' + esc(page) + '</div>';
+  if (st === 'error' && m.content) h += '<div class="wwhy">' + esc(String(m.content).replace(/^Error:\s*/i, '').split('\n')[0].slice(0, 140)) + '</div>';
+  if (st === 'pending' && m.plan) {
+    if (m.plan.tip) h += '<div class="wtip">You\u2019ve allowed ' + m.plan.tip + ' sites in this chat. Allow every website here so it stops asking?<br><button class="btn sm" data-tool="allweb" data-id="' + m.id + '"><span class="lbl">Allow every website</span></button></div>';
+    h += '<div class="tf"><span style="flex:1"></span><button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">Read</span></button></div>' +
+      '<div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(host) + ' in this chat</button></div>';
+  }
+  return h + '</div>';
+}
 function toolCard(m) {
   if (m.name === 'update_plan' && m.steps) return planCard(m);
+  if (m.name === 'web_fetch') return webCard(m);
   if (m.name === 'make_file' && m.file) {
     return '<div class="tool"><div class="th">' + ICON('file') + '<span class="nm">' + esc(m.file.name) + '</span><span class="pa">' + esc(fmtBytes(m.file.size)) + '</span></div>' +
       '<div class="tf"><span class="lbl" style="flex:1">Ready</span><button class="btn sm" data-tool="copyfile" data-id="' + m.id + '">' + ICON('copy') + '<span class="lbl">Copy</span></button>' +
@@ -477,7 +526,7 @@ function pendingCount() { return S.approvals.size; }
 function updateApproveBar() {
   const n = pendingCount(); const bar = $('#approveBar');
   if (!n) { bar.classList.add('hidden'); return; }
-  bar.classList.remove('hidden'); $('#approveText').textContent = n + ' change' + (n > 1 ? 's' : '') + ' waiting for your approval';
+  bar.classList.remove('hidden'); $('#approveText').textContent = n + ' waiting for your approval';
 }
 function decide(id, v) {
   const r = S.approvals.get(Number(id)); if (!r) return;
@@ -499,9 +548,9 @@ async function drawRing() {
 }
 async function showRing() {
   const b = $('#ctxBtn'); const pct = b.dataset.pct, used = +b.dataset.used, budget = +b.dataset.budget;
-  const k = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n));
+  const k = (n) => (n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K' : String(n));
   const mode = b.dataset.mode.charAt(0).toUpperCase() + b.dataset.mode.slice(1);
-  const v = await choiceBox('Context ' + pct + '% used', 'About ' + k(used) + ' of the ' + k(budget) + ' token budget (' + mode + ' mode). When it is full, older messages are summarised automatically, so nothing is lost; small details may be shortened. For an unrelated task, a new chat is cheaper and more focused.', ['OK', 'New chat'], { noCancel: true });
+  const v = await choiceBox('Context ' + pct + '% used', k(used) + ' of ' + k(budget) + ' tokens (' + mode + ' mode). When it fills up, older messages are summarised automatically.', ['OK', 'New chat'], { noCancel: true });
   if (v === 1) newChat(S.folder);
 }
 function setRunning(v) {
@@ -715,8 +764,10 @@ function openLicenses() {
 function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').classList.add('hidden'); S.sheetStack = []; }
 
 /** Use `f` (or no folder) in the current chat. Messages stay; the model is told about the change. */
+async function touchFolder(f) { if (!f) return; const x = S.folders.find((y) => y.id === f.id); if (x) { x.used = Date.now(); f.used = x.used; await A.saveFolders(S.folders); } }
 async function applyFolder(f) {
   const c = S.chat; if (!c) return;
+  touchFolder(f);
   const cur = S.folder;
   if ((cur && f && cur.id === f.id) || (!cur && !f)) { closeSheet(); return; }
   const had = (await db.byIndex('messages', 'chatId', c.id)).some((x) => x.role === 'user');
@@ -756,6 +807,8 @@ async function detectRepo(f) {
 async function openProjects() {
   const body = sheet('Folder for this chat');
   const paths = {};
+  let fq = '';
+  const byRecent = () => S.folders.map((f, i) => [f, i]).sort((a, b) => ((b[0].used || 0) - (a[0].used || 0)) || (a[1] - b[1])).map((x) => x[0]);
   const loadPaths = async () => { for (const f of S.folders) paths[f.id] = await getTermuxPath(f).catch(() => null); };
   await loadPaths();
   const draw = () => {
@@ -766,7 +819,8 @@ async function openProjects() {
       '<button id="pNone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('plus') + '<span class="lbl">New chat without a folder</span></button>' +
       '<div class="safe">' + ICON('lock') + '<span>I can only touch the folder you pick. A backup is saved before every change.</span></div>' +
       (S.folders.length ? '<div class="h3">Your folders</div>' : '') +
-      S.folders.map((f) => '<div class="row-item frow" data-f="' + f.id + '">' + ICON('folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">' + (S.folder && S.folder.id === f.id ? 'Used in this chat' : 'Tap to use in this chat') + '</div></div>' +
+      (S.folders.length >= 6 ? '<label class="fsearch">' + ICON('search') + '<input id="fQ" placeholder="Search folders" autocomplete="off" value="' + esc(fq) + '"></label>' : '') +
+      byRecent().map((f) => '<div class="row-item frow" data-f="' + f.id + '">' + ICON('folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">' + (S.folder && S.folder.id === f.id ? 'Used in this chat' : f.used ? 'Opened ' + ago(f.used) : 'Tap to use in this chat') + '</div></div>' +
         '<button class="icon-btn rbtn" data-nf="' + f.id + '" aria-label="New chat in this folder">' + ICON('plus') + '</button><button class="icon-btn rbtn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button>' +
         '<div class="fp"><span class="fpath">' + esc(paths[f.id] || 'Path unknown').replace(/\//g, '/<wbr>') + '</span>' + (paths[f.id] ? '<button class="icon-btn rbtn" data-cp="' + f.id + '" aria-label="Copy path of ' + esc(f.name) + '">' + ICON('copy') + '</button>' : '') + '</div></div>').join('') +
       '<div class="note" style="margin-top:12px">Android does not allow picking the whole storage or the Download folder. Choose a subfolder, for example one you create for a project.</div>';
@@ -779,6 +833,8 @@ async function openProjects() {
         await applyFolder(f);
       } catch (e) { if (!/cancel/i.test(e.message || '')) toast(e.message || 'Could not open the folder'); }
     };
+    const filt = () => { const q = fq.trim().toLowerCase(); $$('[data-f]', body).forEach((r) => { const f = S.folders.find((x) => x.id === r.dataset.f); r.style.display = !q || (f && f.name.toLowerCase().includes(q)) ? '' : 'none'; }); };
+    if ($('#fQ')) { $('#fQ').oninput = (e) => { fq = e.target.value; filt(); }; filt(); }
     $('#pPath').onclick = openByPath;
     $('#pClone').onclick = cloneFlow;
     if ($('#pDetach')) $('#pDetach').onclick = () => applyFolder(null);
@@ -788,7 +844,7 @@ async function openProjects() {
       await applyFolder(S.folders.find((x) => x.id === r.dataset.f));
     });
     $$('[data-cp]', body).forEach((b) => b.onclick = async () => { flashCopied(b, await copyText(paths[b.dataset.cp])); });
-    $$('[data-nf]', body).forEach((b) => b.onclick = async () => { const f = S.folders.find((x) => x.id === b.dataset.nf); closeSheet(); await newChat(f); await persistChat(); loadChats(); });
+    $$('[data-nf]', body).forEach((b) => b.onclick = async () => { const f = S.folders.find((x) => x.id === b.dataset.nf); touchFolder(f); closeSheet(); await newChat(f); await persistChat(); loadChats(); });
     $$('[data-rmf]', body).forEach((b) => b.onclick = async () => {
       const f = S.folders.find((x) => x.id === b.dataset.rmf);
       if (!await confirmBox('Remove folder?', 'This only removes "' + f.name + '" from the list and releases access. Your files are not deleted.', 'Remove')) return;
@@ -1014,10 +1070,13 @@ function openSettings() {
   $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
   $('#diagBtn').onclick = openDiagnostics; $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
   $('#delAll').onclick = async () => {
-    if (!await confirmBox('Delete all conversations?', 'Every chat, its messages and its change backups are removed from this phone. Your folders, files, settings, memory notes and keys are not touched. This cannot be undone.', 'Delete all')) return;
+    if (!await confirmBox('Delete all conversations?', 'Every chat except pinned ones, with its messages and change backups, is removed from this phone. Your folders, files, settings, memory notes and keys are not touched. This cannot be undone.', 'Delete all')) return;
     if (S.running) stopRun();
-    for (const st of ['messages', 'backups', 'chats']) for (const row of await db.all(st)) await db.del(st, row.id);
-    closeSheet(); await newChat(null); await loadChats(); toast('All conversations deleted');
+    const keep = new Set((await db.all('chats')).filter((c) => c.pinned).map((c) => c.id));
+    for (const row of await db.all('messages')) if (!keep.has(row.chatId)) await db.del('messages', row.id);
+    for (const row of await db.all('backups')) if (!keep.has(row.chatId)) await db.del('backups', row.id);
+    for (const row of await db.all('chats')) if (!keep.has(row.id)) await db.del('chats', row.id);
+    closeSheet(); await newChat(null); await loadChats(); toast(keep.size ? 'Conversations deleted (pinned kept)' : 'All conversations deleted');
   };
   $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message)); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message));
   $('#gitId').onclick = () => openGitIdentity(openSettings);
@@ -1655,13 +1714,11 @@ function wire() {
   $('#sheetClose').onclick = closeSheet; sheetDrag(); touchSwipes();
   $('#chatSearch').oninput = drawChatList;
   $('#chatList').onclick = async (e) => {
-    const d = e.target.closest('[data-del]');
-    if (d) {
-      if (!await confirmBox('Delete chat?', 'This chat and its backups are removed from the phone.', 'Delete')) return;
-      await A.removeChat(d.dataset.del); await loadChats(); if (S.chat && S.chat.id === d.dataset.del) await newChat(null); return;
-    }
+    const d = e.target.closest('[data-menu]');
+    if (d) { e.stopPropagation(); openRowMenu(d, d.dataset.menu); return; }
     const it = e.target.closest('[data-id]'); if (it) openChat(it.dataset.id);
   };
+  document.addEventListener('click', (e) => { if (!e.target.closest('#rowMenu') && !e.target.closest('[data-menu]')) closeRowMenu(); });
   $('#composer').onsubmit = (e) => { e.preventDefault(); send(false); };
   $('#input').addEventListener('input', autoGrow);
   $('#attachBtn').onclick = () => $('#fileInput').click();
@@ -1691,7 +1748,7 @@ function wire() {
         await saveOut(fm.file.name, fm.fileContent); return;
       }
       if (t.dataset.tool === 'undo') { await undoOne(Number(t.dataset.b)); return; }
-      decide(t.dataset.id, t.dataset.tool === 'apply' ? 'apply' : t.dataset.tool === 'always' ? 'always' : 'reject'); return;
+      decide(t.dataset.id, t.dataset.tool === 'apply' ? 'apply' : t.dataset.tool === 'always' ? 'always' : t.dataset.tool === 'allweb' ? 'allweb' : 'reject'); return;
     }
     const a = e.target.closest('[data-act]');
     if (a) {

@@ -59,6 +59,23 @@ for (const dir of fs.readdirSync(res)) {
   if (dir.startsWith('drawable') && fs.existsSync(f)) { fs.copyFileSync(path.join(icons, 'splash.png'), f); splashCount++; }
 }
 
+// 3b. splash that follows the phone's light or dark mode: the app logo, centred, on white or near-black.
+// Android 12+ draws windowSplashScreenAnimatedIcon inside a circle, so the logo has its own padding (splash-logo.png).
+fs.mkdirSync(path.join(res, 'values-night'), { recursive: true });
+fs.mkdirSync(path.join(res, 'drawable-nodpi'), { recursive: true });
+fs.copyFileSync(path.join(icons, 'splash-logo.png'), path.join(res, 'drawable-nodpi', 'kdex_splash_logo.png'));
+write(path.join(res, 'values/kdex_splash_colors.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="kdex_splash_bg">#FFFFFF</color>\n</resources>\n');
+write(path.join(res, 'values-night/kdex_splash_colors.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="kdex_splash_bg">#121214</color>\n</resources>\n');
+write(path.join(res, 'drawable/kdex_splash.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\n    <item android:drawable="@color/kdex_splash_bg" />\n    <item>\n        <bitmap android:src="@drawable/kdex_splash_logo" android:gravity="center" />\n    </item>\n</layer-list>\n');
+const stylesFile = path.join(res, 'values/styles.xml');
+let st = read(stylesFile);
+if (!st.includes('kdex_splash')) {
+  st = st.replace(/(<style name="AppTheme\.NoActionBarLaunch"[^>]*>)([\s\S]*?)(<\/style>)/, (m0, a, body, z) =>
+    a + '\n        <item name="android:background">@drawable/kdex_splash</item>\n        <item name="windowSplashScreenBackground">@color/kdex_splash_bg</item>\n        <item name="windowSplashScreenAnimatedIcon">@drawable/kdex_splash_logo</item>\n    ' + z);
+  write(stylesFile, st);
+  console.log(st.includes('windowSplashScreenAnimatedIcon') ? 'Splash theme patched' : 'WARNING: splash theme not patched');
+}
+
 // 4. manifest: no cloud backup of chats/keys
 const mf = path.join(android, 'app/src/main/AndroidManifest.xml');
 let m = read(mf);
