@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.45.1]
+
+### Fixed
+- Build failed at `npm ci`: the isomorphic-git version in package.json had been mangled (`^1.45.02`) by a version-bump script. Restored to `^1.44.12`. This also affected 1.44.2.
+
 ## [1.45.0]
 
 ### Added
