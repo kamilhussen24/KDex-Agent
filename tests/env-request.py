@@ -15,7 +15,7 @@ with sync_playwright() as p:
         print(mode,'input type:',pg.get_attribute('#dlgInput','type'))
         pg.click('#dlgEye'); print(mode,'after eye:',pg.get_attribute('#dlgInput','type')); pg.click('#dlgEye')
         pg.click('#dlgYes'); pg.wait_for_timeout(150); print(mode,'empty save keeps dialog:', pg.is_visible('#dlgInput'))
-        pg.fill('#dlgInput','sk_live_SUPERSECRET99'); pg.click('#dlgYes'); idle(pg)
+        pg.fill('#dlgInput','demo_key_SUPERSECRET99'); pg.click('#dlgYes'); idle(pg)
         txt=pg.inner_text('#messages'); alls=' '.join(reqs)
         print(mode,'chat shows secret:', 'SUPERSECRET99' in txt, '| sent to model:', 'SUPERSECRET99' in alls, '| model got:', 'ENVRESULT' in txt)
         pg.screenshot(path=f'shots/f/{mode}-secret-done.png')
@@ -25,7 +25,7 @@ with sync_playwright() as p:
         print(mode,'.env file:', repr(res))
         # second request: already set
         pg.fill('#input','envtest again'); pg.click('#sendBtn'); idle(pg)
-        print(mode,'second ask dialog shown:', pg.is_visible('#dlgInput'), '| result mentions already set:', 'already set' in pg.inner_text('#messages'))
+        print(mode,'second ask dialog shown:', pg.is_visible('#dlgInput'), '| result mentions already set:', 'Already set' in pg.inner_text('#messages'))
         # skip path: new var via direct? covered by abort: skip
         print(mode,'errs',errs)
     b.close()

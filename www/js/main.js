@@ -1,7 +1,7 @@
 // KDex Agent (Android) - UI layer. All data stays on this phone.
 import { $, $$, esc, uid, fmtBytes, fmtTok, ago, dayKey, dayKeyAgo, copyText } from './util.js';
 import { db, kvGet, kvSet } from './db.js';
-import { secure, fs, App, Termux, setBars } from './native.js';
+import { secure, fs, App, Termux, setBars, isNative } from './native.js';
 import { PRESETS, QUICK_FILL, listModels, popularModels } from './providers.js';
 import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
@@ -217,9 +217,27 @@ async function openChat(id) {
   msgs.forEach((m) => renderMsg(m));
   scrollEnd(true); closeDrawer(); drawChatList(); updateApproveBar();
 }
+/** Hand a text file to the user: share sheet when available; on the phone otherwise save it into a folder they pick; in a browser a normal download. */
+async function saveOut(name, text) {
+  const file = new File([text], name, { type: 'text/plain' });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  if (isNative) {
+    try {
+      const f = await fs.pickFolder();
+      await fs.writeText(f.uri, name, text);
+      if (!S.folders.some((x) => x.uri === f.uri)) await fs.releaseFolder(f.uri).catch(() => {}); // a one-off save should not keep access to that folder
+      toast('Saved ' + name + ' in ' + (f.name || 'the folder'));
+    } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast('Could not save the file: ' + ((e && e.message) || 'unknown error')); }
+    return;
+  }
+  try {
+    const url = URL.createObjectURL(file); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000); toast('Saving ' + name);
+  } catch (e) { toast(await copyText(text) ? 'Could not download, copied instead' : 'Could not save the file'); }
+}
 function renderEmpty() {
   $('#messages').innerHTML = '<div class="empty"><img src="img/logo.png" alt="" width="64" height="64"><h2>How can I help?</h2><div>' +
-    (S.folder ? 'Working in <b>' + esc(S.folder.name) + '</b>. Ask me to read, search or change files.' : 'Chat freely, or tap <b>Add folder</b> above to let me work on your files. You can add or change the folder any time.') + '</div></div>';
+    (S.folder ? 'Working in <b>' + esc(S.folder.name) + '</b>. Ask me to read, search or change files.' : 'Ask anything, attach files, or tap the <b>folder</b> button above to let me work on a project. You can add or change the folder any time.') + '</div></div>';
 }
 async function persistChat() {
   if (!S.chat) return;
@@ -263,7 +281,7 @@ function renderMsg(m) {
   if (m.role === 'user') {
     el.className = 'msg user';
     el.innerHTML = (m.images && m.images.length ? '<div class="thumbs">' + m.images.map((i) => '<img alt="" src="data:' + i.mime + ';base64,' + i.data + '">').join('') + '</div>' : '') +
-      (m.files && m.files.length ? '<div class="fnames">' + m.files.map(esc).join(', ') + '</div>' : '') + (m.text ? '<div class="bubble">' + esc(m.text) + '</div>' : '');
+      (m.fileData && m.fileData.length ? '<div class="ufiles">' + m.fileData.map((f, i) => '<button type="button" class="ufile" data-ufile="' + m.id + ':' + i + '" aria-label="Save ' + esc(f.name) + '">' + ICON('file') + '<span class="nm">' + esc(f.name) + '</span><span class="sz">' + esc(fmtBytes(f.size)) + '</span></button>').join('') + '</div>' : (m.files && m.files.length ? '<div class="fnames">' + m.files.map(esc).join(', ') + '</div>' : '')) + (m.text ? '<div class="bubble">' + esc(m.text) + '</div>' : '');
   } else if (m.role === 'assistant') {
     el.className = 'msg assistant';
     const live = m.status === 'streaming';
@@ -292,7 +310,7 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash' };
 function planCard(m) {
   const done = m.steps.filter((x) => x.status === 'done').length;
   return '<div class="tool plan"><div class="th">' + ICON('list') + '<span class="nm">Plan</span><span class="pa">' + done + ' of ' + m.steps.length + ' done</span></div><div class="steps">' +
@@ -300,6 +318,11 @@ function planCard(m) {
 }
 function toolCard(m) {
   if (m.name === 'update_plan' && m.steps) return planCard(m);
+  if (m.name === 'make_file' && m.file) {
+    return '<div class="tool"><div class="th">' + ICON('file') + '<span class="nm">' + esc(m.file.name) + '</span><span class="pa">' + esc(fmtBytes(m.file.size)) + '</span></div>' +
+      '<div class="tf"><span class="lbl" style="flex:1">Ready</span><button class="btn sm" data-tool="copyfile" data-id="' + m.id + '">' + ICON('copy') + '<span class="lbl">Copy</span></button>' +
+      '<button class="btn primary sm" data-tool="getfile" data-id="' + m.id + '">' + ICON('down') + '<span class="lbl">Download</span></button></div></div>';
+  }
   const st = m.status || 'running';
   let h = '<div class="tool"><div class="th">' + ICON(TOOL_ICON[m.name] || 'file') + '<span class="nm">' + esc(m.name) + '</span><span class="pa">' + esc(m.args || '') + '</span><span class="st ' + st + '">' + esc(st === 'running' ? 'working' : st) + '</span></div>';
   if (m.plan) {
@@ -355,7 +378,6 @@ async function send(regenerate) {
   const attach = regenerate ? [] : S.attach;
   const images = attach.filter((a) => a.img).map((a) => ({ mime: a.mime, data: a.data }));
   const files = attach.filter((a) => !a.img);
-  const fullText = files.length ? files.map((f) => '[File: ' + f.name + ']\n' + f.text).join('\n\n') + (text ? '\n\n' + text : '') : text;
   if (!regenerate) { input.value = ''; autoGrow(); S.attach = []; drawChips(); }
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
   delete S.chat.fresh; await persistChat(); loadChats();
@@ -371,7 +393,7 @@ async function send(regenerate) {
     }),
   };
   try {
-    await A.runTurn({ chat: S.chat, text: fullText, images, attachNames: attach.map((a) => a.name), folder: S.folder, modelId: currentModelId(), think: S.think, signal: S.abort.signal, ui, regenerate: !!regenerate });
+    await A.runTurn({ chat: S.chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder: S.folder, modelId: currentModelId(), think: S.think, signal: S.abort.signal, ui, regenerate: !!regenerate });
   } catch (e) {
     toast(e.message || 'Something went wrong');
     const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
@@ -464,10 +486,26 @@ async function applyFolder(f) {
   } else if ($('.empty', $('#messages'))) renderEmpty();
   drawCtx(); updateApproveBar(); closeSheet();
   toast(f ? 'Using ' + f.name + ' in this chat' : 'Folder removed from this chat');
+  if (f) detectRepo(f);
+}
+/** Look at an existing repository (for example one made in Termux). Reads only; nothing is changed or deleted. */
+async function detectRepo(f) {
+  try {
+    const r = await G.inspectRepo(f); if (!r || S.folder !== f) return;
+    const app = await G.getGitSettings(); const id = r.issues.find((x) => x.code === 'identity' && x.cand);
+    if (id && !app.name && !app.email) await G.saveGitSettings({ name: id.cand.name, email: id.cand.email });
+    const o = r.remotes.find((x) => x.name === 'origin') || r.remotes[0];
+    const ssh = r.issues.some((x) => x.code === 'ssh');
+    setTimeout(() => toast('Git repository found · ' + (r.branch || 'no commits') + (o ? ' · ' + o.host + '/' + o.path : ' · no remote') + (id && !app.name && !app.email ? ' · identity imported' : '') + (ssh ? ' · SSH remote needs HTTPS' : '')), 1800);
+    updateGitChip();
+  } catch (e) { /* detection is best effort */ }
 }
 
 async function openProjects() {
   const body = sheet('Folder for this chat');
+  const paths = {};
+  const loadPaths = async () => { for (const f of S.folders) paths[f.id] = await getTermuxPath(f).catch(() => null); };
+  await loadPaths();
   const draw = () => {
     body.innerHTML = '<button id="pOpen" class="btn primary" style="width:100%;margin-bottom:8px">' + ICON('folder') + '<span class="lbl">Open a folder...</span></button>' +
       '<button id="pClone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('branch') + '<span class="lbl">Clone a repository...</span></button>' +
@@ -475,8 +513,9 @@ async function openProjects() {
       '<button id="pNone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('plus') + '<span class="lbl">New chat without a folder</span></button>' +
       '<div class="safe">' + ICON('lock') + '<span>I can only touch the folder you pick. A backup is saved before every change.</span></div>' +
       (S.folders.length ? '<div class="h3">Your folders</div>' : '') +
-      S.folders.map((f) => '<div class="row-item" data-f="' + f.id + '">' + ICON('folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">' + (S.folder && S.folder.id === f.id ? 'Used in this chat' : 'Tap to use in this chat') + '</div></div>' +
-        '<button class="icon-btn rbtn" data-nf="' + f.id + '" aria-label="New chat in this folder">' + ICON('plus') + '</button><button class="icon-btn rbtn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button></div>').join('') +
+      S.folders.map((f) => '<div class="row-item frow" data-f="' + f.id + '">' + ICON('folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">' + (S.folder && S.folder.id === f.id ? 'Used in this chat' : 'Tap to use in this chat') + '</div></div>' +
+        '<button class="icon-btn rbtn" data-nf="' + f.id + '" aria-label="New chat in this folder">' + ICON('plus') + '</button><button class="icon-btn rbtn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button>' +
+        '<div class="fp"><span class="fpath">' + esc(paths[f.id] || 'Path unknown').replace(/\//g, '/<wbr>') + '</span>' + (paths[f.id] ? '<button class="icon-btn rbtn" data-cp="' + f.id + '" aria-label="Copy path of ' + esc(f.name) + '">' + ICON('copy') + '</button>' : '') + '</div></div>').join('') +
       '<div class="note" style="margin-top:12px">Android does not allow picking the whole storage or the Download folder. Choose a subfolder, for example one you create for a project.</div>';
     $('#pOpen').onclick = async () => {
       try {
@@ -490,9 +529,10 @@ async function openProjects() {
     if ($('#pDetach')) $('#pDetach').onclick = () => applyFolder(null);
     $('#pNone').onclick = () => { closeSheet(); newChat(null); };
     $$('[data-f]', body).forEach((r) => r.onclick = async (e) => {
-      if (e.target.closest('[data-rmf]') || e.target.closest('[data-nf]')) return;
+      if (e.target.closest('[data-rmf]') || e.target.closest('[data-nf]') || e.target.closest('[data-cp]')) return;
       await applyFolder(S.folders.find((x) => x.id === r.dataset.f));
     });
+    $$('[data-cp]', body).forEach((b) => b.onclick = async () => { toast(await copyText(paths[b.dataset.cp]) ? 'Path copied' : 'Could not copy'); });
     $$('[data-nf]', body).forEach((b) => b.onclick = async () => { const f = S.folders.find((x) => x.id === b.dataset.nf); closeSheet(); await newChat(f); await persistChat(); loadChats(); });
     $$('[data-rmf]', body).forEach((b) => b.onclick = async () => {
       const f = S.folders.find((x) => x.id === b.dataset.rmf);
@@ -618,7 +658,7 @@ function openSettings() {
     if (!await confirmBox('Delete all conversations?', 'Every chat, its messages and its change backups are removed from this phone. Your folders, files, settings, memory notes and keys are not touched. This cannot be undone.', 'Delete all')) return;
     if (S.running) stopRun();
     for (const st of ['messages', 'backups', 'chats']) for (const row of await db.all(st)) await db.del(st, row.id);
-    closeSheet(); await newChat(S.folder); await loadChats(); toast('All conversations deleted');
+    closeSheet(); await newChat(null); await loadChats(); toast('All conversations deleted');
   };
   $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message)); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message));
   $('#gitId').onclick = () => openGitIdentity(openSettings);
@@ -706,51 +746,85 @@ const GS = { tab: 'changes', sel: new Set(), known: new Set(), keepSel: false, h
 const dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
 const baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
 
-function busyLine(text) { const el = $('#gMsg'); if (el) el.innerHTML = text ? '<div class="busy"><span class="spin"></span>' + esc(text) + '</div>' : ''; }
-function errLine(text) { const el = $('#gMsg'); if (el) el.innerHTML = text ? '<div class="err">' + esc(text) + '</div>' : ''; }
-const DONE = { Fetching: 'Fetched', Pulling: 'Pulled', Pushing: 'Pushed', 'Force pushing': 'Force pushed', Committing: 'Committed', Discarding: 'Discarded', 'Creating branch': 'Branch created', 'Switching branch': 'Switched branch', Merging: 'Merged', 'Deleting branch': 'Branch deleted', 'Undoing commit': 'Commit undone', 'Saving remote': 'Remote saved' };
+const PHASES = { 'Analyzing workdir': 'Checking files', 'Updating workdir': 'Updating files', 'Counting objects': 'Counting objects', 'Compressing objects': 'Packing', 'Receiving objects': 'Downloading', 'Writing objects': 'Uploading', 'Resolving deltas': 'Finishing', 'Enumerating objects': 'Counting objects', 'Total': 'Finishing' };
+const phaseOf = (p) => (p && p.phase ? (PHASES[p.phase] || p.phase) : '');
+function busyLine(text, frac, onCancel) {
+  const el = $('#gMsg'); if (!el) return;
+  if (!text) { el.innerHTML = ''; return; }
+  const w = frac == null ? 0 : Math.max(2, Math.min(100, Math.round(frac * 100)));
+  el.innerHTML = '<div class="busy2"><div class="bl"><span class="spin"></span><span class="bt">' + esc(text) + '</span>' + (onCancel ? '<button class="linkbtn" id="gCancel">Cancel</button>' : '') + '</div><div class="bar' + (frac == null ? ' ind' : '') + '"><i' + (frac == null ? '' : ' style="width:' + w + '%"') + '></i></div></div>';
+  if (onCancel) $('#gCancel').onclick = onCancel;
+}
+function errLine(text) {
+  const el = $('#gMsg'); if (!el) return;
+  if (!text) { el.innerHTML = ''; return; }
+  const urls = [...new Set(String(text).match(/https?:\/\/[^\s<>"')]+/g) || [])];
+  const html = esc(text).replace(/\n/g, '<br>');
+  el.innerHTML = '<div class="err">' + html + '</div>' + (urls.length ? '<div class="erract">' + urls.slice(0, 2).map((u, i) => '<button class="btn sm" data-cu="' + i + '"><span class="lbl">Copy link</span></button>').join('') + '</div>' : '');
+  $$('[data-cu]', el).forEach((b) => b.onclick = async () => toast(await copyText(urls[+b.dataset.cu]) ? 'Link copied. Open it in your browser.' : 'Could not copy'));
+}
+const DONE = { Fetching: 'Fetched', Pulling: 'Pulled', Pushing: 'Pushed', 'Force pushing': 'Force pushed', Committing: 'Committed', Discarding: 'Discarded', 'Creating branch': 'Branch created', 'Switching branch': 'Switched branch', Merging: 'Merged', 'Deleting branch': 'Branch deleted', 'Undoing commit': 'Commit undone', 'Saving remote': 'Remote saved', 'Switching to HTTPS': 'Remote switched to HTTPS' };
 async function gitRun(label, fn, after) {
   $$('#sheetBody .btn, #sheetBody .linkbtn, #sheetBody .icon-btn, #sheetBody .stg').forEach((b) => { b.disabled = true; });
-  busyLine(label + '...');
+  const ac = new AbortController();
+  const cancel = () => { ac.abort(); busyLine('Cancelling...'); };
+  busyLine(label + '...', null, cancel);
   try {
-    await fn((p) => busyLine(label + ' ' + pct(p)));
+    await fn((p) => { const ph = phaseOf(p); busyLine(label + (ph ? ' · ' + ph : '') + (p && p.total ? ' ' + Math.round((p.loaded / p.total) * 100) + '%' : ''), p && p.total ? p.loaded / p.total : null, cancel); }, ac.signal);
+    if (ac.signal.aborted) { await openGit(GS.tab); toast('Cancelled'); return; }
     toast(DONE[label] || 'Done');
     if (after) await after(); else await openGit();
   } catch (e) {
     const m = (e && e.message) || String(e);
+    if (ac.signal.aborted) { await openGit(GS.tab); toast('Cancelled'); return; }
     if (/^Set your Git name/.test(m)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGit()); return; }
     await openGit(GS.tab, true); errLine(m);
   }
 }
 
-async function loadGitState(folder) {
-  const [branch, changes, branches, history, remote] = await Promise.all([G.currentBranch(folder), G.status(folder), G.branches(folder), G.log(folder, GS.hist), G.remoteInfo(folder)]);
+/** The cheap parts first, so the sheet opens fast. File changes and repository details follow. */
+async function loadGitQuick(folder) {
+  const [branch, branches, history, remote] = await Promise.all([G.currentBranch(folder), G.branches(folder), G.log(folder, GS.hist), G.remoteInfo(folder)]);
   const ab = remote ? await G.aheadBehind(folder) : null;
   const needToken = remote ? !(await G.getToken(remote.host).catch(() => null)) : false;
+  return { branch, changes: [], pending: true, branches, history, remote, ab, needToken, repo: null };
+}
+async function loadGitChanges(folder, st) {
+  const changes = await G.status(folder);
   const cur = new Set(changes.map((c) => c.path));
   const prevKnown = GS.keepSel ? GS.known : new Set();
   GS.sel = new Set([...cur].filter((p) => !prevKnown.has(p) || GS.sel.has(p)));
   GS.known = cur; GS.keepSel = true;
-  return { branch, changes, branches, history, remote, ab, needToken };
+  st.changes = changes; st.pending = false;
 }
 
+const skeleton = () => '<div class="skel"><i style="width:60%"></i><i style="width:90%"></i><i style="width:75%"></i></div>';
+let gitLoadId = 0;
 async function openGit(tab, keepMsg) {
   if (!S.folder) { toast('Open a folder first.'); return; }
   const folder = S.folder; G.resetGitCache(folder);
   if (!(await G.isRepo(folder))) return openGitStart(folder);
   if (tab) GS.tab = tab;
+  const my = ++gitLoadId;
   const body = sheet('Git');
-  body.innerHTML = '<div class="busy"><span class="spin"></span>Loading...</div>';
+  body.innerHTML = skeleton();
   let st;
-  try { st = await loadGitState(folder); } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message || String(e)) + '</div>'; return; }
-  S.gitState = st; updateGitChip();
-
-  const head = gitHead(st);
-  const tabs = [['changes', 'Changes' + (st.changes.length ? ' (' + st.changes.length + ')' : '')], ['branches', 'Branches'], ['history', 'History'], ['remote', 'Remote']];
-  const tb = $('#sheetTabs'); tb.classList.remove('hidden');
-  tb.innerHTML = tabs.map(([k, l]) => '<button class="tab' + (GS.tab === k ? ' on' : '') + '" data-tab="' + k + '">' + l + '</button>').join('');
-  $$('[data-tab]', tb).forEach((b) => b.onclick = () => { GS.tab = b.dataset.tab; renderGitTab(folder, st, head, body); $$('[data-tab]', tb).forEach((x) => x.classList.toggle('on', x === b)); });
-  renderGitTab(folder, st, head, body);
+  try { st = await loadGitQuick(folder); } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message || String(e)) + '</div>'; return; }
+  if (my !== gitLoadId) return;
+  S.gitState = st;
+  const paint = () => {
+    const head = gitHead(st);
+    const tabs = [['changes', 'Changes' + (st.pending ? '' : st.changes.length ? ' (' + st.changes.length + ')' : '')], ['branches', 'Branches'], ['history', 'History'], ['remote', 'Remote']];
+    const tb = $('#sheetTabs'); tb.classList.remove('hidden');
+    tb.innerHTML = tabs.map(([k, l]) => '<button class="tab' + (GS.tab === k ? ' on' : '') + '" data-tab="' + k + '">' + l + '</button>').join('');
+    $$('[data-tab]', tb).forEach((b) => b.onclick = () => { GS.tab = b.dataset.tab; renderGitTab(folder, st, head, body); $$('[data-tab]', tb).forEach((x) => x.classList.toggle('on', x === b)); });
+    renderGitTab(folder, st, head, body);
+  };
+  paint();
+  // heavier work in the background; ignore it if the sheet moved on
+  const stillHere = () => my === gitLoadId && S.gitState === st;
+  loadGitChanges(folder, st).then(() => { if (!stillHere()) return; const keep = $('#gMsg') ? $('#gMsg').innerHTML : ''; const msg = $('#gMessage') ? $('#gMessage').value : ''; const top = $('#sheetBody').scrollTop; paint(); if ($('#gMsg')) $('#gMsg').innerHTML = keep; if ($('#gMessage')) $('#gMessage').value = msg; $('#sheetBody').scrollTop = top; updateGitChip(); }).catch((e) => { if (stillHere()) { st.pending = false; paint(); errLine((e && e.message) || String(e)); } });
+  G.inspectRepo(folder).then((r) => { if (!stillHere()) return; st.repo = r; if (GS.tab === 'remote') { const top = $('#sheetBody').scrollTop; paint(); $('#sheetBody').scrollTop = top; } }).catch(() => {});
   if (keepMsg) return;
 }
 
@@ -760,14 +834,15 @@ function gitHead(st) {
     '<div class="gsum"><div class="top2">' + ICON('branch') + '<div class="nm">' + esc(st.branch || '') + '</div>' + (abTxt ? '<span class="ab">' + abTxt + '</span>' : (st.remote && st.ab && st.ab.noRemoteBranch ? '<span class="ab">not pushed</span>' : '')) + '</div>' +
     '<div class="rm">' + (st.remote ? esc(st.remote.host + '/' + st.remote.path) : 'No remote yet') + '</div>' +
     '<div class="seg"><button id="gFetch" class="btn sm"><span class="lbl">Fetch</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button></div></div><div id="gMsg"></div>' +
-    (st.needToken ? '<div class="warnbar"><span>No access token saved for ' + esc(st.remote.host) + '. You need one to push or to use a private repository.</span><button id="gTok" class="btn sm"><span class="lbl">Add token</span></button></div>' : ''));
+    (st.needToken && st.remote.host ? '<div class="warnbar"><span>No access token saved for ' + esc(st.remote.host) + '. You need one to push or to use a private repository.</span><button id="gTok" class="btn sm"><span class="lbl">Add token</span></button></div>' : ''));
 }
 
 function renderGitTab(folder, st, head, body) {
   const foot = $('#sheetFoot'); foot.classList.add('hidden'); foot.innerHTML = '';
   let h = head;
   if (GS.tab === 'changes') {
-    if (!st.changes.length) h += '<div class="note" style="margin-top:18px">No changes since the last commit.</div>';
+    if (st.pending) h += '<div style="margin-top:16px">' + skeleton() + '</div>';
+    else if (!st.changes.length) h += '<div class="note" style="margin-top:18px">No changes since the last commit.</div>';
     else {
       const staged = st.changes.filter((c) => GS.sel.has(c.path)); const unstaged = st.changes.filter((c) => !GS.sel.has(c.path));
       const row = (c, on) => '<div class="gr"><button class="stg' + (on ? ' on' : '') + '" data-sel="' + esc(c.path) + '" aria-label="' + (on ? 'Unstage ' : 'Stage ') + esc(c.path) + '">' + ICON(on ? 'minus' : 'plus') + '</button><div class="grow" data-gf="' + esc(c.path) + '"><div class="t">' + esc(baseOf(c.path)) + '</div>' + (dirOf(c.path) ? '<div class="s">' + esc(dirOf(c.path)) + '</div>' : '') + '</div><span class="kind ' + c.kind + '">' + c.kind + '</span><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard ' + esc(c.path) + '" style="width:34px;height:34px">' + ICON('undo') + '</button></div>';
@@ -788,6 +863,7 @@ function renderGitTab(folder, st, head, body) {
       (st.history.map((x) => '<div class="hist"><div class="t">' + esc(x.commit.message.trim().split('\n')[0]) + '</div><div class="s">' + esc(x.commit.author.name) + ' · ' + x.oid.slice(0, 7) + ' · ' + ago(x.commit.author.timestamp * 1000) + '</div></div>').join('') || '<div class="note">No commits yet.</div>') +
       (st.history.length >= GS.hist ? '<button id="gMore" class="btn" style="width:100%;margin-top:10px"><span class="lbl">Show 10 more</span></button>' : '');
   } else {
+    h += repoCard(st);
     h += '<div class="h3">Remote</div><div class="card"><div class="t" style="word-break:break-all">' + (st.remote ? esc(st.remote.url) : 'No remote set') + '</div><div style="margin-top:10px"><button id="gRemote" class="btn sm"><span class="lbl">' + (st.remote ? 'Change URL' : 'Set remote URL') + '</span></button></div></div>';
     if (!st.remote) h += '<div class="h3">Create a new repository</div><div class="card"><p>Create a repository on GitHub or GitLab for these files and upload them.</p><button id="gPublish" class="btn primary" style="width:100%"><span class="lbl">Create and push</span></button></div>';
     h += '<div class="h3">Account</div><div class="card"><div class="kv" style="border:0"><span>Author</span><span id="gAuthor"></span></div><button id="gIdent" class="btn sm"><span class="lbl">Identity and tokens</span></button></div>' +
@@ -798,13 +874,39 @@ function renderGitTab(folder, st, head, body) {
   bindGit(folder, st, body);
 }
 
+
+function repoCard(st) {
+  const r = st.repo;
+  if (!r) return '<div class="h3">Repository</div><div class="card">' + skeleton() + '</div>';
+  const o = r.remotes.find((x) => x.name === 'origin') || r.remotes[0];
+  const kv = (k, v) => v ? '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>' : '';
+  const proto = o ? '<span class="badge ' + (o.protocol === 'https' ? 'cur' : 'warn') + '">' + o.protocol.toUpperCase() + '</span>' : '';
+  const when = r.head ? ago(r.head.at) : '';
+  let h = '<div class="h3">Repository</div><div class="card repo">' +
+    kv('Branch', esc(r.branch || 'none') + (r.detached ? ' (detached)' : '')) +
+    kv('Tracking', esc(r.upstream || '')) +
+    kv('Remote', o ? esc(o.host + '/' + o.path) + ' ' + proto : 'none') +
+    kv('Last commit', r.head ? esc(r.head.message) : '') +
+    kv('By', r.head ? esc(r.head.name + ' <' + r.head.email + '>') + (when ? ' · ' + esc(when) : '') : '') +
+    kv('Repo author', r.config.name ? esc(r.config.name + ' <' + r.config.email + '>') : '') +
+    kv('Data', r.mode === 'native' ? 'In the folder (.git)' : 'Inside the app') +
+    '</div>';
+  if (r.issues.length) h += r.issues.map((i, n) => '<div class="warnbar ' + i.level + '"><span>' + esc(i.text) + '</span>' + (i.fix ? '<button class="btn sm" data-fix="' + n + '"><span class="lbl">' + esc(i.fix) + '</span></button>' : '') + '</div>').join('');
+  return h;
+}
+
 function bindGit(folder, st, body) {
+  $$('[data-fix]', body).forEach((b) => b.onclick = async () => {
+    const i = st.repo.issues[+b.dataset.fix];
+    if (i.code === 'ssh') gitRun('Switching to HTTPS', () => G.useHttps(folder, i.remote, i.to), () => openGit('remote'));
+    else if (i.code === 'identity') { if (i.cand) { await G.saveGitSettings({ name: i.cand.name, email: i.cand.email }); toast('Git identity saved'); await openGit('remote'); } else openGitIdentity(() => openGit('remote')); }
+  });
   const run = (label, fn) => gitRun(label, fn);
-  $('#gFetch').onclick = () => run('Fetching', (pr) => G.fetchRemote(folder, { onProgress: pr }));
-  $('#gPull').onclick = () => run('Pulling', (pr) => G.pull(folder, { onProgress: pr }));
+  $('#gFetch').onclick = () => run('Fetching', (pr, sg) => G.fetchRemote(folder, { onProgress: pr, signal: sg }));
+  $('#gPull').onclick = () => run('Pulling', (pr, sg) => G.pull(folder, { onProgress: pr, signal: sg }));
   $('#gPush').onclick = async () => {
     if (st.changes.length && !await confirmBox('Uncommitted changes', 'Push uploads commits only. Your ' + st.changes.length + ' uncommitted change(s) stay on this phone.', 'Push')) return;
-    run('Pushing', (pr) => G.push(folder, { onProgress: pr }));
+    run('Pushing', (pr, sg) => G.push(folder, { onProgress: pr, signal: sg }));
   };
   $$('[data-gf]', body).forEach((r) => r.onclick = () => openGitDiff(folder, r.dataset.gf));
   const redraw = () => { const m = $('#gMessage') ? $('#gMessage').value : ''; const top = $('#sheetBody').scrollTop; renderGitTab(folder, st, gitHead(st), body); if ($('#gMessage')) $('#gMessage').value = m; $('#sheetBody').scrollTop = top; };
@@ -841,7 +943,7 @@ function bindGit(folder, st, body) {
   if ($('#gIdent')) { G.getGitSettings().then((g) => { const a = $('#gAuthor'); if (a) a.textContent = g.name ? g.name + ' <' + g.email + '>' : 'not set'; }); $('#gIdent').onclick = () => openGitIdentity(() => openGit('remote')); }
   if ($('#gForce')) $('#gForce').onclick = async () => {
     if (!await confirmBox('Force push?', 'This overwrites "' + st.branch + '" on the remote with your local version. Anyone else\'s commits there will be lost.', 'Force push')) return;
-    run('Force pushing', (pr) => G.push(folder, { force: true, onProgress: pr }));
+    run('Force pushing', (pr, sg) => G.push(folder, { force: true, onProgress: pr, signal: sg }));
   };
   if ($('#gWipe')) $('#gWipe').onclick = async () => {
     if (!await confirmBox('Remove Git from this folder?', 'The commit history of this project is deleted. Your files are not touched.', 'Remove')) return;
@@ -855,7 +957,7 @@ function syncCommit(st) {
 /** Private input for a secret value. Resolves with the text, or null on Skip. The value never touches the chat. */
 function askSecret(info, signal) {
   return new Promise((res) => {
-    $('#dlgTitle').textContent = 'Add ' + info.name;
+    $('#dlgTitle').textContent = 'Add ' + info.name + (info.step ? ' (' + info.step + ')' : '');
     $('#dlgText').innerHTML = (info.description ? '<div style="margin-bottom:8px">' + esc(info.description) + '</div>' : '') +
       '<div style="margin-bottom:8px;font-size:12.5px">Saved to <b>' + esc(info.file) + '</b> in this project. The agent never sees the value and it is not shown in the chat.</div>' +
       '<div style="display:flex;gap:6px"><input id="dlgInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1;min-width:0;height:42px;border:1px solid var(--line);border-radius:12px;padding:0 12px;background:var(--card);outline:0" placeholder="Value"><button id="dlgEye" type="button" class="icon-btn" aria-label="Show value">' + ICON('eye') + '</button></div>';
@@ -1035,7 +1137,7 @@ function wire() {
   window.addEventListener('unhandledrejection', (e) => { if (window.__stage !== 'ready') return; e.preventDefault(); oops(e); });
   window.addEventListener('error', (e) => { if (window.__stage !== 'ready' || (e.target && (e.target.src || e.target.href))) return; oops(e); });
   $('#menuBtn').onclick = openDrawer; $('#scrim').onclick = closeDrawer;
-  $('#dNew').onclick = () => newChat(S.folder); $('#topNewBtn').onclick = () => newChat(S.folder);
+  $('#dNew').onclick = () => newChat(null); $('#topNewBtn').onclick = () => newChat(null);
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
   $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal; $('#chipAuto').onclick = toggleAuto;
@@ -1045,7 +1147,7 @@ function wire() {
     const d = e.target.closest('[data-del]');
     if (d) {
       if (!await confirmBox('Delete chat?', 'This chat and its backups are removed from the phone.', 'Delete')) return;
-      await A.removeChat(d.dataset.del); await loadChats(); if (S.chat && S.chat.id === d.dataset.del) await newChat(S.folder); return;
+      await A.removeChat(d.dataset.del); await loadChats(); if (S.chat && S.chat.id === d.dataset.del) await newChat(null); return;
     }
     const it = e.target.closest('[data-id]'); if (it) openChat(it.dataset.id);
   };
@@ -1067,8 +1169,15 @@ function wire() {
       const ok = code ? await copyText(code.textContent) : false;
       c.firstElementChild.textContent = ok ? 'Copied' : 'Failed'; setTimeout(() => { c.firstElementChild.textContent = 'Copy'; }, 1400); return;
     }
+    const uf = e.target.closest('[data-ufile]');
+    if (uf) { const [mid, ix] = uf.dataset.ufile.split(':'); const um = await db.get('messages', Number(mid)); const f = um && um.fileData && um.fileData[Number(ix)]; if (f) await saveOut(f.name, f.text); return; }
     const t = e.target.closest('[data-tool]');
     if (t) {
+      if (t.dataset.tool === 'getfile' || t.dataset.tool === 'copyfile') {
+        const fm = await db.get('messages', Number(t.dataset.id)); if (!fm || !fm.file) return;
+        if (t.dataset.tool === 'copyfile') { toast(await copyText(fm.fileContent) ? 'Copied' : 'Could not copy'); return; }
+        await saveOut(fm.file.name, fm.fileContent); return;
+      }
       if (t.dataset.tool === 'undo') { await undoOne(Number(t.dataset.b)); return; }
       decide(t.dataset.id, t.dataset.tool === 'apply' ? 'apply' : t.dataset.tool === 'always' ? 'always' : 'reject'); return;
     }

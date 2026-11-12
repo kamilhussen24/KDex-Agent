@@ -129,6 +129,11 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 ## v1.8.1
 - The assistant now knows Termux runs on a phone (ARM, limited memory and storage, no root, no sudo/Docker/apt) and keeps installs small: it checks space and memory first, prefers `pkg` packages and light tools, and says so when a task is too heavy for a phone.
 
+## v1.14.0
+
+- Plain settings no longer need the secret box. For ordinary, non-secret variables (PORT, HOST, NODE_ENV, APP_ENV, DEBUG, LOG_LEVEL, TZ, LANG, WORKERS and similar) the agent passes a sensible value and the app writes it itself. In Ask first chats you approve a small card showing the line; in Auto it is written directly. Missing variables only; existing ones are never changed.
+- The app, not the model, decides what counts as plain: names containing KEY, SECRET, TOKEN, PASSWORD and the like, token-looking values, and URLs other than localhost always use the private box, even if the model supplies a value.
+
 ## v1.13.0
 
 - New agent tool `request_env_var`: when a project needs an environment variable that is missing, the agent asks for it by name. A private box opens (masked, with a show button), you type the value, and it is written to `.env`. The value never reaches the chat or the model. Existing variables are never changed.
@@ -166,3 +171,51 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 
 ## v1.8.2
 - The assistant now carries a short guide to the whole app: connecting a model, opening a project, Auto/Ask approvals, Git setup, and the one-time Termux setup (install, `allow-external-apps`, permission, storage). When someone asks for commands while the terminal is off, or a command fails because Termux is missing, it walks them through the missing steps.
+
+### v1.18.0
+- Short network or server failures (rate limit, busy server, dropped connection) are retried twice automatically before an error is shown, as long as nothing of the reply had arrived yet.
+- Memory learning no longer sends almost every Bengali message to the model: the filter now needs a clear personal fact ("my name", "I live in", "remember...") instead of just "I" or "my". This cuts hidden token cost.
+- Change backups are limited to the newest 60 per chat so storage no longer grows without limit.
+- The agent is told to start working with sensible defaults and ask at most one short question, instead of listing questions.
+
+### v1.17.1
+- The Stop button now works while a terminal command is running (for example a long video conversion). It stops waiting at once, marks the command Cancelled, and sends a best-effort kill to Termux for that command and everything it started. Before, the app kept waiting until the command ended or timed out.
+
+### v1.17.0
+- The folder sheet now shows the path of every connected folder (the path Termux uses) with a Copy button, so it is clear which folder and path each project points to. Status text no longer gets cut off in these rows.
+
+### v1.16.2
+- Saving a file from the chat on the phone no longer relies on a browser-style download (the Android WebView may ignore it): the share sheet is tried first, and if it is unavailable the app asks for a folder and saves the file there, then releases that folder again.
+
+### v1.16.1
+- Attached text files now appear in the chat as a small file card (name and size) instead of pasting the whole file into the message. The model still receives the full content, and tapping the card saves the file back. Older chats are unchanged.
+
+### v1.16.0
+- New introduction and capability summary: the agent now describes itself as the KDex Agent built by Kamil Hussen from KDex, and lists what it can do (small projects, editing old code, bug finding, full Git, terminal work, everyday chat, memory) instead of listing limits.
+- Chats without a folder can now create files: the agent calls `make_file` and the chat shows a Download / Copy card (share sheet on the phone, normal download in a browser). Folder chats are unchanged.
+- The agent knows the app better: where to find New chat, folders, attachments, Memory, Token saving, Delete all conversations and Token usage, and that a memory is kept on the phone and shared across models.
+- Text of the empty chat screen updated.
+
+### v1.15.1
+- The + button now opens a clean chat without a folder. Choose a folder for it from the folder button, or start a chat inside a project from the Projects list.
+
+### v1.15.0
+- The agent now handles environment variables the way big apps do: plain settings (PORT, HOST, NODE_ENV, APP_NAME, localhost URLs, LOG_LEVEL, TZ, sqlite paths) are added by the app itself with example values, without asking.
+- Secrets (keys, tokens, passwords) are only requested: a private box per value ("1 of 3"), where you can type the value or skip. Skipped names are still listed empty in `.env.example`.
+- One `request_env_var` call can cover every missing variable; existing values are never changed.
+- The agent no longer asks about project type or defaults; it reads the project first.
+
+
+### v1.19.0 – Git, professional
+- Opening a folder that already has a Git repository (for example one made in Termux) now detects it: branch, tracking branch, remote (with HTTPS/SSH badge), last commit and author, repository author, data location, Git LFS, submodules and shallow clones. A Repository card in Git > Remote shows it, with one-tap fixes. Nothing is ever deleted or changed automatically.
+- An empty Git name/email in the app is filled from the repository's own settings or last commit.
+- SSH remotes (`git@github.com:user/repo.git`) can be switched to HTTPS in one tap, since the built-in Git works over HTTPS.
+- Push refusals from GitHub (secret scanning, protected branch, rules) are explained in plain words with the file, the secret type and the unblock link, plus a Copy link button.
+- Faster Git sheet: it opens at once with placeholders; branch, history and remote appear first, file changes follow.
+- Operations show a progress bar with a friendly phase name and a Cancel button.
+
+### v1.19.1
+- Added `scripts/fix-blocked-push.sh`: combines local commits into one clean commit when GitHub blocks a push because an old commit contains a secret.
+
+### v1.19.2
+- Fixed `scripts/fix-blocked-push.sh` flagging itself.

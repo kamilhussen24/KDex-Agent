@@ -14,10 +14,10 @@ with sync_playwright() as p:
         # ask mode: asks
         pg.fill('#input','allowtest'); pg.click('#sendBtn'); pg.wait_for_selector('[data-tool=apply]',timeout=8000); print(mode,'ask mode asks: True'); pg.click('[data-tool=apply]'); idle(pg)
         # turn on Auto while a command waits
-        pg.click('#topNewBtn'); pg.wait_for_timeout(300)
+        pg.click('#topFolderBtn'); pg.wait_for_selector('[data-nf]'); pg.click('[data-nf]'); pg.wait_for_timeout(400)
         pg.fill('#input','allowtest 2'); pg.click('#sendBtn'); pg.wait_for_selector('[data-tool=apply]',timeout=8000)
-        pg.click('#chipAuto'); idle(pg); print(mode,'pending auto-approved on toggle; chip:',pg.inner_text('#chipAuto'),'| calls ls:',sum(1 for c in pg.evaluate('window.__calls') if c=='ls'))
-        pg.fill('#input','allowtest 3'); pg.click('#sendBtn'); idle(pg); print(mode,'auto runs without asking:',pg.query_selector('[data-tool=apply]') is None,'| ls calls:',sum(1 for c in pg.evaluate('window.__calls') if c=='ls'))
+        pg.click('#chipAuto'); idle(pg); print(mode,'pending auto-approved on toggle; chip:',pg.inner_text('#chipAuto'),'| calls ls:',sum(1 for c in pg.evaluate('window.__calls') if c.split('\n')[0]=='ls'))
+        pg.fill('#input','allowtest 3'); pg.click('#sendBtn'); idle(pg); print(mode,'auto runs without asking:',pg.query_selector('[data-tool=apply]') is None,'| ls calls:',sum(1 for c in pg.evaluate('window.__calls') if c.split('\n')[0]=='ls'))
         pg.fill('#input','risktest'); pg.click('#sendBtn'); pg.wait_for_selector('[data-tool=apply]',timeout=8000); print(mode,'risky still asks:',pg.inner_text('.tool .tf .lbl'),'| rm run?',any('rm' in c for c in pg.evaluate('window.__calls')))
         pg.screenshot(path=f'shots/a-{mode}-risky.png'); pg.click('[data-tool=reject]'); idle(pg)
         print(mode,logs)

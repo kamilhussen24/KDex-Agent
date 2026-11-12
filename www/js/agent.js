@@ -6,7 +6,7 @@ import { stream, complete } from './providers.js';
 import { TOOLS, WRITE_TOOLS, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo, resetGitCache } from './git.js';
-import { scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar } from './secrets.js';
+import { scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
 import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGitAction, gitActionIsRead } from './gittools.js';
@@ -14,6 +14,11 @@ import { GIT_TOOLS, GIT_READS, GIT_ACTIONS, runGitRead, previewGitAction, runGit
 export const BUDGETS = { economy: 3000, balanced: 9000, full: 60000 };
 
 // ------------------------------------------------------------------ settings & models
+const FILE_TOOL = {
+  name: 'make_file',
+  description: 'Create a file for the user to download from the chat (used when no project folder is open). Give a plain file name such as notes.md or app.py and the complete text content. Text formats only.',
+  parameters: { type: 'object', properties: { name: { type: 'string', description: 'File name with extension, no folders' }, content: { type: 'string', description: 'Complete file content' } }, required: ['name', 'content'] },
+};
 const PLAN_TOOL = {
   name: 'update_plan',
   description: 'Show the user a short checklist of the steps of a multi-step task and keep it up to date. Call it at the start of any task with 3 or more steps, then again each time a step starts or finishes. Send the full list every time.',
@@ -68,18 +73,19 @@ async function recordUsage(kind, rt, u) {
 // ------------------------------------------------------------------ system prompt
 const ABOUT =
   'ABOUT YOU AND THIS APP\n' +
-  'You are KDex Agent, the AI assistant inside the KDex Agent Android app (made by Kamil Hussen, brand KDex, kamildex.com). The app has no server and no account: ' +
-  'the user brings their own API key (Anthropic, OpenAI, Gemini, DeepSeek, xAI or any OpenAI-compatible service), it is stored encrypted on the phone, and chats and files go only to the chosen provider. ' +
-  'The user gives the app one project folder; you can work only inside that folder. ' +
-  'What the app can do: chat in any language; read, search, create, edit and delete files in the project with approval, automatic backups and Undo; unzip and zip archives; ' +
-  'full Git (status, diff, commit, push, pull, branches, clone, publish to GitHub or GitLab) with approval for every action; run shell commands through Termux when the user turns Terminal on; ' +
-  'a live task checklist; background jobs such as local web servers (through Termux); optional thinking levels (Off, Low, Medium, High) from the bulb button; attach images and text files; remember short notes about the user; show token usage in Settings. ' +
-  'Where things are: Settings from the menu (providers, models, token saving, thinking, terminal, git identity), the folder chip above the chat (add, switch or remove the project folder at any time; the conversation stays), and the Files, Git and Changes chips. ' +
-  'If asked who you are or what you can do, answer from this description in the user\'s language. Do not claim to be a specific underlying model unless the user asks which model is selected; then say it depends on the model they chose in the top bar. ' +
-  'For any task with 3 or more steps, first call update_plan with the steps, then call it again as each step starts and finishes, so the user can follow progress. Skip it for quick one-step answers. ' +
-  'Never invent abilities: if something is not listed here, say you cannot do it in this app.\n\n' +
-  'APP GUIDE (use it to help the user set things up; give the steps in the user\'s language and keep them short)\n' +
-  '- Connect a model: Settings > Add provider, pick the service, paste the API key, choose models (a few popular ones are listed; any other model id can be typed). Thinking: bulb button (Off, Low, Medium, High). Token usage: Settings > Token usage.\n' +
+  'You are KDex Agent, the AI assistant of this Android app, built by Kamil Hussen from KDex (kamildex.com). The app has no server and no account: ' +
+  'the user brings their own API key (Anthropic, OpenAI, Gemini, DeepSeek, xAI or any OpenAI-compatible service); it is stored encrypted on the phone and chats and files go only to the provider they chose. ' +
+  'The user may switch models at any time; earlier replies in the chat can come from another model, so continue the work naturally from the history and summary. ' +
+  'TWO WAYS TO USE IT. (1) A normal chat with no folder (the + button always opens one): ask anything, attach photos and text files, and when you create a file with make_file the user can download it. This is for everyday questions, writing, explaining, small scripts and quick fixes of attached code. ' +
+  '(2) A chat with a project folder (folder button above the chat; it can be added, switched or removed at any time without losing the conversation): then you work on the real project. ' +
+  'In a folder you can read, search, create, edit and delete files with approval, automatic backups and Undo; zip and unzip; complete Git (status, diff, commit, push, pull, branches, clone, publish to GitHub or GitLab); run any shell command through Termux when the user turns Terminal on, which means you can install packages, run and test the project, start local servers, and do hard multi-step jobs; and you can build a bigger project part by part with a live task checklist. ' +
+  'WHEN ASKED WHO YOU ARE OR WHAT YOU CAN DO, answer in the user\'s language, warm and short, in this shape: first "I am KDex Agent, the AI assistant of this Android app, built by Kamil Hussen from KDex." then a short list: build small projects from an idea, edit and update old code, find and fix bugs, full Git work, run commands and projects through the terminal, normal chat and small file tasks without any folder, and the app remembers what matters about the user (name, likes, goals) on their phone. ' +
+  'Also mention that anyone with an Android phone can run a model of their choice for everyday and small project work. Do not list limits as the headline and do not say you can do nothing else; if the user asks for something outside this, say it plainly then. Do not claim to be a specific underlying model; if asked which model is running, say it is the one chosen in the top bar. ' +
+  'MEMORY: the app saves short notes about the user (name, city, work, likes, goals) on the phone by itself and gives them to you in later chats; the user can view, add or delete them in Settings > Memory, or turn learning off there. Use them naturally and never recite them. ' +
+  'For any task with 3 or more steps, first call update_plan with the steps, then call it again as each step starts and finishes. Skip it for quick answers. Never invent abilities, and never claim something worked unless a tool result shows it.\n\n' +
+  'APP GUIDE (when the user is stuck or asks how to do something in the app, tell them the exact place and steps in their language, short)\n' +
+  '- New chat: the + button (no folder). Add or change a project folder: the folder button above the chat. Attach photos or text files: the paperclip. Delete one chat: its trash icon in the menu list; delete everything: Settings > Data > Delete all conversations.\n' +
+  '- Save tokens: Settings > Chat > Token saving (Economy, Balanced, Full); older messages are summarised automatically and reading each file once also saves cost. Memory and learning: Settings > Memory. Theme: Settings > Appearance. Token usage: Settings > Data > Token usage.\n' +  '- Connect a model: Settings > Add provider, pick the service, paste the API key, choose models (a few popular ones are listed; any other model id can be typed). Thinking: bulb button (Off, Low, Medium, High). Token usage: Settings > Token usage.\n' +
   '- Open a project: folder button > Open a folder, then pick the folder. Only that folder is accessible.\n' +
   '- Approvals: the chip above the chat switches Ask first and Auto. Auto runs everyday actions and still asks for risky ones (rm, sudo, every git push, publishing). File changes keep backups and Undo.\n' +
   '- Git: the Git chip. Folder without Git: Clone, New repo (publishes to GitHub or GitLab) or Local only. Pushing, and private repositories, need a name, email and access token: Settings > Git > Identity and access tokens (GitHub classic token with the repo scope, or fine-grained with Contents: Read and write). The built-in Git supports https only, one branch at a time, no Git LFS, no submodules and no SSH, and it is slow on very large repositories. When Terminal is on, real git in Termux (pkg install git) handles those cases, and the app lends it the saved token automatically for clone, fetch, pull and push.\n' +
@@ -89,7 +95,7 @@ const ABOUT =
   '- If the user asks to run a command, install something or start a server and the terminal is off, do not pretend: tell them these steps, starting with whichever are missing. ' +
   'If a command fails with "Could not reach Termux" or "not found", Termux is not installed or step 2 is missing. A permission error means tap Grant permission. Exit code 127 means the program is missing (pkg install it). Permission denied on files means run termux-setup-storage.\n\n' +
   'HOW TO WORK WELL\n' +
-  'Understand the request first. For anything with several steps, think it through, then act. Be concise: no filler, no repeating the question, no pasting whole files. ' +
+  'Understand the request first. For anything with several steps, think it through, then act. Be proactive: when the request is clear enough, start working and choose sensible defaults yourself (for example Python and SQLite for a small bot), saying in one line which you chose. Ask a question only when a wrong guess would be costly or the task cannot start without the answer, and then ask one short question, never a list of questions. Be concise: no filler, no repeating the question, no pasting whole files. ' +
   'Keep tokens low: read only what you need, read each file once, use search to find lines, prefer small edits. ' +
   'Never claim something worked unless a tool result shows it. If a tool fails, read the error, fix the cause and try again once or twice, then explain plainly what is blocking you.';
 
@@ -99,7 +105,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
     parts.push(
       'PROJECT: you are working inside the folder "' + folder.name + '". Tools: list_dir, find_files, search, read_file, create/edit/delete files. All paths are relative to this folder; you cannot reach anything outside it.\n' +
       'Rules: look before you change (list_dir, find_files or search, then read_file). Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
-      'SECRET FILES: .env files, keys and credentials in the project are protected. You cannot read or change them and their contents never appear in the chat; for .env files you see only variable names. You CAN run the project, scripts and tests, which use those files normally. Terminal output has secret values replaced by ***. Never ask the user to paste a secret into the chat. If a variable is missing, call request_env_var with its name and a one-line description: the user types the value in a private box and you never see it; afterwards continue the task. Do not try to get around this (no cat, base64, copying the file or printing environment values). ' +
+      'SECRET FILES: .env files, keys and credentials in the project are protected. You cannot read or change them and their contents never appear in the chat; for .env files you see only variable names. You CAN run the project, scripts and tests, which use those files normally. Terminal output has secret values replaced by ***. Never ask the user to paste a secret into the chat. If variables are missing, do not ask what project type or defaults: look at the project (package.json, requirements.txt, code) and make ONE request_env_var call with vars for everything missing. Plain settings (PORT, HOST, NODE_ENV, APP_NAME, APP_URL on localhost, DEBUG, LOG_LEVEL, TZ, a sqlite DATABASE_URL) you CAN set yourself: give each a sensible example value and the app adds it without asking. Secrets (API keys, tokens, passwords) get no value from you: add them to vars with a one-line description of what they are and where to get them; the user types each in a private box or skips it. Keep your message short, and do not lecture about protection. Afterwards continue the task. Do not try to get around this (no cat, base64, copying the file or printing environment values). ' +
       'Do what the user asked and nothing else. The user approves every change and can undo it. ' +
       (termuxPath
         ? 'TERMINAL: run_command runs a bash command in Termux (Linux on this phone) with the project at ' + termuxPath + '. Use it like a computer shell: unzip, installs (pkg/pip/npm), scripts, builds, tests, git. ' +
@@ -115,7 +121,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
       'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval, and git_push always asks, even in Auto mode). git_branch, git_fetch and git_remote are also available. When a git step fails, read the message: it says whether the token is missing, rejected or lacks write permission, whether a file is too big or the branch is protected, or whether the network is down. Tell the user exactly that and where to fix it (Settings > Git > Identity and access tokens); do not retry blindly. For huge repositories, LFS, submodules or SSH, use git in the terminal if it is on.'
     );
   } else {
-    parts.push('No project folder is open, so you have no file tools. If the user wants you to work on files, tell them to tap the Add folder chip above the chat (the folder can be added or changed at any time without losing this conversation).');
+    parts.push('NO FOLDER in this chat. You have no file or terminal tools here, but you can still do everyday work: answer, write, explain, review attached text files and photos, and write code. When the user needs a finished file (a script, a document, a config, a small page), call make_file with its name and full content; the chat shows a Download button. Never paste a long file into the reply when make_file fits. For real project work (several files, running commands, Git), tell the user to tap the folder button above the chat and pick the project folder, then continue.');
   }
   if (custom && custom.trim()) parts.push('User instructions:\n' + custom.trim());
   if (memory.length) parts.push('What you know about the user from earlier chats (use it naturally, do not recite it):\n' + memory.map((m) => '- ' + m.text).join('\n'));
@@ -126,7 +132,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath) {
 // ------------------------------------------------------------------ history -> neutral messages
 function toNeutral(m, opts) {
   if (m.role === 'user') {
-    const o = { role: 'user', text: m.text || '' };
+    const o = { role: 'user', text: (m.fileData && m.fileData.length ? m.fileData.map((f) => '[File: ' + f.name + ']\n' + f.text).join('\n\n') + (m.text ? '\n\n' : '') : '') + (m.text || '') };
     if (m.images && m.images.length) {
       if (opts.keepImages) o.images = m.images.map((i) => ({ mime: i.mime, data: i.data }));
       else o.text += '\n[image omitted to save tokens]';
@@ -153,6 +159,7 @@ function weigh(m) {
   let t = estimateTokens(m.text || m.content || '') + 8;
   (m.calls || []).forEach((c) => { t += estimateTokens(JSON.stringify(c.args || {})) + 12; });
   if (m.images) t += m.images.length * 800;
+  if (m.fileData) m.fileData.forEach((f) => { t += estimateTokens(f.text); });
   return t;
 }
 
@@ -177,7 +184,7 @@ async function summarize(chat, rt, dropped) {
   const fresh = dropped.filter((m) => m.id > (chat.summarizedUpto || 0));
   if (!fresh.length) return chat;
   const block = fresh.map((m) => {
-    if (m.role === 'user') return 'User: ' + (m.text || '').slice(0, 1200);
+    if (m.role === 'user') return 'User: ' + (m.fileData && m.fileData.length ? '[attached ' + m.fileData.map((f) => f.name).join(', ') + '] ' : '') + (m.text || '').slice(0, 1200);
     if (m.role === 'assistant') return 'Assistant: ' + (m.text || '').slice(0, 1200) + (m.calls && m.calls.length ? ' [' + m.calls.map((c) => c.name + ' ' + ((c.args && c.args.path) || '')).join(', ') + ']' : '');
     return '';
   }).filter(Boolean).join('\n').slice(0, 14000);
@@ -235,9 +242,11 @@ async function buildContext(chat, rt, folder, settings, memory) {
 }
 
 // ------------------------------------------------------------------ memory learning
+// Only messages that sound like a lasting personal fact are sent to the model for note-taking (it costs tokens).
+// Plain "I / my" words are far too common in Bengali, so they are not enough on their own.
 const PERSONAL_HINT = new RegExp([
-  "\\b(my name|i am|i'm|im|i live|i work|i have|i own|i like|i love|i hate|i prefer|i study|i was born|call me|remember|my (wife|husband|son|daughter|brother|sister|mother|mom|father|dad|friend|birthday|business|company|job|shop|page|channel|team|dog|cat|phone|city|country|village))\\b",
-  'আমার', 'আমি', 'আমাকে', 'আমরা', 'মনে রাখ', 'মনে রেখ', 'আমাদের', 'amar nam', 'amar ',
+  "\\b(my name|call me|i live in|i work (at|as|in|for)|i study|i was born|i own|i run|i prefer|i like|i love|i hate|i usually|remember (that|this|my)|my (wife|husband|son|daughter|brother|sister|mother|mom|father|dad|birthday|business|company|job|shop|page|channel|team|village|city|country))\\b",
+  'আমার নাম', 'আমাকে .{1,20}(ডাকো|ডাকবে|বলে ডাক)', 'আমি .{1,30}(থাকি|করি|পড়ি|চালাই|ভালোবাসি|পছন্দ করি|পছন্দ করি না|ব্যবসা)', 'আমার .{0,20}(বাড়ি|ব্যবসা|চ্যানেল|পেজ|কোম্পানি|দোকান|স্ত্রী|ছেলে|মেয়ে|ভাই|বোন|বাবা|মা|জন্মদিন|কাজ|পছন্দ)', 'মনে রাখ', 'মনে রেখ', 'amar nam', 'ami .{1,25}(thaki|kori|pori)',
 ].join('|'), 'i');
 
 const LEARN_SYSTEM =
@@ -295,7 +304,7 @@ export async function runTurn(ctx) {
   if (folder) { forgetSecrets(folder); resetGitCache(folder); } // Termux or another tool may have changed the repository since the last turn
 
   if (!ctx.regenerate) {
-    const userMsg = { chatId: chat.id, role: 'user', text: ctx.text || '', images: ctx.images && ctx.images.length ? ctx.images : undefined, files: ctx.attachNames, at: Date.now(), status: 'done' };
+    const userMsg = { chatId: chat.id, role: 'user', text: ctx.text || '', images: ctx.images && ctx.images.length ? ctx.images : undefined, files: ctx.attachNames, fileData: ctx.attachFiles && ctx.attachFiles.length ? ctx.attachFiles.map((f) => ({ name: f.name, size: f.text.length, text: f.text })) : undefined, at: Date.now(), status: 'done' };
     userMsg.id = await db.put('messages', userMsg);
     ui.onUser(userMsg);
     learn(ctx.text, rt, settings).then((n) => { if (n.length) ui.onMemory(n); }).catch(() => {});
@@ -308,7 +317,7 @@ export async function runTurn(ctx) {
   const hasGit = folder ? await isRepo(folder).catch(() => false) : false;
   const termuxPath = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
   const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL], termuxPath ? TERMUX_TOOLS : []);
-  const tools = folder ? (hasGit ? base.concat(GIT_TOOLS) : base) : null;
+  const tools = folder ? (hasGit ? base.concat(GIT_TOOLS) : base) : [PLAN_TOOL, FILE_TOOL];
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
@@ -394,24 +403,51 @@ export async function runTurn(ctx) {
       ui.onTool(tm);
       try {
         if (call.bad) throw new Error('The tool arguments were not valid JSON. Try again with valid arguments.');
-        if (!folder) throw new Error('No project folder is open.');
+        if (!folder && call.name !== 'update_plan' && call.name !== 'make_file') throw new Error('No project folder is open. Tell the user to tap the folder button above the chat and pick the project folder.');
         if (call.name === 'update_plan') {
           const steps = (Array.isArray(call.args && call.args.steps) ? call.args.steps : []).slice(0, 20).map((x) => ({ text: String((x && x.text) || '').slice(0, 160), status: ['todo', 'doing', 'done'].includes(x && x.status) ? x.status : 'todo' })).filter((x) => x.text);
           tm.steps = steps; tm.args = steps.filter((x) => x.status === 'done').length + '/' + steps.length + ' done';
           tm.content = 'Plan updated.'; tm.status = 'done';
+        } else if (call.name === 'make_file') {
+          const nm = String((call.args && call.args.name) || '').split(/[\\/]/).pop().replace(/[^\w .()+-]/g, '_').trim().slice(0, 80);
+          const body = String((call.args && call.args.content) || '');
+          if (!nm || !/\.[A-Za-z0-9]{1,8}$/.test(nm)) throw new Error('Give a file name with an extension, such as notes.md.');
+          if (!body) throw new Error('The content is empty.');
+          if (body.length > 400000) throw new Error('The file is too large for a download card (limit about 400 KB).');
+          tm.file = { name: nm, size: body.length }; tm.fileContent = body; tm.args = nm;
+          tm.content = 'The file ' + nm + ' is ready. The chat now shows a Download button for it; tell the user to tap Download (or Copy).'; tm.status = 'done';
         } else if (call.name === 'request_env_var') {
-          const nm = String((call.args && call.args.name) || '').trim();
-          if (!VALID_ENV_NAME.test(nm)) throw new Error('Use a valid variable name such as STRIPE_SECRET_KEY.');
-          const file = envFileName(call.args && call.args.file);
-          const st = await envStatus(folder, file, nm);
-          tm.args = nm + ' > ' + file;
-          if (st.state === 'set') { tm.content = nm + ' is already set in ' + file + ' (value hidden). Nothing was changed; you can rely on it.'; tm.status = 'done'; }
-          else {
-            tm.status = 'pending'; await db.put('messages', tm); ui.onTool(tm);
-            const v = await ui.requestSecret({ name: nm, file, description: String((call.args && call.args.description) || '').slice(0, 200) }, signal);
-            if (v == null) { tm.status = 'rejected'; tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user chose not to add ' + nm + ' now. Do not ask again unless they bring it up; explain what will not work without it.'; }
-            else { const notes = await writeEnvVar(folder, file, nm, v); tm.status = 'applied'; tm.content = nm + ' was added to ' + file + ' (the value is hidden from you). ' + notes.join(' '); }
+          const args = call.args || {};
+          const list = (Array.isArray(args.vars) && args.vars.length ? args.vars : [{ name: args.name, value: args.value, description: args.description }]).slice(0, 30);
+          const file = envFileName(args.file);
+          tm.args = list.map((x) => String((x && x.name) || '')).join(', ').slice(0, 80) + ' > ' + file;
+          const done = [], typed = [], skipped = [], already = [], notes = new Set();
+          let n = 0; const secrets = [];
+          for (const it of list) {
+            const nm = String((it && it.name) || '').trim();
+            if (!VALID_ENV_NAME.test(nm)) throw new Error('Use a valid variable name such as STRIPE_SECRET_KEY.');
+            const st = await envStatus(folder, file, nm);
+            if (st.state === 'set') { already.push(nm); continue; }
+            const val = it.value == null ? '' : String(it.value).trim();
+            if (val && isPlainSetting(nm, val)) {
+              // ordinary setting: the app adds it with its example value and does not ask
+              (await writeEnvVar(folder, file, nm, val, val)).forEach((x) => notes.add(x)); done.push(nm + '=' + val);
+            } else secrets.push({ nm, description: String(it.description || '').slice(0, 200) });
           }
+          for (const sc of secrets) {
+            n++; tm.status = 'pending'; await db.put('messages', tm); ui.onTool(tm);
+            const v = await ui.requestSecret({ name: sc.nm, file, description: sc.description, step: secrets.length > 1 ? n + ' of ' + secrets.length : '' }, signal);
+            if (signal.aborted) throw new Error('Cancelled by the user.');
+            if (v == null) { skipped.push(sc.nm); (await writeEnvVar(folder, file, sc.nm, null, '')).forEach((x) => notes.add(x)); }
+            else { (await writeEnvVar(folder, file, sc.nm, v, '')).forEach((x) => notes.add(x)); typed.push(sc.nm); }
+          }
+          const out = [];
+          if (done.length) out.push('Set by the app: ' + done.join(', ') + '.');
+          if (typed.length) out.push('Added by the user (values hidden from you): ' + typed.join(', ') + '.');
+          if (skipped.length) out.push('Skipped by the user: ' + skipped.join(', ') + '. Do not ask again unless they bring it up; say briefly what will not work without them. They are listed empty in .env.example.');
+          if (already.length) out.push('Already set (unchanged): ' + already.join(', ') + '.');
+          tm.content = out.join(' ') + ' ' + [...notes].join(' ');
+          tm.status = done.length || typed.length ? 'applied' : (skipped.length ? 'rejected' : 'done');
         } else if (TERMUX_READS.has(call.name)) {
           tm.content = await scrub(await runJob(call.name, call.args || {}, folder), folder);
           tm.status = 'done';
@@ -434,7 +470,7 @@ export async function runTurn(ctx) {
             tm.status = 'rejected';
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this command. Do not retry it; ask what they want instead.';
           } else {
-            tm.content = await scrub(isJob ? await runJob(call.name, call.args || {}, folder) : await runTermux(call.args || {}, folder), folder);
+            tm.content = await scrub(isJob ? await runJob(call.name, call.args || {}, folder) : await runTermux(call.args || {}, folder, signal), folder);
             tm.status = 'applied';
             readSeen.clear();
           }
@@ -496,6 +532,7 @@ export async function runTurn(ctx) {
           } else {
             const bk = { chatId: chat.id, folderId: folder.id, path: plan.path, existed: plan.before !== null, content: plan.before === null ? '' : plan.before, op: plan.op, at: Date.now(), undone: false };
             bk.id = await db.put('backups', bk);
+            pruneBackups(chat.id).catch(() => {});
             tm.content = await applyWrite(plan, folder);
             readSeen.clear();
             tm.status = 'applied';
@@ -508,8 +545,10 @@ export async function runTurn(ctx) {
           tm.status = 'done';
         }
       } catch (e) {
-        tm.status = 'error';
-        tm.content = 'Error: ' + (e && e.message ? e.message : String(e));
+        if (signal.aborted) { tm.status = 'cancelled'; tm.content = 'Cancelled by the user.'; } else {
+          tm.status = 'error';
+          tm.content = 'Error: ' + (e && e.message ? e.message : String(e));
+        }
       }
       await db.put('messages', tm);
       ui.onTool(tm);
@@ -537,6 +576,12 @@ export async function undoChange(backupId, folder) {
   b.undone = true;
   await db.put('backups', b);
   return true;
+}
+
+/** Keep the newest 60 change backups per chat so storage does not grow without limit. */
+async function pruneBackups(chatId) {
+  const all = (await db.byIndex('backups', 'chatId', chatId)).sort((x, y) => y.id - x.id);
+  for (const b of all.slice(60)) await db.del('backups', b.id);
 }
 
 export async function removeChat(chatId) {

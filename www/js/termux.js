@@ -119,12 +119,27 @@ async function withGitToken(command, folder) {
   return { command: pre + command, secret: token, host };
 }
 
-export async function runTermux(args, folder) {
+/** Stop a command started by runTermux: kills it and everything it started (best effort). */
+function killTagged(tag) {
+  const pat = tag.replace(/^(kdex-run-)(.)/, '$1[$2]'); // the bracket keeps this very command from matching itself
+  const script = 'kt(){ for c in $(pgrep -P "$1"); do kt "$c"; done; kill -TERM "$1" 2>/dev/null; }; for p in $(pgrep -f ' + shq(pat) + '); do kt "$p"; done; true';
+  return Termux.run(script, undefined, 15000).catch(() => {});
+}
+
+export async function runTermux(args, folder, signal) {
   const original = String(args.command || '').trim();
   const cwd = await workdir(args, folder);
   const secs = Math.max(5, Math.min(600, parseInt(args.timeout_seconds, 10) || 120));
   const w = await withGitToken(original, folder);
-  const r = await Termux.run(w.command, cwd, secs * 1000);
+  const tag = 'kdex-run-' + Math.random().toString(36).slice(2, 10);
+  let onAbort;
+  const stopped = new Promise((_, rej) => {
+    if (!signal) return;
+    onAbort = () => { killTagged(tag); rej(new Error('Cancelled by the user.')); };
+    if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true });
+  });
+  let r;
+  try { r = await Promise.race([Termux.run(w.command + '\n# ' + tag, cwd, secs * 1000), stopped]); } finally { if (signal && onAbort) signal.removeEventListener('abort', onAbort); }
   if (GIT_NET.test(original) && folder) resetGitCache(folder); // the repository may have changed behind the app's back
   if (w.secret) { const hide = (x) => String(x || '').split(w.secret).join('***'); r.stdout = hide(r.stdout); r.stderr = hide(r.stderr); r.errmsg = hide(r.errmsg); }
   let hint = '';

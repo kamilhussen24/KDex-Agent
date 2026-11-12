@@ -19,10 +19,10 @@ with sync_playwright() as p:
         print(mode,'plan cards:',len(pg.query_selector_all('.plan')),'|',pg.inner_text('.plan').replace('\n',' / '))
         pg.screenshot(path=f'shots/j-{mode}-2-done.png'); print(mode,'calls:',[c[:40] for c in pg.evaluate('window.__calls')])
         # 2) always allow
-        pg.click('#topNewBtn'); pg.wait_for_timeout(300)
+        pg.click('#topFolderBtn'); pg.wait_for_selector('[data-nf]'); pg.click('[data-nf]'); pg.wait_for_timeout(400)
         pg.fill('#input','allowtest'); pg.click('#sendBtn'); pg.wait_for_selector('[data-tool=always]',timeout=8000); print(mode,'always label:',pg.inner_text('[data-tool=always]'))
         pg.click('[data-tool=always]'); pg.wait_for_function("document.querySelector('#sendBtn').getAttribute('aria-label')=='Send'",timeout=10000)
         pg.fill('#input','allowtest again'); pg.click('#sendBtn'); pg.wait_for_function("document.querySelector('#sendBtn').getAttribute('aria-label')=='Send'",timeout=10000); pg.wait_for_timeout(300)
-        print(mode,'second run asked?',pg.query_selector('[data-tool=apply]') is not None,'| allowed tag:',any('allowed' in e.inner_text() for e in pg.query_selector_all('.tf')),'| ls calls:',sum(1 for c in pg.evaluate('window.__calls') if c=='ls'))
+        print(mode,'second run asked?',pg.query_selector('[data-tool=apply]') is not None,'| allowed tag:',any('allowed' in e.inner_text() for e in pg.query_selector_all('.tf')),'| ls calls:',sum(1 for c in pg.evaluate('window.__calls') if c.split('\n')[0]=='ls'))
         pg.screenshot(path=f'shots/j-{mode}-3-allow.png'); print(mode,logs)
     b.close()

@@ -166,8 +166,30 @@ async function tokenFor(folder, url) {
 }
 const TOKEN_HELP = 'Add one in Settings > Git > Identity and access tokens. GitHub: a classic token with the "repo" scope, or a fine-grained token with Contents: Read and write.';
 /** Turns Git and network failures into a message that says what is wrong and what to do. */
-function nice(e, { host = '', hasToken = false, action = '' } = {}) {
+/** Collects the lines a Git server prints while pushing ("remote: ..."), which hold the real reason for a refusal. */
+function collect() {
+  const lines = [];
+  return { lines, onMessage: (m) => { String(m == null ? '' : m).split(/\r?\n/).forEach((l) => { l = l.replace(/^remote:\s?/, '').trim(); if (l) lines.push(l); }); } };
+}
+/** Turns a server refusal (GitHub rule violations, secret scanning, protected branch) into plain steps. */
+export function explainRefusal(m, lines) {
+  const text = lines.join('\n');
+  const url = (text.match(/https?:\/\/\S+/g) || []).find((u) => /unblock|secret-scanning|rules|settings/.test(u)) || (text.match(/https?:\/\/\S+/) || [])[0] || '';
+  if (/push cannot contain secrets|secret.?scanning|push protection/i.test(text + m)) {
+    const kind = (/——+\s*(.+?)\s*——+/.exec(text) || [])[1] || 'a secret (key or token)';
+    const where = [...text.matchAll(/path:\s*(\S+)/g)].map((x) => x[1]).slice(0, 4).join(', ');
+    return 'GitHub blocked the push: it found ' + kind + ' inside a commit' + (where ? ' (' + where + ')' : '') + '. Remove it from the file, then fix the commit with Undo last commit and commit again. If it is only a test or fake value, you can allow it once with the link GitHub gives' + (url ? ': ' + url : '.');
+  }
+  if (/pull request|status check|signed|verified signature|merge queue|rulesets?|protected (branch|ref)|cannot update this protected|GH013|GH006|rule violations?/i.test(text + m)) {
+    const why = lines.filter((l) => /^-|must|require|cannot|blocked|declined/i.test(l)).slice(0, 4).join(' ');
+    return 'The repository rules blocked this push' + (why ? ': ' + why.slice(0, 260) : ' (for example: changes must go through a pull request, checks must pass, or commits must be signed)') + '. Push to another branch (Branches > New branch from here, then Push) and open a pull request on the website.' + (url ? ' Details: ' + url : '');
+  }
+  return '';
+}
+function nice(e, { host = '', hasToken = false, action = '', remote = [] } = {}) {
   let m = String((e && e.message) || e);
+  const refusal = explainRefusal(m, remote);
+  if (refusal) return new Error(refusal);
   const sub = e && Array.isArray(e.errors) ? e.errors.map((x) => String((x && x.message) || x)).join('; ') : '';
   if (sub) m = sub;
   const status = (e && e.data && e.data.statusCode) || (/\b(401|403|404|429|5\d\d)\b/.exec(m) || [])[1];
@@ -308,8 +330,9 @@ export async function push(folder, { force = false, onProgress, signal } = {}) {
   if (!url) throw new Error('No remote set. Add a remote URL in Git > Remote.');
   const { host, token } = await needToken(url);
   const branch = await currentBranch(folder);
+  const mc = collect();
   try {
-    const r = await git().push({ ...c, http: makeHttp(signal), remote: 'origin', ref: branch, remoteRef: branch, force, onAuth: authFor(token), onProgress: (p) => onProgress && onProgress(p) });
+    const r = await git().push({ ...c, http: makeHttp(signal), remote: 'origin', ref: branch, remoteRef: branch, force, onAuth: authFor(token), onProgress: (p) => onProgress && onProgress(p), onMessage: mc.onMessage });
     if (r && r.ok === false) {
       const refErr = r.refs && Object.values(r.refs).map((x) => x && x.error).filter(Boolean).join('; ');
       throw new Error(refErr || r.error || 'Push was rejected.');
@@ -317,7 +340,7 @@ export async function push(folder, { force = false, onProgress, signal } = {}) {
     return r;
   } catch (e) {
     if (/not a simple fast-forward|non-fast-forward|fetch first|stale info/i.test(String(e.message))) throw new Error('Push rejected: the remote has newer commits. Pull first.');
-    throw nice(e, { host, hasToken: !!token, action: 'push' });
+    throw nice(e, { host, hasToken: !!token, action: 'push', remote: mc.lines });
   }
 }
 export async function pull(folder, { onProgress, signal } = {}) {
@@ -457,3 +480,50 @@ export async function publishNew(folder, opts, step = () => {}) {
 }
 
 export const hostFromUrl = hostOf;
+
+// ---------------------------------------------------------------- detect an existing repository (for example one made in Termux)
+export function parseRemote(url) {
+  const u = String(url || '').trim();
+  let m;
+  if ((m = /^https?:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/i.exec(u))) return { protocol: 'https', host: m[1].toLowerCase(), path: m[2], https: u.replace(/^(https?:\/\/)[^@/]+@/i, '$1') };
+  if ((m = /^(?:ssh:\/\/)?(?:[\w.-]+@)([^/:]+)(?::\d+)?[:/](.+?)(?:\.git)?\/?$/i.exec(u))) return { protocol: 'ssh', host: m[1].toLowerCase(), path: m[2], https: 'https://' + m[1].toLowerCase() + '/' + m[2] + '.git' };
+  if (/^git:\/\//i.test(u)) { m = /^git:\/\/([^/]+)\/(.+?)(?:\.git)?$/.exec(u); return { protocol: 'git', host: m ? m[1] : '', path: m ? m[2] : '', https: m ? 'https://' + m[1] + '/' + m[2] + '.git' : '' }; }
+  return { protocol: u ? 'local' : '', host: '', path: u, https: '' };
+}
+const cfg = async (folder, path) => { try { return (await git().getConfig({ ...ctx(folder), path })) || ''; } catch (e) { return ''; } };
+const exists = async (folder, p) => { try { const st = await safFs.stat(folder.uri, p); return !!(st && st.exists); } catch (e) { return false; } };
+
+/** Everything worth knowing about a repository, read without changing anything. */
+export async function inspectRepo(folder) {
+  if (!(await isRepo(folder))) return null;
+  const g = git(); const c = ctx(folder);
+  const info = { mode: modes.get(folder.id) || 'native', remotes: [], issues: [], branch: '', detached: false, head: null, config: { name: '', email: '' } };
+  try { info.branch = (await g.currentBranch({ ...c })) || ''; } catch (e) { /* detached */ }
+  if (!info.branch) { info.detached = true; try { info.branch = (await g.resolveRef({ ...c, ref: 'HEAD' })).slice(0, 7); } catch (e) { /* empty repository */ } }
+  try { (await g.listRemotes({ ...c })).forEach((r) => info.remotes.push({ name: r.remote, url: r.url, ...parseRemote(r.url) })); } catch (e) { /* none */ }
+  try { const l = await g.log({ ...c, depth: 1 }); if (l[0]) info.head = { oid: l[0].oid.slice(0, 7), message: l[0].commit.message.trim().split('\n')[0], name: l[0].commit.author.name, email: l[0].commit.author.email, at: l[0].commit.author.timestamp * 1000 }; } catch (e) { /* no commits */ }
+  info.config = { name: await cfg(folder, 'user.name'), email: await cfg(folder, 'user.email') };
+  if (info.branch && !info.detached) info.upstream = (await cfg(folder, 'branch.' + info.branch + '.remote')) ? (await cfg(folder, 'branch.' + info.branch + '.remote')) + '/' + String(await cfg(folder, 'branch.' + info.branch + '.merge')).replace(/^refs\/heads\//, '') : '';
+  info.shallow = info.mode === 'native' && await exists(folder, '.git/shallow');
+  info.submodules = await exists(folder, '.gitmodules');
+  try { if (await exists(folder, '.gitattributes')) info.lfs = /filter=lfs/.test((await safFs.readText(folder.uri, '.gitattributes', 20000)).text); } catch (e) { /* ignore */ }
+
+  const app = await getGitSettings();
+  const cand = info.config.name && info.config.email ? { name: info.config.name, email: info.config.email, from: 'the repository settings' } : (info.head ? { name: info.head.name, email: info.head.email, from: 'the last commit' } : null);
+  const origin = info.remotes.find((r) => r.name === 'origin') || info.remotes[0];
+  if (origin && origin.protocol === 'ssh') info.issues.push({ code: 'ssh', level: 'warn', text: 'The remote "' + origin.name + '" uses SSH (' + origin.url + '). The built-in Git works over HTTPS, so push and pull would fail.', fix: 'Switch to HTTPS', remote: origin.name, to: origin.https });
+  else if (origin && origin.protocol === 'git') info.issues.push({ code: 'ssh', level: 'warn', text: 'The remote uses the git:// protocol, which is read-only. Use HTTPS to push.', fix: 'Switch to HTTPS', remote: origin.name, to: origin.https });
+  if (!info.remotes.length) info.issues.push({ code: 'noremote', level: 'info', text: 'No remote yet. Add a URL in the Remote tab to push this project to GitHub or GitLab.' });
+  if (!app.name || !app.email) info.issues.push({ code: 'identity', level: cand ? 'info' : 'warn', text: cand ? 'Your Git name and email are not saved in the app. This repository was last used by ' + cand.name + ' <' + cand.email + '> (from ' + cand.from + ').' : 'Your Git name and email are not saved in the app. You need them to commit.', fix: cand ? 'Use ' + cand.name : 'Set identity', cand });
+  if (info.detached) info.issues.push({ code: 'detached', level: 'warn', text: 'HEAD is detached, so new commits are not on a branch. Switch to a branch in the Branches tab first.' });
+  if (info.lfs) info.issues.push({ code: 'lfs', level: 'info', text: 'This repository uses Git LFS. Large files appear as small pointer files here; fetch them with git in the terminal.' });
+  if (info.submodules) info.issues.push({ code: 'sub', level: 'info', text: 'This repository has submodules. The built-in Git does not fetch them; use the terminal for those.' });
+  if (info.shallow) info.issues.push({ code: 'shallow', level: 'info', text: 'This is a shallow clone, so older history is not available.' });
+  if (info.mode === 'app') info.issues.push({ code: 'appmode', level: 'info', text: 'The Git data of this folder is kept inside the app, not in a .git folder, so other tools such as Termux cannot see it.' });
+  return info;
+}
+/** Switch an SSH remote to its HTTPS address. */
+export async function useHttps(folder, name, to) {
+  if (!to || !/^https:\/\//.test(to)) throw new Error('Could not work out an HTTPS address for this remote.');
+  await git().addRemote({ ...ctx(folder), remote: name || 'origin', url: to, force: true });
+}

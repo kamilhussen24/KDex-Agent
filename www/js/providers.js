@@ -280,8 +280,24 @@ async function* anthropicStream(o) {
   yield { t: 'usage', in: tin, out: tout, cached };
 }
 
-export function stream(opts) {
-  return opts.provider.type === 'anthropic' ? anthropicStream(opts) : openaiStream(opts);
+const RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 529]);
+/** One reply stream. A failure before anything arrived (rate limit, busy server, dropped network) is retried twice, so a short hiccup does not cost the user a message. */
+export async function* stream(opts) {
+  const run = () => (opts.provider.type === 'anthropic' ? anthropicStream(opts) : openaiStream(opts));
+  for (let attempt = 0; ; attempt++) {
+    let started = false;
+    try {
+      for await (const ev of run()) { started = true; yield ev; }
+      return;
+    } catch (e) {
+      const aborted = opts.signal && opts.signal.aborted;
+      const transient = e && (RETRY_STATUS.has(e.status) || (!e.status && /network|fetch|failed|timeout|timed out|connection|reset|offline/i.test(String(e.message))));
+      if (started || aborted || !transient || attempt >= 2) throw e;
+      yield { t: 'notice', text: 'The provider is busy or the connection dropped. Trying again...' };
+      await new Promise((r) => setTimeout(r, attempt ? 4000 : 1500));
+      if (opts.signal && opts.signal.aborted) throw e;
+    }
+  }
 }
 
 /** Collect a plain-text reply (used for summaries and memory notes). */
