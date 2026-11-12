@@ -94,6 +94,7 @@ setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too lo
     <div id="messages" class="messages"></div>
     <div id="approveBar" class="approve-bar hidden"><span id="approveText" class="lbl"></span><button id="approveAll" class="btn primary sm" type="button"><span class="lbl">Apply all</span></button></div>
 
+    <div id="netLine" class="netline hidden" role="status"></div>
     <div id="thinkMenu" class="menu hidden" role="menu">
       <div class="hd">Thinking (this chat)</div>
       <button type="button" class="it" data-think="off"><b>Off</b><small>Fastest and cheapest</small></button>
@@ -120,6 +121,7 @@ setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too lo
   <!-- Sheets -->
   <section id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
     <div class="sheet-card">
+      <div id="sheetGrip" class="sheet-grip" aria-hidden="true"><i></i></div>
       <div class="sheet-head">
         <button id="sheetBack" class="icon-btn hidden" type="button" aria-label="Back"><svg class="ic"><use href="#i-back"/></svg></button>
         <div id="sheetTitle" class="sheet-title"></div>

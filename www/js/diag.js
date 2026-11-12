@@ -2,7 +2,8 @@
 // Stays on this phone. Secrets are masked before anything is stored.
 import { kvGet, kvSet } from './db.js';
 
-const MAX = 300;
+const MAX = 200;
+const DAYS = 7;
 let items = [];
 let loaded = false;
 let timer = null;
@@ -24,7 +25,7 @@ export function scrub(text) {
 async function load() {
   if (loaded) return;
   loaded = true;
-  try { const v = await kvGet('diag.log'); if (Array.isArray(v)) items = v.concat(items).slice(-MAX); } catch (e) { /* storage unavailable */ }
+  try { const v = await kvGet('diag.log'); if (Array.isArray(v)) items = prune(v.concat(items)); } catch (e) { /* storage unavailable */ }
 }
 function save() {
   if (timer) return;
@@ -32,12 +33,21 @@ function save() {
 }
 
 /** kind: 'error' | 'git' | 'run' | 'info' */
+/** Drops entries older than a week, then trims to MAX, losing routine run lines before errors and Git entries. */
+export function prune(list, now = Date.now()) {
+  let out = list.filter((e) => now - e.t < DAYS * 86400000);
+  while (out.length > MAX) {
+    const i = out.findIndex((e) => e.k === 'run');
+    out.splice(i >= 0 ? i : 0, 1);
+  }
+  return out;
+}
 export function log(kind, message) {
   items.push({ t: Date.now(), k: kind, m: scrub(message) });
-  if (items.length > MAX) items = items.slice(-MAX);
+  items = prune(items);
   load().then(save);
 }
-export async function entries() { await load(); return items.slice().reverse(); }
+export async function entries() { await load(); items = prune(items); return items.slice().reverse(); }
 export async function clear() { items = []; loaded = true; await kvSet('diag.log', []); }
 
 export function format(list, info = {}) {

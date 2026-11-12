@@ -3,7 +3,7 @@
 // repository. Older repositories created by earlier versions keep their data inside the app.
 import { fs as safFs, httpRaw, secure, subUri, gitNative } from './native.js';
 import { kvGet, kvSet } from './db.js';
-import { lineDiff } from './tools.js';
+import { lineDiff, BINARY_EXT } from './tools.js';
 import { isSecretPath, protectionOn } from './secrets.js';
 
 const git = () => window.git;
@@ -293,12 +293,17 @@ export async function status(folder) {
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-async function headText(folder, path) {
+async function headBlob(folder, path) {
   try {
     const oid = await git().resolveRef({ ...ctx(folder), ref: 'HEAD' });
     const { blob } = await git().readBlob({ ...ctx(folder), oid, filepath: path });
-    return new TextDecoder().decode(blob);
+    return blob;
   } catch (e) { return null; }
+}
+const looksBinary = (b) => { if (!b) return false; const n = Math.min(b.length, 8000); for (let i = 0; i < n; i++) if (b[i] === 0) return true; return false; };
+async function headText(folder, path) {
+  const b = await headBlob(folder, path);
+  return b ? new TextDecoder().decode(b) : null;
 }
 export async function diffFile(folder, path) {
   if (isSecretPath(path) && await protectionOn()) return { lines: [{ t: 'ctx', text: 'Protected file: contents are hidden.' }], added: 0, removed: 0, more: 0 };
@@ -307,13 +312,23 @@ export async function diffFile(folder, path) {
   try { const r = await safFs.readText(folder.uri, path, 1048576); after = r.binary ? null : r.text; } catch (e) { after = null; }
   return lineDiff(before == null ? '' : before, after == null ? '' : after);
 }
-/** The text of a file in the last commit and now, for the diff screen. */
+/** The text of a file in the last commit and now, for the diff screen. Binary files only report sizes. */
 export async function diffTexts(folder, path) {
   if (isSecretPath(path) && await protectionOn()) return { hidden: true };
-  const before = await headText(folder, path);
-  let after = ''; let binary = false; let size = 0;
-  try { const r = await safFs.readText(folder.uri, path, 1048576); if (r.binary) { binary = true; size = r.size || 0; } else after = r.text; } catch (e) { after = ''; }
-  return { before: before == null ? '' : before, after, binary, size, isNew: before == null };
+  const blob = await headBlob(folder, path);
+  const beforeSize = blob ? blob.length : 0;
+  let st = null; try { st = await safFs.stat(folder.uri, path); } catch (e) { st = null; }
+  const exists = !!(st && st.exists !== false);
+  const size = exists ? (st.size || 0) : 0;
+  const isNew = !blob; const deleted = !exists && !!blob;
+  const binExt = BINARY_EXT.test(path);
+  let binary = binExt || looksBinary(blob);
+  let after = '';
+  if (!binary && exists) {
+    try { const r = await safFs.readText(folder.uri, path, 1048576); if (r.binary) binary = true; else after = r.text; } catch (e) { after = ''; }
+  }
+  if (binary) return { binary: true, size, beforeSize, isNew, deleted, before: '', after: '' };
+  return { before: blob ? new TextDecoder().decode(blob) : '', after, binary: false, size, beforeSize, isNew, deleted };
 }
 export async function discard(folder, path) {
   const before = await headText(folder, path);

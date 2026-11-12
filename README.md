@@ -285,3 +285,28 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 - A selected option (segmented controls, active chips) now has a light pink tint, a pink border and pink text, so it is clear which one is chosen. Unselected options use muted text. Dark mode uses a lighter pink.
 - Links and text accents use a darker pink (`--ink`) for readability.
 - Fixed: a primary button briefly turned grey while pressed.
+
+### v1.28.0 – offline line and a clearer Git card
+- No connection while the agent is working: instead of a popup there is a quiet status line above the message box ("Offline. Waiting to reconnect..." with a spinner). It disappears by itself when the reply continues, so there is no "Back online" popup. After 5 minutes it says "Still waiting. Tap Stop to cancel." A busy provider uses the same line.
+- Popup cards no longer have a Copy button. The text can be selected with a long press.
+- Git sheet status tag: "N to push" (pink), "N to pull" (orange), "Up to date" (green), "Not pushed yet" for a branch without a remote copy.
+- Git sheet branch card: the branch icon sits in a tile, centred against the branch name and the repository link. A long link is shortened in the middle (`github.com/owner/…/repo`) so the repository name stays visible; the full link is on the Remote tab.
+
+### v1.29.0 – steadier chips, tidier Repository card
+- The Auto and Terminal chips keep one fixed width, so tapping them no longer makes the chip row jump (Ask first / Auto, Terminal / Terminal on).
+- Git > Remote > Repository card: a long value (over 34 characters, for example a repository link or an author line) moves under its label, left aligned, and breaks after a `/` instead of in the middle of a word. Short values stay beside the label as before. The text can be selected with a long press.
+
+## v1.30.0
+- Git changes list opens instantly: per-file +/- counts removed from rows, rows have a uniform height. Tap a file to see its diff with a sticky +N / -M summary on top.
+- Terminal sheet: "Git token for Termux" is now "Use my Git token in Termux" with Allow / Never, and a clearer description.
+- Terminal sheet: "Path in Termux" shows the full path in a wrapping, tap-to-select box.
+
+## v1.31.0
+- Git diff: binary files show their size change (`120 KB → 85 KB (−35 KB)`, `New · 85 KB`, `Deleted · 120 KB`). Text files show the size line above the diff. The old side of a binary file is no longer read as text.
+- File viewer: images (png, jpg, gif, webp, bmp, ico, avif) open as a preview with dimensions and size. Large text files say how much is shown (`first 195 KB of 2.4 MB`).
+- Diagnostics log: keeps the last 7 days and at most 200 entries. Agent runs are one line each, and routine run lines are dropped before errors and Git entries.
+- Git identity and tokens: saved tokens first, then an "Add a token" card (button reads "Replace token" for a host that already has one), then Commit author with its own Save. Placeholder `root` / `root@localhost` values are treated as empty, and an author is required.
+
+## v1.32.0
+- Sheets: drag the grip or the title bar down to close any bottom sheet. A short drag springs back, a long drag or a quick flick closes it. Buttons, lists and text fields are not affected. Confirmation dialogs are unchanged.
+- Terminal: the "Change path" button is gone. The path box shows "Detected automatically · Edit" or "Set by you · Edit · Reset". If no path can be found, a notice and a "Set path" button appear instead. Grant permission only shows while it is needed.

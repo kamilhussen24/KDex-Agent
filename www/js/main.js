@@ -4,10 +4,10 @@ import { db, kvGet, kvSet } from './db.js';
 import { secure, fs, App, Termux, AllFiles, Work, setBars, isNative } from './native.js';
 import * as D from './diag.js';
 import { highlight, langOf } from './highlight.js';
-import { diffHtml, buildDiff } from './diffview.js';
+import { diffHtml } from './diffview.js';
 import { BINARY_EXT } from './tools.js';
 import { PRESETS, QUICK_FILL, listModels, popularModels } from './providers.js';
-import { getTermuxPath, setTermuxPath } from './termux.js';
+import { getTermuxPath, setTermuxPath, hasCustomTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
 import * as G from './git.js';
@@ -32,6 +32,15 @@ function toastKind(t) {
 }
 /** Confirmations the screen already shows (a chip changes, a sheet closes). Hidden in Quiet mode. */
 const QUIET_RE = /^(saved$|provider saved|key updated|token saved|git identity saved|git removed|using .+ in this chat|folder removed from this chat|auto: risky|asking before every|git repository found|cancelled|undone|fetched|committed|discarded|branch created|switched branch|branch deleted|commit undone|remote saved|remote switched|\d+ model\(s\) added)/i;
+/** One quiet status line above the message box: offline, waiting, provider busy. Replaces popups for these. */
+let netTimer;
+function netLine(text) {
+  const el = $('#netLine'); if (!el) return;
+  clearTimeout(netTimer);
+  if (!text) { if (!el.classList.contains('hidden')) { el.classList.add('hidden'); el.innerHTML = ''; } return; }
+  el.innerHTML = '<span class="spin"></span><span>' + esc(text) + '</span>'; el.classList.remove('hidden');
+  if (/^Offline/.test(text)) netTimer = setTimeout(() => netLine('Still waiting. Tap Stop to cancel.'), 5 * 60 * 1000);
+}
 /** Shows "Copied" on the button itself for a moment, instead of a popup. */
 function flashCopied(el, ok) {
   if (!ok || !el) { toast('Could not copy'); return; }
@@ -80,7 +89,7 @@ function toast(t, opts = {}) {
   const draw = () => {
     el.className = 'toast ' + kind + (card ? ' card' : ' pill') + (open ? ' open show' : ' show');
     el.innerHTML = '<span class="tic">' + ICON(TOAST_ICON[kind]) + '</span><span class="ttx"><span class="tt1">' + esc(open ? title : midCut(title)) + '</span>' + (detail ? '<span class="tt2">' + esc(open ? detail : midCut(detail)) + '</span>' : '') + '</span>' +
-      (opts.action ? '<button type="button" class="tact" data-a="1">' + esc(opts.action.label) + '</button>' : '') + (open ? '<button type="button" class="tact" data-c="1">Copy</button>' : '');
+      (opts.action ? '<button type="button" class="tact" data-a="1">' + esc(opts.action.label) + '</button>' : ''); 
   };
   draw(); el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
   el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
@@ -92,7 +101,6 @@ function toast(t, opts = {}) {
   el.onclick = async (e) => {
     if (el._moved) { el._moved = false; return; }
     if (e.target.closest('[data-a]')) { try { opts.action.fn(); } catch (x) { /* ignore */ } hide(); return; }
-    if (e.target.closest('[data-c]')) { const ok = await copyText(text); const b = el.querySelector('[data-c]'); if (b) b.textContent = ok ? 'Copied' : 'Failed'; arm(1800); return; }
     if (card && !open) { open = true; draw(); el.classList.add('show'); arm(9000); return; }
     hide();
   };
@@ -484,12 +492,12 @@ async function send(regenerate) {
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
   delete S.chat.fresh; await persistChat(); loadChats();
   S.abort = new AbortController(); setRunning(true);
-  Work.start('Working on your request'); const t0 = Date.now(); D.log('run', 'Agent run started');
+  Work.start('Working on your request'); const t0 = Date.now();
   const ui = {
-    onUser: (m) => renderMsg(m), onAssistant: (m) => renderMsg(m), onDelta: (m) => renderMsg(m),
+    onUser: (m) => renderMsg(m), onAssistant: (m) => renderMsg(m), onDelta: (m) => { netLine(''); renderMsg(m); },
     onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); },
     requestSecret: (info, signal) => askSecret(info, signal),
-    onNotice: (t) => toast(t), onMemory: (n) => toast('Remembered: ' + n[0]),
+    onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
       S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
       signal.addEventListener('abort', () => decide(tm.id, 'reject'), { once: true });
@@ -497,10 +505,11 @@ async function send(regenerate) {
   };
   try {
     await A.runTurn({ chat: S.chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder: S.folder, modelId: currentModelId(), think: S.think, signal: S.abort.signal, ui, regenerate: !!regenerate });
+    netLine('');
     if (!S.abort || !S.abort.signal.aborted) Work.done(true, 'Your request is done.');
-    D.log('run', 'Agent run finished in ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
+    D.log('run', 'Agent run \u00b7 ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
   } catch (e) {
-    D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120));
+    netLine(''); D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120));
     toast(e.message || 'Something went wrong');
     const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
     m.id = await db.put('messages', m); renderMsg(m);
@@ -565,6 +574,33 @@ function sheet(title, opts = {}) {
   const tabs = $('#sheetTabs'); tabs.classList.add('hidden'); tabs.innerHTML = '';
   $('#sheetFoot').classList.add('hidden'); $('#sheetFoot').innerHTML = '';
   const body = $('#sheetBody'); body.innerHTML = ''; body.scrollTop = 0; return body;
+}
+/** Drag the grip or title bar down to close a sheet, like a native bottom sheet. */
+function sheetDrag() {
+  const card = $('#sheet .sheet-card'); const root = $('#sheet'); if (!card || card._drag) return; card._drag = true;
+  const zone = [$('#sheetGrip'), $('.sheet-head', card)];
+  let on = false; let y0 = 0; let t0 = 0; let dy = 0; let id = null; let h = 1;
+  const calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reset = () => { card.style.transition = card.style.transform = ''; root.style.transition = root.style.background = ''; };
+  zone.forEach((z) => {
+    z.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; on = true; id = e.pointerId; y0 = e.clientY; t0 = Date.now(); dy = 0; h = card.offsetHeight || 1; card.style.transition = root.style.transition = 'none'; try { z.setPointerCapture(id); } catch (x) { /* ignore */ } });
+    z.addEventListener('pointermove', (e) => {
+      if (!on) return; dy = Math.max(0, e.clientY - y0);
+      card.style.transform = 'translateY(' + dy + 'px)';
+      root.style.background = 'rgba(0,0,0,' + (0.45 * (1 - Math.min(1, dy / h))).toFixed(3) + ')';
+    });
+    const end = () => {
+      if (!on) return; on = false; try { z.releasePointerCapture(id); } catch (x) { /* ignore */ }
+      const v = dy / Math.max(1, Date.now() - t0);
+      const t = calm ? '0s' : '.2s';
+      card.style.transition = 'transform ' + t + ' ease'; root.style.transition = 'background ' + t + ' ease';
+      if (dy > h * 0.25 || (v > 0.6 && dy > 30)) {
+        card.style.transform = 'translateY(100%)'; root.style.background = 'rgba(0,0,0,0)';
+        setTimeout(() => { closeSheet(); reset(); }, calm ? 0 : 200);
+      } else { card.style.transform = ''; root.style.background = ''; setTimeout(reset, calm ? 0 : 220); }
+    };
+    z.addEventListener('pointerup', end); z.addEventListener('pointercancel', end);
+  });
 }
 function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').classList.add('hidden'); S.sheetStack = []; }
 
@@ -712,6 +748,18 @@ async function openFileView(p, body) {
   body.innerHTML = '<div class="note">Loading...</div>';
   const notText = (size) => { body.innerHTML = '<div class="nofile">' + ICON('file') + '<div class="t">' + esc(baseOf(p)) + '</div><div class="s">' + (size ? fmtBytes(size) + ' \u00b7 ' : '') + 'Not a text or code file</div><div class="s">It cannot be shown here. Open it with another app on your phone.</div></div>'; };
   try {
+    if (/\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i.test(p)) {
+      let sz = 0; try { sz = ((await fs.stat(S.folder.uri, p)) || {}).size || 0; } catch (e) { /* ignore */ }
+      if (sz > 0 && sz <= 8 * 1048576) {
+        const bytes = await fs.readBytes(S.folder.uri, p);
+        const ext = p.split('.').pop().toLowerCase(); const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' }[ext];
+        const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+        body.innerHTML = '<div class="imgview"><img alt="' + esc(baseOf(p)) + '" src="' + url + '"><div class="s"><span id="imgDim"></span>' + fmtBytes(sz) + '</div></div>';
+        const im = body.querySelector('img'); im.onload = () => { const d = $('#imgDim'); if (d) d.textContent = im.naturalWidth + ' \u00d7 ' + im.naturalHeight + ' \u00b7 '; };
+        im.onerror = () => notText(sz);
+        return;
+      }
+    }
     if (BINARY_EXT.test(p)) { let sz = 0; try { sz = ((await fs.stat(S.folder.uri, p)) || {}).size || 0; } catch (e) { /* ignore */ } notText(sz); return; }
     const t = await fs.readText(S.folder.uri, p, 200000);
     const head = String(t.text || '').slice(0, 4000);
@@ -724,7 +772,7 @@ async function openFileView(p, body) {
     body.innerHTML = '<div class="fv-bar"><span class="fv-meta">' + fmtBytes(t.size != null ? t.size : text.length) + ' · ' + n + ' line' + (n === 1 ? '' : 's') + (lang ? ' · ' + esc(lang) : '') + '</span><button id="fvCopy" class="mini" type="button"><span class="lbl">Copy</span></button></div>' +
       (hide ? '<div class="note" style="text-align:left">Protected file. Its values are hidden here and from the agent.</div>' : '') +
       '<div class="fv"><pre class="gut" aria-hidden="true">' + gut + '</pre><pre class="src"><code>' + (hide ? esc(text) : highlight(text, p)) + '</code></pre></div>' +
-      (t.truncated || t.size > 200000 ? '<div class="note">Showing the first part of a large file.</div>' : '');
+      (t.truncated || t.size > 200000 ? '<div class="note">Showing the first ' + fmtBytes(Math.min(200000, t.size)) + ' of ' + fmtBytes(t.size) + '.</div>' : '');
     $('#fvCopy').onclick = async () => { const ok = await copyText(text); $('#fvCopy').firstElementChild.textContent = ok ? 'Copied' : 'Failed'; setTimeout(() => { const b = $('#fvCopy'); if (b) b.firstElementChild.textContent = 'Copy'; }, 1400); };
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
@@ -867,12 +915,16 @@ async function drawTerm(redraw) {
     if (!S.settings.termux) { box.innerHTML = ''; return; }
     const stt = await Termux.status().catch(() => ({}));
     const path = S.folder ? await getTermuxPath(S.folder) : null;
+    const custom = S.folder ? await hasCustomTermuxPath(S.folder) : false;
     box.innerHTML =
       '<div class="kv"><span>Termux app</span><span>' + (stt.installed ? 'installed' : (stt.web ? 'Android only' : 'not found')) + '</span></div>' +
       '<div class="kv"><span>Permission</span><span>' + (stt.granted ? 'granted' : 'not granted') + '</span></div>' +
-      (S.folder ? '<div class="kv"><span>Path of "' + esc(S.folder.name) + '"</span><span style="word-break:break-all;text-align:right">' + esc(path || 'unknown') + '</span></div>' : '<div class="note">Open a project to see its Termux path.</div>') +
+      (S.folder ? (path
+        ? '<div class="field"><span>Path in Termux</span><pre class="cmd wrap">' + esc(path).replace(/\//g, '/<wbr>') + '</pre><small>' + (custom ? 'Set by you' : 'Detected automatically') + ' \u00b7 <button id="tmPath" class="linkbtn" type="button">Edit</button>' + (custom ? ' \u00b7 <button id="tmReset" class="linkbtn" type="button">Reset</button>' : '') + '</small></div>'
+        : '<div class="field"><span>Path in Termux</span><div class="ghint">Path not detected. Termux cannot find this folder on its own.</div><button id="tmPath" class="btn primary sm" type="button"><span class="lbl">Set path</span></button></div>')
+        : '<div class="note">Open a project to see its Termux path.</div>') +
       '<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">' + (stt.granted ? '' : '<button id="tmPerm" class="btn sm"><span class="lbl">Grant permission</span></button>') +
-      '<button id="tmTest" class="btn sm"><span class="lbl">Test connection</span></button>' + (S.folder ? '<button id="tmPath" class="btn sm"><span class="lbl">Change path</span></button>' : '') + '</div><div id="tmMsg"></div>' +
+      '<button id="tmTest" class="btn sm"><span class="lbl">Test connection</span></button></div><div id="tmMsg"></div>' +
       '<div class="card tmsetup"><div class="t">One-time setup</div>' +
       '<p>1. Install Termux from F-Droid or GitHub (not Google Play).</p>' +
       '<p>2. Open Termux and run these two commands, one after the other:</p>' +
@@ -889,6 +941,7 @@ async function drawTerm(redraw) {
       try { const r = await Termux.run('echo ok; uname -m', undefined, 20000); msg('<div class="ok">Works (exit ' + r.exitCode + '): ' + esc((r.stdout || '').trim().replace(/\n/g, ', ')) + '</div>'); }
       catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); }
     };
+    if ($('#tmReset')) $('#tmReset').onclick = async () => { await setTermuxPath(S.folder, ''); redraw(); };
     if ($('#tmPath')) $('#tmPath').onclick = async () => { const v = await askText('Path in Termux', '/data/data/com.termux/files/home/project', path || ''); if (v !== null) { await setTermuxPath(S.folder, v); redraw(); } };
   }
 }
@@ -898,8 +951,8 @@ async function openTerminal() {
   const draw = () => {
     body.innerHTML = '<p class="note" style="text-align:left;margin-top:0">Let the agent run commands in Termux, inside this project, like on a computer. Every command asks for your approval first.</p>' +
       '<div class="field"><span>Terminal for the agent</span>' + seg(S.settings.termux ? '1' : '0') + '</div>' +
-      '<div class="field"><span>Git token for Termux</span><div class="seg" id="tTok">' + [['1', 'Lend'], ['0', 'Never']].map(([k, l]) => '<button type="button" class="btn sm' + ((S.settings.gitTokenTermux !== false ? '1' : '0') === k ? ' on' : '') + '" data-v="' + k + '"><span class="lbl">' + l + '</span></button>').join('') +
-      '</div><small>When a git clone, pull, fetch or push runs in Termux, your saved token is lent to that one command. It is not stored in Termux and the model never sees it.</small></div><div id="termBox"></div>';
+      '<div class="field"><span>Use my Git token in Termux</span><div class="seg" id="tTok">' + [['1', 'Allow'], ['0', 'Never']].map(([k, l]) => '<button type="button" class="btn sm' + ((S.settings.gitTokenTermux !== false ? '1' : '0') === k ? ' on' : '') + '" data-v="' + k + '"><span class="lbl">' + l + '</span></button>').join('') +
+      '</div><small>Allow: when a git clone, pull, fetch or push runs in Termux, your saved token is lent to that one command. Never: Termux gets no token, so private repositories and pushes will fail. The token is never stored in Termux and the model never sees it.</small></div><div id="termBox"></div>';
     $$('#tSeg .btn', body).forEach((b) => b.onclick = async () => { await save({ termux: b.dataset.v === '1' }); updateTermChip(); draw(); });
     $$('#tTok .btn', body).forEach((b) => b.onclick = async () => { await save({ gitTokenTermux: b.dataset.v === '1' }); draw(); });
     drawTerm(draw);
@@ -932,7 +985,7 @@ async function openDiagnostics() {
   const dt = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   body.innerHTML = '<div class="row" style="display:flex;gap:8px;margin-bottom:12px"><button id="dgCopy" class="btn" style="flex:1"><span class="lbl">Copy log</span></button><button id="dgClear" class="btn danger" style="flex:1"><span class="lbl">Clear</span></button></div>' +
     (list.length ? '<div class="diag">' + list.slice(0, 120).map((e) => '<div class="dg ' + esc(e.k) + '"><span class="dt">' + esc(dt(e.t)) + '</span><span class="dm">' + esc(e.m) + '</span></div>').join('') + '</div>' : '<div class="note">Nothing logged yet. Errors and failed Git actions appear here.</div>') +
-    '<div class="note" style="margin-top:12px;text-align:left">Stays on this phone. Tokens and keys are masked before they are saved.</div>';
+    '<div class="note" style="margin-top:12px;text-align:left">Keeps the last 7 days. Stays on this phone. Tokens and keys are masked before they are saved.</div>';
   $('#dgCopy').onclick = async () => { flashCopied($('#dgCopy'), await copyText(D.format(list, info))); };
   $('#dgClear').onclick = async () => { await D.clear(); openDiagnostics(); };
 }
@@ -1067,11 +1120,26 @@ async function openGit(tab, keepMsg) {
   if (keepMsg) return;
 }
 
+/** Shortens a repository link in the middle so the owner and the repository name both stay visible. */
+function shortRemote(host, path) {
+  const full = host + '/' + path; if (full.length <= 40) return full;
+  const parts = String(path).split('/'); const repo = parts[parts.length - 1]; const owner = parts[0];
+  const a = host + '/' + owner + '/\u2026/' + repo;
+  return a.length <= 44 ? a : host + '/\u2026/' + repo;
+}
 function gitHead(st) {
-  const abTxt = st.ab && st.ab.ahead != null ? ((st.ab.ahead ? '↑' + st.ab.ahead : '') + (st.ab.behind ? ' ↓' + st.ab.behind : '')).trim() : '';
+  let tags = '';
+  if (st.remote && st.ab) {
+    if (st.ab.noRemoteBranch) tags = '<span class="ab push">' + ICON('up') + 'Not pushed yet</span>';
+    else if (st.ab.ahead != null) {
+      if (st.ab.ahead) tags += '<span class="ab push">' + ICON('up') + st.ab.ahead + ' to push</span>';
+      if (st.ab.behind) tags += '<span class="ab pull">' + ICON('down') + st.ab.behind + ' to pull</span>';
+      if (!st.ab.ahead && !st.ab.behind) tags = '<span class="ab ok">' + ICON('check') + 'Up to date</span>';
+    }
+  }
+  const rm = st.remote ? shortRemote(st.remote.host, st.remote.path) : 'No remote yet';
   return (
-    '<div class="gsum"><div class="top2">' + ICON('branch') + '<div class="nm">' + esc(st.branch || '') + '</div>' + (abTxt ? '<span class="ab">' + abTxt + '</span>' : (st.remote && st.ab && st.ab.noRemoteBranch ? '<span class="ab">not pushed</span>' : '')) + '</div>' +
-    '<div class="rm">' + (st.remote ? esc(st.remote.host + '/' + st.remote.path) : 'No remote yet') + '</div>' +
+    '<div class="gsum"><div class="top2"><span class="btile">' + ICON('branch') + '</span><div class="tx"><div class="nm">' + esc(st.branch || '') + '</div><div class="rm"' + (st.remote ? ' title="' + esc(st.remote.host + '/' + st.remote.path) + '"' : '') + '>' + esc(rm) + '</div></div>' + (tags ? '<span class="abs">' + tags + '</span>' : '') + '</div>' +
     '<div class="seg"><button id="gFetch" class="btn sm">' + ICON('fetch') + '<span class="lbl">Fetch</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button></div></div><div id="gMsg"></div>' +
     (st.needToken && st.remote.host ? '<div class="warnbar"><span>No access token saved for ' + esc(st.remote.host) + '. You need one to push or to use a private repository.</span><button id="gTok" class="btn sm"><span class="lbl">Add token</span></button></div>' : ''));
 }
@@ -1084,7 +1152,7 @@ function renderGitTab(folder, st, head, body) {
     else if (!st.changes.length) h += '<div class="note" style="margin-top:18px">No changes since the last commit.</div>';
     else {
       const staged = st.changes.filter((c) => GS.sel.has(c.path)); const unstaged = st.changes.filter((c) => !GS.sel.has(c.path));
-      const row = (c, on) => '<div class="gr"><button class="stg' + (on ? ' on' : '') + '" data-sel="' + esc(c.path) + '" aria-label="' + (on ? 'Unstage ' : 'Stage ') + esc(c.path) + '">' + ICON(on ? 'minus' : 'plus') + '</button><div class="grow" data-gf="' + esc(c.path) + '"><div class="t">' + esc(baseOf(c.path)) + '</div>' + (dirOf(c.path) ? '<div class="s">' + esc(dirOf(c.path)) + '</div>' : '') + '<div class="s cnt" data-cnt="' + esc(c.path) + '">' + ((st.counts && st.counts[c.path]) || '') + '</div></div><span class="kind ' + c.kind + '">' + c.kind + '</span><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard ' + esc(c.path) + '" style="width:34px;height:34px">' + ICON('undo') + '</button></div>';
+      const row = (c, on) => '<div class="gr"><button class="stg' + (on ? ' on' : '') + '" data-sel="' + esc(c.path) + '" aria-label="' + (on ? 'Unstage ' : 'Stage ') + esc(c.path) + '">' + ICON(on ? 'minus' : 'plus') + '</button><div class="grow" data-gf="' + esc(c.path) + '"><div class="t">' + esc(baseOf(c.path)) + '</div>' + (dirOf(c.path) ? '<div class="s">' + esc(dirOf(c.path)) + '</div>' : '') + '</div><span class="kind ' + c.kind + '">' + c.kind + '</span><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard ' + esc(c.path) + '" style="width:34px;height:34px">' + ICON('undo') + '</button></div>';
       h += '<div class="gbar"><span class="h4">Staged (' + staged.length + ')</span>' + (staged.length ? '<button id="gUnstageAll" class="linkbtn">Unstage all</button>' : '') + '</div>' +
         (staged.map((c) => row(c, true)).join('') || '<div class="note" style="text-align:left">Nothing staged. Tap + on a file to include it in the next commit.</div>') +
         '<div class="gbar"><span class="h4">Changes (' + unstaged.length + ')</span><span>' + (unstaged.length ? '<button id="gStageAll" class="linkbtn">Stage all</button>' : '') + '<button id="gDiscardAll" class="linkbtn danger" style="margin-left:14px">Discard all</button></span></div>' +
@@ -1118,7 +1186,12 @@ function repoCard(st) {
   const r = st.repo;
   if (!r) return '<div class="h3">Repository</div><div class="card">' + skeleton() + '</div>';
   const o = r.remotes.find((x) => x.name === 'origin') || r.remotes[0];
-  const kv = (k, v) => v ? '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>' : '';
+  const kv = (k, v) => {
+    if (!v) return '';
+    const long = v.replace(/<[^>]*>/g, '').length > 34;
+    const val = long ? v.replace(/(^|>)([^<]+)/g, (m, a, t) => a + t.replace(/\//g, '/<wbr>')) : v;
+    return '<div class="kv' + (long ? ' long' : '') + '"><span>' + k + '</span><span>' + val + '</span></div>';
+  };
   const proto = o ? '<span class="badge ' + (o.protocol === 'https' ? 'cur' : 'warn') + '">' + o.protocol.toUpperCase() + '</span>' : '';
   const when = r.head ? ago(r.head.at) : '';
   let h = '<div class="h3">Repository</div><div class="card repo">' +
@@ -1148,7 +1221,6 @@ function bindGit(folder, st, body) {
     run('Pushing', (pr, sg) => G.push(folder, { onProgress: pr, signal: sg }), true);
   };
   $$('[data-gf]', body).forEach((r) => r.onclick = () => openGitDiff(folder, r.dataset.gf));
-  fillCounts(folder, st, body);
   const redraw = () => { const m = $('#gMessage') ? $('#gMessage').value : ''; const top = $('#sheetBody').scrollTop; renderGitTab(folder, st, gitHead(st), body); if ($('#gMessage')) $('#gMessage').value = m; $('#sheetBody').scrollTop = top; };
   $$('[data-sel]', body).forEach((c) => c.onclick = () => { GS.sel.has(c.dataset.sel) ? GS.sel.delete(c.dataset.sel) : GS.sel.add(c.dataset.sel); redraw(); });
   if ($('#gStageAll')) $('#gStageAll').onclick = () => { st.changes.forEach((x) => GS.sel.add(x.path)); redraw(); };
@@ -1240,31 +1312,24 @@ function askText(title, placeholder, value = '') {
   });
 }
 
-/** Fills in "+3 −1" under each changed file, a few at a time, so the list opens first and stays smooth. */
-async function fillCounts(folder, st, body) {
-  st.counts = st.counts || {}; const token = (GS.cnt = (GS.cnt || 0) + 1);
-  const todo = st.changes.filter((c) => st.counts[c.path] == null).slice(0, 40);
-  for (const c of todo) {
-    if (GS.cnt !== token || !document.body.contains(body)) return;
-    await new Promise((r) => setTimeout(r, 30));
-    let txt = '';
-    try {
-      const d = await G.diffTexts(folder, c.path);
-      if (d.hidden) txt = 'protected'; else if (d.binary) txt = 'binary';
-      else if (d.before.length + d.after.length <= 300000) { const x = buildDiff(d.before, d.after); txt = x.same ? '' : '+' + x.added + ' \u2212' + x.removed; }
-    } catch (e) { txt = ''; }
-    st.counts[c.path] = txt;
-    const el = body.querySelector('[data-cnt="' + CSS.escape(c.path) + '"]'); if (el) el.textContent = txt;
-  }
+/** One line about a file's size change: "120 KB → 85 KB (−35 KB)", "New · 85 KB" or "Deleted · 120 KB". */
+function sizeLine(d) {
+  if (d.isNew) return 'New \u00b7 ' + fmtBytes(d.size);
+  if (d.deleted) return 'Deleted \u00b7 ' + fmtBytes(d.beforeSize);
+  const diff = d.size - d.beforeSize;
+  if (!diff) return fmtBytes(d.size) + ' \u00b7 same size';
+  return fmtBytes(d.beforeSize) + ' \u2192 ' + fmtBytes(d.size) + ' (' + (diff > 0 ? '+' : '\u2212') + fmtBytes(Math.abs(diff)) + ')';
 }
+/** Diff screen for one changed file. */
 async function openGitDiff(folder, path) {
   const body = sheet(path, { back: () => openGit() });
   body.innerHTML = '<div class="busy"><span class="spin"></span>Loading...</div>';
   try {
     const d = await G.diffTexts(folder, path);
     if (d.hidden) { body.innerHTML = '<div class="note" style="text-align:left">Protected file. Its contents are hidden here and from the agent.</div>'; return; }
-    if (d.binary) { body.innerHTML = '<div class="note">Binary file' + (d.size ? ', ' + fmtBytes(d.size) : '') + '. Line changes are not shown.</div>'; return; }
-    body.innerHTML = diffHtml(d.before, d.after);
+    const sz = sizeLine(d);
+    if (d.binary) { body.innerHTML = '<div class="note" style="text-align:left"><b>' + esc(sz) + '</b><br>Binary file. Line changes are not shown.</div>'; return; }
+    body.innerHTML = '<div class="note sizeline">' + esc(sz) + '</div>' + diffHtml(d.before, d.after);
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
 
@@ -1321,22 +1386,37 @@ async function openGitStart(folder, mode) {
 async function openGitIdentity(back) {
   const body = sheet('Git identity and tokens', { back });
   const gs = await G.getGitSettings(); const hosts = await G.listTokenHosts();
+  const blank = (v) => !v || /^root(@localhost)?$/i.test(v);
+  const nm = blank(gs.name) ? '' : gs.name; const em = blank(gs.email) ? '' : gs.email;
   body.innerHTML =
-    '<div class="h3">Commit author</div>' +
-    '<label class="field"><span>Name</span><input id="gName" value="' + esc(gs.name) + '"></label>' +
-    '<label class="field"><span>Email</span><input id="gEmail" type="email" value="' + esc(gs.email) + '" autocapitalize="off"></label>' +
     '<div class="h3">Access tokens</div>' +
-    (hosts.map((h) => '<div class="row-item">' + ICON('key') + '<div class="grow"><div class="t">' + esc(h) + '</div><div class="s">Token saved</div></div><button class="icon-btn" data-rh="' + esc(h) + '">' + ICON('trash') + '</button></div>').join('') || '<div class="note">No tokens saved.</div>') +
-    '<label class="field" style="margin-top:10px"><span>Host</span><input id="tHost" value="github.com" autocapitalize="off"></label>' +
-    '<label class="field"><span>Token</span><input id="tTok" type="password" autocomplete="off" autocapitalize="off"><small>GitHub: Settings > Developer settings > Personal access tokens (needs repo access). GitLab: a token with write_repository.</small></label>' +
-    '<button id="tSave" class="btn primary" style="width:100%"><span class="lbl">Save</span></button><div id="tMsg"></div>';
+    (hosts.map((h) => '<div class="row-item">' + ICON('key') + '<div class="grow"><div class="t">' + esc(h) + '</div><div class="s">Token saved</div></div><button class="icon-btn" data-rh="' + esc(h) + '" aria-label="Remove token for ' + esc(h) + '">' + ICON('trash') + '</button></div>').join('') || '<div class="note" style="text-align:left">No tokens yet. Add one below.</div>') +
+    '<div class="h3">Add a token</div><div class="tokcard">' +
+    '<label class="field"><span>Host</span><input id="tHost" value="github.com" autocapitalize="off"></label>' +
+    '<label class="field"><span id="tTokLbl">Token</span><input id="tTok" type="password" autocomplete="off" autocapitalize="off"><small>GitHub: Settings > Developer settings > Personal access tokens (needs repo access). GitLab: a token with write_repository.</small></label>' +
+    '<button id="tSave" class="btn primary" style="width:100%"><span class="lbl">Save token</span></button><div id="tMsg"></div></div>' +
+    '<div class="h3">Commit author</div>' +
+    '<label class="field"><span>Name</span><input id="gName" value="' + esc(nm) + '" placeholder="Your name"></label>' +
+    '<label class="field"><span>Email</span><input id="gEmail" type="email" value="' + esc(em) + '" placeholder="you@example.com" autocapitalize="off"></label>' +
+    '<div class="note" style="text-align:left">' + (nm && em ? 'Commits will show this name and email.' : 'Set your name and email so commits show you.') + '</div>' +
+    '<button id="aSave" class="btn" style="width:100%"><span class="lbl">Save author</span></button><div id="aMsg"></div>';
+  const say = (id, m) => { $(id).innerHTML = '<div class="ghint">' + esc(m) + '</div>'; };
+  const hostIn = () => $('#tHost').value.trim().toLowerCase();
+  const syncLbl = () => { $('#tSave').firstElementChild.textContent = hosts.indexOf(hostIn()) >= 0 ? 'Replace token' : 'Save token'; };
+  $('#tHost').oninput = syncLbl; syncLbl();
   $('#tSave').onclick = async () => {
-    const h = $('#tHost').value.trim().toLowerCase(); const t = $('#tTok').value.trim();
-    const bad = (m) => { $('#tMsg').innerHTML = '<div class="ghint">' + esc(m) + '</div>'; };
-    if (t && !h) { bad('Enter the host, for example github.com.'); return; }
-    if (t && (t.length < 20 || /\s/.test(t))) { bad('That does not look like an access token. Copy it again from the website.'); return; }
-    await G.saveGitSettings({ name: $('#gName').value.trim(), email: $('#gEmail').value.trim() });
-    if (t && h) { await G.saveToken(h, t); await G.rememberHost(h); }
+    const h = hostIn(); const t = $('#tTok').value.trim();
+    if (!h) return say('#tMsg', 'Enter the host, for example github.com.');
+    if (!t) return say('#tMsg', 'Paste the token first.');
+    if (t.length < 20 || /\s/.test(t)) return say('#tMsg', 'That does not look like an access token. Copy it again from the website.');
+    await G.saveToken(h, t); await G.rememberHost(h);
+    openGitIdentity(back);
+  };
+  $('#aSave').onclick = async () => {
+    const n = $('#gName').value.trim(); const e = $('#gEmail').value.trim();
+    if (!n || !e) return say('#aMsg', 'Enter both your name and your email.');
+    if (!/^[^@\s]+@[^@\s]+$/.test(e)) return say('#aMsg', 'That email does not look right.');
+    await G.saveGitSettings({ name: n, email: e });
     if (back) back(); else closeSheet();
   };
   $$('[data-rh]', body).forEach((b) => b.onclick = async () => { await G.forgetHost(b.dataset.rh); openGitIdentity(back); });
@@ -1419,7 +1499,7 @@ function wire() {
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
   $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal; $('#chipAuto').onclick = toggleAuto;
-  $('#sheetClose').onclick = closeSheet;
+  $('#sheetClose').onclick = closeSheet; sheetDrag();
   $('#chatSearch').oninput = drawChatList;
   $('#chatList').onclick = async (e) => {
     const d = e.target.closest('[data-del]');

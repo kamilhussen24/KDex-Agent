@@ -70,6 +70,7 @@ export async function getTermuxPath(folder) {
   const r = await db.get('kv', 'termux-path:' + folder.id);
   return (r && r.value) || deriveTermuxPath(folder.uri);
 }
+export async function hasCustomTermuxPath(folder) { if (!folder) return false; const r = await db.get('kv', 'termux-path:' + folder.id); return !!(r && r.value); }
 export async function setTermuxPath(folder, value) {
   if (value) await db.put('kv', { key: 'termux-path:' + folder.id, value }); else await db.del('kv', 'termux-path:' + folder.id);
 }
