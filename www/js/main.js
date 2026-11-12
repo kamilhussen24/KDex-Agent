@@ -1140,7 +1140,7 @@ function gitHead(st) {
   const rm = st.remote ? shortRemote(st.remote.host, st.remote.path) : 'No remote yet';
   return (
     '<div class="gsum"><div class="top2"><span class="btile">' + ICON('branch') + '</span><div class="tx"><div class="nm">' + esc(st.branch || '') + '</div><div class="rm"' + (st.remote ? ' title="' + esc(st.remote.host + '/' + st.remote.path) + '"' : '') + '>' + esc(rm) + '</div></div>' + (tags ? '<span class="abs">' + tags + '</span>' : '') + '</div>' +
-    '<div class="seg"><button id="gFetch" class="btn sm">' + ICON('fetch') + '<span class="lbl">Fetch</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button></div></div><div id="gMsg"></div>' +
+    '<div class="seg"><button id="gFetch" class="btn sm">' + ICON('fetch') + '<span class="lbl">Fetch</span></button><button id="gPush" class="btn sm">' + ICON('up') + '<span class="lbl">Push</span></button><button id="gPull" class="btn sm">' + ICON('down') + '<span class="lbl">Pull</span></button></div></div><div id="gMsg"></div>' +
     (st.needToken && st.remote.host ? '<div class="warnbar"><span>No access token saved for ' + esc(st.remote.host) + '. You need one to push or to use a private repository.</span><button id="gTok" class="btn sm"><span class="lbl">Add token</span></button></div>' : ''));
 }
 

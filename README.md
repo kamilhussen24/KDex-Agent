@@ -310,3 +310,9 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 ## v1.32.0
 - Sheets: drag the grip or the title bar down to close any bottom sheet. A short drag springs back, a long drag or a quick flick closes it. Buttons, lists and text fields are not affected. Confirmation dialogs are unchanged.
 - Terminal: the "Change path" button is gone. The path box shows "Detected automatically · Edit" or "Set by you · Edit · Reset". If no path can be found, a notice and a "Set path" button appear instead. Grant permission only shows while it is needed.
+
+## v1.33.0
+- Brand colour: the orange-pink gradient is replaced by one solid raspberry, `#D6334F`, taken from the logo (white text contrast 4.7:1). Dark theme uses a lighter `#FF7A92` for links, selected states and focus. Primary buttons, send button, chips, toggles, links, spinners and checkboxes all follow it.
+- Legibility: Fetch, Push and Pull use full-strength text (a toggle rule had greyed them by mistake). Button and field borders are clearer, and muted text is darker in light theme and brighter in dark theme.
+- Git summary buttons are now in the order Fetch, Push, Pull.
+- Font: Inter (variable, Latin subset, about 48 KB, SIL Open Font License) is bundled so text weights look the same on every phone. Bangla text still uses the phone's own font.

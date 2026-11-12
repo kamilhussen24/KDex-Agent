@@ -1,3 +1,4 @@
+@font-face{font-family:Inter;font-style:normal;font-weight:100 900;font-display:swap;src:url(../fonts/inter-latin.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 :root{--b1:#FF6A35;--b2:#F04478;--brand:#F85757;--grad:linear-gradient(135deg,#FF6A35,#F04478);
 --bg:#fff;--bg2:#f5f5f7;--card:#fff;--fg:#1c1c1e;--mut:#6b6b73;--line:#e4e4e8;--user:#f0f0f3;
 --ok:#1f9d55;--bad:#d64545;--addbg:#e6f6ec;--delbg:#fdeaea;--code:#f6f6f8;
@@ -6,7 +7,7 @@ html[data-theme=dark]{--bg:#121214;--bg2:#1b1b1f;--card:#1b1b1f;--fg:#ececf0;--m
 --addbg:#16301f;--delbg:#3a1b1b;--code:#0e0e10}
 html{color-scheme:light}html[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Roboto,sans-serif;overscroll-behavior:none}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:15px/1.5 Inter,system-ui,-apple-system,Roboto,sans-serif;overscroll-behavior:none}
 button,input,select,textarea{font:inherit;color:inherit}
 .hidden{display:none!important}
 .app{position:fixed;inset:0;height:var(--vh);display:flex;overflow:hidden}
@@ -411,3 +412,11 @@ pre.cmd.wrap{white-space:normal;overflow-wrap:anywhere;overflow-x:visible}
 .note.sizeline{text-align:left;padding:4px 2px 8px;font-size:13px}
 .tokcard{border:1px solid var(--line);border-radius:14px;padding:12px;margin:6px 0 14px}
 .tokcard .field:last-of-type{margin-bottom:10px}
+
+/* v1.33.0: solid logo-matched brand colour, clearer buttons */
+:root{--b1:#D6334F;--b2:#D6334F;--brand:#D6334F;--grad:#D6334F;--ink:#D6334F;--tint:rgba(214,51,79,.09);--mut:#55555D;--ctl:#BDBDC6}
+html[data-theme=dark]{--b2:#FF7A92;--ink:#FF7A92;--tint:rgba(255,110,140,.14);--mut:#B0B0BA;--ctl:#4A4A54}
+.btn,.chip,.mini,.pill,.tab,.field input,.field textarea,.field select,.inp{border-color:var(--ctl)}
+.btn.primary{border:0}
+.btn.primary:active{filter:brightness(.9)}
+.gsum .seg .btn:not(.on){color:var(--fg);font-weight:500}
