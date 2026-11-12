@@ -15,6 +15,7 @@ for its version.
 
 ### Changed
 - License: KDex Agent is now source-available under the KDex Agent License (see `LICENSE`). Versions 1.38.0 and earlier stay under the MIT License.
+- Privacy policy updated to match the app (update check, Git storage, Termux, backups).
 - Settings > About now has a "Licenses" screen that lists the app license and third-party licenses.
 
 ### Removed
