@@ -231,4 +231,13 @@ export async function runJob(name, args, folder) {
 
 /** Commands that can destroy data, change the system or publish work. They always ask, even in Auto mode. */
 const RISKY = /(^|[;&|\n]\s*|\s)(sudo|su|rm|rmdir|dd|mkfs\S*|chmod|chown|kill|pkill|killall|shutdown|reboot|ssh|scp|sftp|mkfs)(\s|$)|\bgit\s+(push|reset|clean|rebase)\b|\b(npm|pnpm|yarn|cargo)\s+publish\b|>\s*\/dev\/|\b(curl|wget)\b[^|;]*\|\s*(ba|z)?sh\b|:\(\)\s*\{/i;
-export function isRiskyCommand(command) { const c = String(command || ''); return DANGER.test(c) || RISKY.test(c); }
+// Commands that can send data out of the phone. A web page or file may carry hidden instructions, so these always ask,
+// even in Auto mode. Plain downloads (curl URL, wget URL, pip, npm, git) keep running without a prompt.
+const EGRESS = new RegExp([
+  '\\b(curl|wget|http|httpie)\\b[^\\n;|&]*(\\s-d\\b|\\s-F\\b|\\s-T\\b|--data\\S*|--form\\b|--upload-file|--post-\\S+|--body-\\S+|\\s-X\\s*(POST|PUT|PATCH|DELETE)|--method|\\s-H\\s*["\']?Authorization)',
+  '\\b(curl|wget)\\b[^\\n;|&]*(\\$\\(|`)',
+  '\\b(nc|ncat|netcat|socat|telnet|ftp|sftp|rsync|scp)\\b',
+  'KDEX_GIT|\\.kdex/askpass|\\.git-credentials|\\.netrc',
+  '\\b(requests|httpx|aiohttp)\\.(post|put|patch|delete|request)\\b|urllib\\.request|http\\.client|\\bsocket\\.|net\\.connect|fetch\\([^)]*method',
+].join('|'), 'i');
+export function isRiskyCommand(command) { const c = String(command || ''); return DANGER.test(c) || RISKY.test(c) || EGRESS.test(c); }

@@ -4,6 +4,9 @@ import { isSecretPath, isEnvLike, maskEnv, protectionOn, PROTECTED_MSG, ENV_TOOL
 import { fs } from './native.js';
 import { cleanRel, fmtBytes } from './util.js';
 
+const GIT_INTERNAL = /(^|\/)\.git(\/|$)/;
+export const isGitInternal = (p) => GIT_INTERNAL.test(String(p || '').replace(/\\/g, '/'));
+
 export const TOOLS = [
   {
     name: 'list_dir',
@@ -85,7 +88,7 @@ export async function runRead(name, args, folder) {
     const q = String(args.query || '').toLowerCase();
     if (!q) throw new Error('query is required');
     const { files, truncated } = await fs.walk(folder.uri, '', 3000);
-    const hits = files.filter((f) => f.path.toLowerCase().includes(q)).slice(0, 100).map((f) => f.path);
+    const hits = files.filter((f) => !isGitInternal(f.path) && f.path.toLowerCase().includes(q)).slice(0, 100).map((f) => f.path);
     return hits.length ? hits.join('\n') + (truncated ? '\n(project is large; list may be incomplete)' : '') : 'No file matches "' + args.query + '".';
   }
 
@@ -101,7 +104,7 @@ export async function runRead(name, args, folder) {
     const started = Date.now();
     for (const f of files) {
       if (results.length >= 60 || scanned >= 150 || Date.now() - started > 8000) break;
-      if (BINARY_EXT.test(f.path) || f.size > 200000 || (prot && isSecretPath(f.path))) continue;
+      if (isGitInternal(f.path) || BINARY_EXT.test(f.path) || f.size > 200000 || (prot && isSecretPath(f.path))) continue;
       scanned++;
       try {
         const r = await fs.readText(folder.uri, f.path, 200000);
@@ -118,6 +121,7 @@ export async function runRead(name, args, folder) {
   if (name === 'read_file') {
     const rel = cleanRel(args.path);
     if (!rel) throw new Error('path is required');
+    if (isGitInternal(rel)) throw new Error('The .git folder is managed by Git and may hold access tokens, so it is hidden from you. Use the git tools (git_status, git_diff, git_log) instead.');
     if (BINARY_EXT.test(rel)) throw new Error('This looks like a binary file; only text files can be read.');
     if (isSecretPath(rel) && await protectionOn()) {
       if (!isEnvLike(rel)) return PROTECTED_MSG;

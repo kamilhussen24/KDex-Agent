@@ -60,6 +60,7 @@ export function forgetSecrets(folder) { if (folder) cache.delete(folder.id); els
 export async function scrub(text, folder) {
   let s = String(text == null ? '' : text); if (!s) return s;
   for (const v of await secretValues(folder)) if (s.includes(v)) s = s.split(v).join('***');
+  s = s.replace(/(https?:\/\/)[^\/\s:@'"]+:[^\/\s@'"]+@/g, '$1***@'); // user:token@host in remote URLs
   return s;
 }
 export const PROTECTED_MSG = 'This file is protected. Its contents are hidden from me and from the chat on purpose. Programs you run in the terminal can still use it. Do not ask the user to paste secret values. If a variable is missing, call request_env_var: the user types the value in a private box and you never see it.';

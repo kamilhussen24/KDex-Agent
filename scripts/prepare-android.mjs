@@ -9,7 +9,11 @@ if (!fs.existsSync(android)) { console.error('android/ not found. Run "npx cap a
 
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const versionName = process.env.APP_VERSION || pkg.version || '1.0.0';
-const versionCode = Number(process.env.APP_VERSION_CODE || process.env.GITHUB_RUN_NUMBER || 1);
+// versionCode comes from the version number (1.42.0 -> 1042000), so it always rises with the version
+// and never depends on how many times the workflow ran.
+const vm = /^(\d+)\.(\d+)\.(\d+)/.exec(versionName);
+const fromVersion = vm ? Number(vm[1]) * 1000000 + Number(vm[2]) * 1000 + Number(vm[3]) : 1;
+const versionCode = Number(process.env.APP_VERSION_CODE || fromVersion);
 const res = path.join(android, 'app/src/main/res');
 const javaDir = path.join(android, 'app/src/main/java/com/kdex/agent');
 const read = (p) => fs.readFileSync(p, 'utf8');

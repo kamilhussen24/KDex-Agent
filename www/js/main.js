@@ -126,7 +126,7 @@ function choiceBox(title, text, labels, opts) {
   const noCancel = !!(opts && opts.noCancel);
   return new Promise((res) => {
     $('#dlgTitle').textContent = title; $('#dlgText').textContent = text;
-    $('#dlgYes').firstElementChild.textContent = labels[0]; $('#dlgAlt').firstElementChild.textContent = labels[1]; $('#dlgAlt').classList.remove('hidden');
+    $('#dlgYes').firstElementChild.textContent = labels[0]; $('#dlgAlt').firstElementChild.textContent = labels[1] || ''; $('#dlgAlt').classList.toggle('hidden', labels.length < 2);
     if (noCancel) $('#dlgNo').classList.add('hidden');
     $('#dialog').classList.remove('hidden');
     const done = (v) => { $('#dialog').classList.add('hidden'); $('#dlgAlt').classList.add('hidden'); $('#dlgNo').classList.remove('hidden'); $('#dialog').onclick = null; $('#dlgYes').onclick = $('#dlgNo').onclick = $('#dlgAlt').onclick = null; res(v); };
@@ -1579,14 +1579,39 @@ async function reportReply(id) {
 }
 
 // ------------------------------------------------------------ backup export / import (no API keys inside)
+// Pictures are left out of a backup (they can be hundreds of MB); the text of every chat is kept.
+function stripPictures(rows) {
+  return rows.map((m) => {
+    if (!m || !m.images || !m.images.length) return m;
+    const c = { ...m, imagesOmitted: m.images.length }; delete c.images;
+    c.text = (c.text ? c.text + '\n' : '') + '[' + c.imagesOmitted + ' picture' + (c.imagesOmitted > 1 ? 's' : '') + ' not included in the backup]';
+    return c;
+  });
+}
+const BACKUP_STORES = ['kv', 'chats', 'messages', 'backups', 'usage'];
 async function exportBackup() {
   const r = await fs.pickFolder().catch(() => null); if (!r || !r.uri) return;
-  const data = { app: 'kdex-agent', version: 1, at: Date.now() };
-  for (const st of ['kv', 'chats', 'messages', 'backups', 'usage']) data[st] = await db.all(st);
+  const data = { app: 'kdex-agent', version: 2, at: Date.now() };
+  for (const st of BACKUP_STORES) data[st] = await db.all(st);
   data.kv = data.kv.filter((x) => x.key !== 'lastChat');
+  data.messages = stripPictures(data.messages);
   const name = 'kdex-agent-backup-' + dayKey() + '.json';
-  await fs.writeText(r.uri, name, JSON.stringify(data));
-  toast('Saved ' + name + ' in ' + (r.name || 'the folder'));
+  const text = JSON.stringify(data);
+  if (text.length > 60 * 1048576) { toast('This backup would be larger than 60 MB, too big to restore. Delete some old chats first.'); return; }
+  await fs.writeText(r.uri, name, text);
+  toast('Saved ' + name + ' (' + fmtBytes(text.length) + ') in ' + (r.name || 'the folder'));
+}
+/** A backup file is only used when every part has the shape the app expects. Returns an error text or ''. */
+function backupProblem(d) {
+  if (!d || typeof d !== 'object' || d.app !== 'kdex-agent') return 'This is not a KDex Agent backup.';
+  for (const st of BACKUP_STORES) if (d[st] != null && !Array.isArray(d[st])) return 'The backup file is damaged (' + st + ').';
+  if ((d.chats || []).some((c) => !c || typeof c.id !== 'string')) return 'The backup file is damaged (chats).';
+  if ((d.messages || []).some((m) => !m || typeof m.chatId !== 'string' || typeof m.role !== 'string')) return 'The backup file is damaged (messages).';
+  if ((d.kv || []).some((k) => !k || typeof k.key !== 'string')) return 'The backup file is damaged (settings).';
+  return '';
+}
+async function wipeStores() {
+  for (const st of ['chats', 'messages', 'backups', 'usage']) for (const row of await db.all(st)) await db.del(st, row.id);
 }
 async function importBackup() {
   const r = await fs.pickFolder().catch(() => null); if (!r || !r.uri) return;
@@ -1594,11 +1619,25 @@ async function importBackup() {
   if (!files.length) { toast('No backup file found in that folder.'); return; }
   const f = files[0];
   if (!await confirmBox('Restore backup?', 'Restore ' + f.name + '? Chats, notes and settings in the file replace the current ones. API keys are never in a backup; add them again if needed.', 'Restore')) return;
-  const t = await fs.readText(r.uri, f.path, 64 * 1024 * 1024);
-  const data = JSON.parse(t.text);
-  if (data.app !== 'kdex-agent') { toast('This is not a KDex Agent backup.'); return; }
-  for (const st of ['chats', 'messages', 'backups', 'usage']) { for (const row of await db.all(st)) await db.del(st, st === 'chats' || st === 'kv' ? row.id || row.key : row.id); }
-  for (const st of ['kv', 'chats', 'messages', 'backups', 'usage']) for (const row of data[st] || []) await db.put(st, row);
+  let data;
+  try { const t = await fs.readText(r.uri, f.path, 64 * 1024 * 1024); if (t.truncated) { toast('The backup file is too large to restore (over 64 MB).'); return; } data = JSON.parse(t.text); }
+  catch (e) { toast('Could not read the backup file: ' + String((e && e.message) || e).slice(0, 80)); return; }
+  const bad = backupProblem(data); if (bad) { toast(bad); return; }
+  // Keep a copy of what is on the phone now; if anything fails halfway, put it back.
+  const before = {}; for (const st of BACKUP_STORES) before[st] = await db.all(st);
+  try {
+    await wipeStores();
+    for (const st of BACKUP_STORES) for (const row of data[st] || []) await db.put(st, row);
+  } catch (e) {
+    try { await wipeStores(); for (const st of BACKUP_STORES) for (const row of before[st]) await db.put(st, row); } catch (e2) { /* best effort */ }
+    toast('Restore failed, nothing was changed: ' + String((e && e.message) || e).slice(0, 80)); return;
+  }
+  // After a reinstall, Android forgets which folders the app may open. Say which ones need to be added again.
+  const lost = [];
+  for (const fo of (data.kv || []).filter((k) => k.key === 'folders').flatMap((k) => k.value || [])) {
+    try { await fs.list(fo.uri, ''); } catch (e) { lost.push(fo.name || fo.path || 'a folder'); }
+  }
+  if (lost.length) await choiceBox('Add folders again', 'Restored. Android no longer lets this install open ' + lost.length + ' folder' + (lost.length > 1 ? 's' : '') + ': ' + lost.slice(0, 6).join(', ') + (lost.length > 6 ? ' ...' : '') + '. Tap the folder button, then Add folder, and pick each one again. Your chats are kept.', ['OK'], { noCancel: true });
   toast('Restored. Restarting...'); setTimeout(() => location.reload(), 700);
 }
 

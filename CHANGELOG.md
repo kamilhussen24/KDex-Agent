@@ -7,6 +7,21 @@ for its version.
 
 ## [Unreleased]
 
+## [1.42.0]
+
+### Security
+- The `.git` folder is hidden from the AI's read, search and file-find tools; it can hold access tokens. Git tools remain available.
+- Credentials inside URLs (`https://user:token@host`) are masked in tool output.
+- Terminal commands that send data out (curl/wget uploads, POST, auth headers, nc/scp/rsync, reads of Git credential files) always ask first, even in Auto mode. Plain downloads are unaffected.
+- The update check only accepts APK links from this project's GitHub repository.
+
+### Fixed
+- Backup and restore are safer: backups leave pictures out (with a note in the message), a damaged file is rejected before anything is changed, and a failed restore rolls back to the previous data.
+- After a reinstall, folders Android no longer lets the app open are listed so you can add them again.
+
+### Changed
+- Android versionCode is derived from the version number, and a release tag must match the version in package.json.
+
 ## [1.41.0]
 
 ### Added

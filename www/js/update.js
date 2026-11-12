@@ -24,6 +24,6 @@ export async function checkUpdate(current, fetchFn) {
     if (!parseVer(latest)) return { ok: false, error: 'Unreadable release' };
     const assets = Array.isArray(j.assets) ? j.assets : [];
     const apk = assets.find((a) => /\.apk$/i.test(a.name || ''));
-    return { ok: true, latest, newer: isNewer(latest, current), url: j.html_url || REPO_URL + '/releases', apk: apk ? apk.browser_download_url : '', size: apk ? apk.size : 0, notes: String(j.body || '').slice(0, 1200) };
+    return { ok: true, latest, newer: isNewer(latest, current), url: j.html_url || REPO_URL + '/releases', apk: apk && String(apk.browser_download_url || '').startsWith(REPO_URL + '/') ? apk.browser_download_url : '', size: apk ? apk.size : 0, notes: String(j.body || '').slice(0, 1200) };
   } catch (e) { return { ok: false, error: 'No connection' }; }
 }

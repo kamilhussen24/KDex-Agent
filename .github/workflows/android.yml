@@ -32,6 +32,7 @@ jobs:
           VER=$(node -p "require('./package.json').version")
           SKIP=false; RELEASE=false; TAG="v$VER"
           if [ "${{ github.ref_type }}" = "tag" ]; then
+            if [ "${{ github.ref_name }}" != "v$VER" ]; then echo "::error::Tag ${{ github.ref_name }} does not match package.json version $VER."; exit 1; fi
             RELEASE=true; TAG="${{ github.ref_name }}"
           elif [ "${{ github.event_name }}" = "push" ]; then
             if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
