@@ -333,3 +333,10 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 ## v1.37.0
 - Long titles: in every sheet the Back and Close buttons keep their place. A long file name or path is cut at the start (`…/public/delivery.html`) so the name stays visible. The sheet no longer shifts sideways; long code lines scroll inside their own box.
 - Swipe to close: swipe left anywhere on the menu to close it; swipe down anywhere on a sheet (when its content is scrolled to the top) to close it. A short swipe springs back. Typing fields and scrolled lists are left alone.
+
+## v1.38.0
+- About (Settings): Developer, Source code (GitHub), Updates and Open source licenses. The app is now MIT licensed (`LICENSE`).
+- Updates: Settings > About > Check for updates reads the latest GitHub Release. If a newer version exists you get a Download button for the APK; open the downloaded file to install over the old one (chats and settings stay). The app also checks quietly once a day and shows one notice per new version. Updates only install over the old app when both are signed with the same key, so keep using the same signing secrets.
+- Automatic releases: raise `version` in `package.json` and push to `main`. GitHub Actions builds the signed APK, creates the tag `vX.Y.Z` and the Release, writes the notes from this README's `## vX.Y.Z` section and attaches `KDex-Agent-release.apk`. If the tag already exists nothing happens. Pushing a `v*` tag by hand still works. The default branch must be `main`.
+- Fast file access: the permission prompt now appears when you add a folder or clone (not on first launch), with only Not now and Allow; tapping outside closes it. Settings > Fast file access has a permanent switch.
+- Dialogs with two choices no longer show an extra Cancel button (tap outside to dismiss).

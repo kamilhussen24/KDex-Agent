@@ -438,3 +438,5 @@ html[data-theme=dark]{--bad-text:#FF8080}
 
 /* v1.35.0: keep the chat screen hidden until startup knows which screen to show */
 html:not(.ready) #app{visibility:hidden}
+
+a.link{color:var(--ink);font-weight:600;text-decoration:none}

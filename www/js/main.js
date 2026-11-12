@@ -13,6 +13,7 @@ import * as A from './agent.js';
 import * as G from './git.js';
 import { isSecretPath, isEnvLike, maskEnv, protectionOn } from './secrets.js';
 import { SUPPORT_EMAIL, APP_VERSION } from './config.js';
+import { checkUpdate, isNewer, REPO_URL } from './update.js';
 
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
@@ -119,13 +120,16 @@ function confirmBox(title, text, yes = 'OK') {
   });
 }
 /** Dialog with two actions plus Cancel. Resolves 0 (first), 1 (second) or -1 (cancel). */
-function choiceBox(title, text, labels) {
+function choiceBox(title, text, labels, opts) {
+  const noCancel = !!(opts && opts.noCancel);
   return new Promise((res) => {
     $('#dlgTitle').textContent = title; $('#dlgText').textContent = text;
     $('#dlgYes').firstElementChild.textContent = labels[0]; $('#dlgAlt').firstElementChild.textContent = labels[1]; $('#dlgAlt').classList.remove('hidden');
+    if (noCancel) $('#dlgNo').classList.add('hidden');
     $('#dialog').classList.remove('hidden');
-    const done = (v) => { $('#dialog').classList.add('hidden'); $('#dlgAlt').classList.add('hidden'); $('#dlgYes').onclick = $('#dlgNo').onclick = $('#dlgAlt').onclick = null; res(v); };
+    const done = (v) => { $('#dialog').classList.add('hidden'); $('#dlgAlt').classList.add('hidden'); $('#dlgNo').classList.remove('hidden'); $('#dialog').onclick = null; $('#dlgYes').onclick = $('#dlgNo').onclick = $('#dlgAlt').onclick = null; res(v); };
     $('#dlgYes').onclick = () => done(0); $('#dlgAlt').onclick = () => done(1); $('#dlgNo').onclick = () => done(-1);
+    if (noCancel) $('#dialog').onclick = (e) => { if (e.target === $('#dialog')) done(-1); };
   });
 }
 function applyTheme() {
@@ -156,12 +160,12 @@ async function boot() {
   window.__stage = 'wiring'; wire();
   if (!S.models.length && !(await kvGet('setupSkipped', false))) { showSetup(true); document.documentElement.classList.add('ready'); window.__stage = 'ready'; return; }
   await enter(); document.documentElement.classList.add('ready'); window.__stage = 'ready';
+  autoUpdateCheck().catch(() => {});
   Launch.onLaunch(() => Launch.take().then(handleLaunch)); Launch.take().then(handleLaunch);
-  setTimeout(() => offerAllFiles().catch(() => {}), 1200);
 }
 /** Opens Android's permission screen; when the user comes back it checks the result. */
 async function askAllFiles(done) {
-  try { await AllFiles.request(); } catch (e) { toast('Could not open the settings screen'); return; }
+  try { await AllFiles.request(); } catch (e) { toast('Could not open the settings screen'); if (done) done(); return; }
   const back = async () => {
     if (document.hidden) return;
     document.removeEventListener('visibilitychange', back);
@@ -178,8 +182,8 @@ async function offerAllFiles() {
   if (!st.supported || st.granted) return;
   if (await kvGet('allFilesAsked', 0) >= 2) return;
   await kvSet('allFilesAsked', (await kvGet('allFilesAsked', 0)) + 1);
-  const r = await choiceBox('Fast file access', 'Allow "All files access" so files and Git work at full speed, like Termux. Android opens a settings screen: turn on the switch for KDex Agent, then come back.', ['Allow', 'Not now']);
-  if (r === 0) askAllFiles();
+  const r = await choiceBox('Fast file access', 'Allow "All files access" so files and Git run at full speed, like Termux. Android opens a settings screen: turn on the switch for KDex Agent, then come back.', ['Allow', 'Not now'], { noCancel: true });
+  if (r === 0) await new Promise((res) => askAllFiles(res));
 }
 async function enter() {
   $('#setup').classList.add('hidden');
@@ -320,7 +324,7 @@ async function handleLaunch(l) {
   if (l.chat && (!S.chat || S.chat.id !== l.chat) && S.chats.find((c) => c.id === l.chat)) await openChat(l.chat);
   const sh = l.share; if (!sh) return;
   const used = (await db.byIndex('messages', 'chatId', S.chat.id)).length > 0;
-  if (used) { const r = await choiceBox('Shared to KDex Agent', 'Add it to this chat, or start a new one?', ['New chat', 'This chat']); if (r === -1) return; if (r === 0) await newChat(S.folder); }
+  if (used) { const r = await choiceBox('Shared to KDex Agent', 'Add it to this chat, or start a new one?', ['New chat', 'This chat'], { noCancel: true }); if (r === -1) return; if (r === 0) await newChat(S.folder); }
   const txt = [sh.subject, sh.text].filter(Boolean).join('\n\n');
   const input = $('#input'); if (txt) { input.value = (input.value ? input.value + '\n\n' : '') + txt; autoGrow(); }
   const bad = [];
@@ -667,6 +671,33 @@ function touchSwipes() {
     cancel: (calm) => { card.style.transition = calm ? 'none' : 'transform .2s ease'; root.style.transition = calm ? 'none' : 'background .2s ease'; card.style.transform = ''; root.style.background = ''; setTimeout(rs, calm ? 0 : 220); },
   });
 }
+/** Settings > About: shows the last known update result and lets the user check now. */
+async function drawUpdate(body) {
+  const st = $('#updState', body); const box = $('#updBox', body); if (!st || !box) return;
+  const show = (r) => {
+    if (!r) { st.textContent = 'Not checked'; box.innerHTML = '<button id="updGo" class="btn" style="width:100%"><span class="lbl">Check for updates</span></button>'; }
+    else if (!r.ok) { st.textContent = r.error || 'Could not check'; box.innerHTML = '<button id="updGo" class="btn" style="width:100%"><span class="lbl">Try again</span></button>'; }
+    else if (r.newer) { st.textContent = r.latest + ' available'; box.innerHTML = '<a class="btn primary" style="display:flex;width:100%;justify-content:center;text-decoration:none" href="' + esc(r.apk || r.url) + '" target="_blank" rel="noopener"><span class="lbl">Download ' + esc(r.latest) + (r.size ? ' (' + fmtBytes(r.size) + ')' : '') + '</span></a><small style="display:block;margin-top:6px;color:var(--mut);font-size:13px">Open the downloaded file to install. Your chats and settings stay.</small>'; }
+    else { st.textContent = r.none ? 'No releases yet' : 'Up to date'; box.innerHTML = '<button id="updGo" class="btn" style="width:100%"><span class="lbl">Check for updates</span></button>'; }
+    const g = $('#updGo', body); if (g) g.onclick = async () => { st.textContent = 'Checking...'; g.disabled = true; const x = await checkUpdate(APP_VERSION); if (x.ok) await kvSet('updLast', { at: Date.now(), r: x }); show(x); };
+  };
+  const last = await kvGet('updLast', null); show(last && last.r && last.r.ok ? Object.assign({}, last.r, { newer: isNewer(last.r.latest, APP_VERSION) }) : null);
+}
+/** Once a day, quietly. Tells the user once per new version. */
+async function autoUpdateCheck() {
+  if (!isNative) return;
+  const last = await kvGet('updLast', null);
+  if (last && Date.now() - last.at < 24 * 3600 * 1000) return;
+  const r = await checkUpdate(APP_VERSION); if (!r.ok) return;
+  await kvSet('updLast', { at: Date.now(), r });
+  if (r.newer && (await kvGet('updToldFor', '')) !== r.latest) { await kvSet('updToldFor', r.latest); toast('Update ' + r.latest + ' is available. See Settings > About.'); }
+}
+function openLicenses() {
+  const body = sheet('Open source licenses', { back: () => openSettings() });
+  const item = (n, l, t) => '<div class="kv" style="display:block"><b>' + esc(n) + '</b> <span style="color:var(--mut)">' + esc(l) + '</span><div style="color:var(--mut);font-size:13px;margin-top:2px">' + esc(t) + '</div></div>';
+  body.innerHTML = '<div class="note" style="text-align:left">KDex Agent is free software. Source: <a class="link" href="' + REPO_URL + '" target="_blank" rel="noopener">GitHub</a></div>' +
+    item('KDex Agent', 'MIT', 'Copyright (c) 2026 Kamil Hussen (KDex)') + item('Capacitor', 'MIT', 'Ionic and contributors') + item('Inter font', 'SIL OFL 1.1', 'The Inter Project Authors') + item('Eclipse JGit', 'EDL (BSD-3-Clause)', 'Eclipse Foundation and contributors') + item('AndroidX libraries', 'Apache 2.0', 'Google');
+}
 function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').classList.add('hidden'); S.sheetStack = []; }
 
 /** Use `f` (or no folder) in the current chat. Messages stay; the model is told about the change. */
@@ -676,7 +707,7 @@ async function applyFolder(f) {
   if ((cur && f && cur.id === f.id) || (!cur && !f)) { closeSheet(); return; }
   const had = (await db.byIndex('messages', 'chatId', c.id)).some((x) => x.role === 'user');
   if (had && cur && f) {
-    const r = await choiceBox('Change folder?', 'This chat is working in "' + cur.name + '". Use "' + f.name + '" here, or start a new chat for it?', ['Use here', 'New chat']);
+    const r = await choiceBox('Change folder?', 'This chat is working in "' + cur.name + '". Use "' + f.name + '" here, or start a new chat for it?', ['Use here', 'New chat'], { noCancel: true });
     if (r === 1) { closeSheet(); await newChat(f); await persistChat(); loadChats(); return; }
     if (r !== 0) return;
   }
@@ -726,6 +757,7 @@ async function openProjects() {
         '<div class="fp"><span class="fpath">' + esc(paths[f.id] || 'Path unknown').replace(/\//g, '/<wbr>') + '</span>' + (paths[f.id] ? '<button class="icon-btn rbtn" data-cp="' + f.id + '" aria-label="Copy path of ' + esc(f.name) + '">' + ICON('copy') + '</button>' : '') + '</div></div>').join('') +
       '<div class="note" style="margin-top:12px">Android does not allow picking the whole storage or the Download folder. Choose a subfolder, for example one you create for a project.</div>';
     $('#pOpen').onclick = async () => {
+      await offerAllFiles().catch(() => {});
       try {
         const r = await fs.pickFolder(); if (!r || !r.uri) return;
         let f = S.folders.find((x) => x.uri === r.uri);
@@ -922,7 +954,9 @@ function openSettings() {
     '<div class="h3">Fast file access</div><div id="afBox"></div>' +
     '<div class="h3">Git</div><button id="gitId" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Identity and access tokens</span></button>' +
     '<div class="h3">Help</div><button id="diagBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Diagnostics log</span></button>' +
-    '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
+    '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div><div class="kv"><span>Developer</span><span>Kamil Hussen (KDex)</span></div><div class="kv"><span>Source code</span><span><a class="link" href="' + REPO_URL + '" target="_blank" rel="noopener">GitHub</a></span></div><div class="kv"><span>Updates</span><span id="updState">Not checked</span></div>' +
+    '<div id="updBox" style="margin-top:10px"></div><button id="licBtn" class="btn" style="width:100%;margin-top:8px"><span class="lbl">Open source licenses</span></button>';
+  drawUpdate(body); $('#licBtn', body).onclick = openLicenses;
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
   bindSeg('setProt', (v) => save({ protectSecrets: v === '1' })); bindSeg('setAutoDef', (v) => save({ autoDefault: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
@@ -1432,6 +1466,7 @@ async function openGitStart(folder, mode) {
     const fail = (e) => { lock(false); const msg = (e && e.message) || String(e); if (/^Set your Git name/.test(msg)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGitStart(folder, m)); } else errLine(msg); };
     if ($('#cGo')) $('#cGo').onclick = async () => {
       const v = readCloneFields(); if (!v.url) { errLine('Enter the repository URL.'); return; }
+    await offerAllFiles().catch(() => {});
       lock(true);
       try { await runClone(folder, v, (t) => busyLine(t)); } catch (e) { fail(e); }
     };
