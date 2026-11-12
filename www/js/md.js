@@ -1,5 +1,6 @@
 // Small, safe Markdown renderer (headings, lists, tables, code blocks, bold/italic, links).
 import { esc } from './util.js';
+import { highlight } from './highlight.js';
 
 function inline(t) {
   const codes = [];
@@ -39,7 +40,7 @@ export function renderMarkdown(src) {
       flushPara(); flushList();
       const b = blocks[Number(m[1])];
       out.push('<div class="code"><div class="code-h"><span class="tag">' + esc(b.lang || 'code') + '</span>' +
-        '<button type="button" class="mini" data-copy><span class="lbl">Copy</span></button></div><pre><code>' + esc(b.code) + '</code></pre></div>');
+        '<button type="button" class="mini" data-copy><span class="lbl">Copy</span></button></div><pre><code>' + highlight(b.code, b.lang) + '</code></pre></div>');
       continue;
     }
     if (!line.trim()) { flushPara(); flushList(); continue; }

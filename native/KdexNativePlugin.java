@@ -6,6 +6,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.app.PendingIntent;
 import android.os.Build;
 import android.os.Bundle;
@@ -549,6 +550,115 @@ public class KdexNativePlugin extends Plugin {
         return o;
     }
 
+
+
+    // ------------------------------------------------------------------ Keep working in the background
+    private volatile boolean workActive = false;
+
+    @PluginMethod
+    public void workStart(PluginCall call) {
+        try {
+            if (Build.VERSION.SDK_INT >= 33 && getActivity() != null
+                    && getContext().checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                getActivity().requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 4102);
+            }
+            Intent i = new Intent(getContext(), KdexWorkService.class);
+            i.putExtra("text", call.getString("text", "Working on your request"));
+            if (Build.VERSION.SDK_INT >= 26) getContext().startForegroundService(i); else getContext().startService(i);
+            workActive = true;
+            call.resolve();
+        } catch (Throwable t) {
+            workActive = false;
+            call.resolve(); // optional: the agent still runs while the app is open
+        }
+    }
+
+    @PluginMethod
+    public void workStop(PluginCall call) {
+        workActive = false;
+        try { getContext().stopService(new Intent(getContext(), KdexWorkService.class)); } catch (Throwable t) { /* ignore */ }
+        call.resolve();
+    }
+
+    @Override
+    protected void handleOnPause() {
+        super.handleOnPause();
+        if (workActive && getActivity() != null) {
+            getActivity().runOnUiThread(() -> {
+                try { getBridge().getWebView().resumeTimers(); } catch (Throwable t) { /* ignore */ }
+            });
+        }
+    }
+
+    // ------------------------------------------------------------------ Native Git (JGit), reached by reflection so the app builds and runs without it
+    private Object toJson(Object o) throws JSONException {
+        if (o instanceof Map) {
+            JSObject out = new JSObject();
+            for (Object e : ((Map<?, ?>) o).entrySet()) {
+                Map.Entry<?, ?> en = (Map.Entry<?, ?>) e;
+                out.put(String.valueOf(en.getKey()), toJson(en.getValue()));
+            }
+            return out;
+        }
+        if (o instanceof List) {
+            JSArray arr = new JSArray();
+            for (Object x : (List<?>) o) arr.put(toJson(x));
+            return arr;
+        }
+        return o;
+    }
+
+    @PluginMethod
+    public void gitNative(PluginCall call) {
+        pool.execute(() -> {
+            try {
+                String op = call.getString("op", "");
+                String id = call.getString("id", "");
+                Uri tree = Uri.parse(call.getString("uri", ""));
+                File root = directRoot(tree);
+                if (root == null) { call.reject("native-git-unavailable: direct file access is off"); return; }
+                Map<String, String> args = new java.util.HashMap<>();
+                JSObject a = call.getObject("args");
+                if (a != null) {
+                    Iterator<String> keys = a.keys();
+                    while (keys.hasNext()) { String k = keys.next(); args.put(k, a.isNull(k) ? "" : String.valueOf(a.get(k))); }
+                }
+                String rel = call.getString("path", "");
+                args.put("dir", fileFor(root, rel).getAbsolutePath());
+                System.setProperty("user.home", new File(getContext().getFilesDir(), "jgit-home").getAbsolutePath());
+                Class<?> k = Class.forName("com.kdex.agent.KdexGit");
+                java.lang.reflect.Method m = k.getMethod("run", String.class, Map.class, String.class, java.util.function.Consumer.class);
+                java.util.function.Consumer<Object[]> sink = x -> {
+                    try {
+                        JSObject ev = new JSObject();
+                        ev.put("id", String.valueOf(x[0])); ev.put("phase", String.valueOf(x[1]));
+                        ev.put("done", ((Number) x[2]).intValue()); ev.put("total", ((Number) x[3]).intValue());
+                        notifyListeners("gitProgress", ev);
+                    } catch (Exception e) { /* progress is optional */ }
+                };
+                Object r = m.invoke(null, op, args, id, sink);
+                Object j = toJson(r);
+                call.resolve(j instanceof JSObject ? (JSObject) j : new JSObject());
+            } catch (ClassNotFoundException | LinkageError e) {
+                call.reject("native-git-unavailable: " + e);
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                Throwable c = e.getCause() != null ? e.getCause() : e;
+                if (c instanceof LinkageError) call.reject("native-git-unavailable: " + c);
+                else call.reject(c.getClass().getSimpleName() + ": " + String.valueOf(c.getMessage()));
+            } catch (Throwable e) {
+                call.reject(e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
+            }
+        });
+    }
+
+    @PluginMethod
+    public void gitCancel(PluginCall call) {
+        try {
+            Class<?> k = Class.forName("com.kdex.agent.KdexGit");
+            k.getMethod("cancel", String.class).invoke(null, call.getString("id", ""));
+        } catch (Throwable t) { /* nothing to cancel */ }
+        call.resolve();
+    }
 
     // ------------------------------------------------------------------ Direct file access
     // With "All files access" the app reads and writes shared storage through normal file paths. That is how Termux

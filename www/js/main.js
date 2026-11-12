@@ -1,7 +1,9 @@
 // KDex Agent (Android) - UI layer. All data stays on this phone.
 import { $, $$, esc, uid, fmtBytes, fmtTok, ago, dayKey, dayKeyAgo, copyText } from './util.js';
 import { db, kvGet, kvSet } from './db.js';
-import { secure, fs, App, Termux, AllFiles, setBars, isNative } from './native.js';
+import { secure, fs, App, Termux, AllFiles, Work, setBars, isNative } from './native.js';
+import * as D from './diag.js';
+import { highlight, langOf } from './highlight.js';
 import { PRESETS, QUICK_FILL, listModels, popularModels } from './providers.js';
 import { getTermuxPath, setTermuxPath } from './termux.js';
 import { renderMarkdown } from './md.js';
@@ -61,7 +63,7 @@ function currentModelId() { return $('#modelSelect').value || (S.models[0] && S.
 
 // ------------------------------------------------------------ boot
 async function boot() {
-  window.__stage = 'boot'; fitViewport();
+  window.__stage = 'boot'; D.install(); fitViewport();
   S.settings = await A.getSettings(); applyTheme();
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
   window.__stage = 'settings-ok';
@@ -405,6 +407,7 @@ async function send(regenerate) {
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
   delete S.chat.fresh; await persistChat(); loadChats();
   S.abort = new AbortController(); setRunning(true);
+  Work.start('Working on your request'); const t0 = Date.now(); D.log('run', 'Agent run started');
   const ui = {
     onUser: (m) => renderMsg(m), onAssistant: (m) => renderMsg(m), onDelta: (m) => renderMsg(m),
     onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); },
@@ -417,12 +420,14 @@ async function send(regenerate) {
   };
   try {
     await A.runTurn({ chat: S.chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder: S.folder, modelId: currentModelId(), think: S.think, signal: S.abort.signal, ui, regenerate: !!regenerate });
+    D.log('run', 'Agent run finished in ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
   } catch (e) {
+    D.log('error', 'Agent run failed: ' + (e.message || e));
     toast(e.message || 'Something went wrong');
     const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
     m.id = await db.put('messages', m); renderMsg(m);
   }
-  setRunning(false); S.abort = null; updateApproveBar(); updateChangesChip(); loadChats();
+  Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); updateChangesChip(); loadChats();
 }
 async function regenerate() {
   if (S.running) return;
@@ -579,10 +584,28 @@ async function openFiles(path = '') {
     $$('[data-p]', body).forEach((r) => r.onclick = async () => {
       if (r.dataset.d === '1') return openFiles(r.dataset.p);
       const p = r.dataset.p; const b2 = sheet(p, { back: () => openFiles(path) });
-      try { const t = await fs.readText(S.folder.uri, p, 200000); const hide = isSecretPath(p) && await protectionOn(); b2.innerHTML = t.binary ? '<div class="note">Binary file, ' + fmtBytes(t.size) + '</div>' : (hide ? '<div class="note" style="text-align:left">Protected file. Its values are hidden here and from the agent. Open it in a file editor to change it.</div>' : '') + '<pre class="out" style="white-space:pre-wrap;word-break:break-word;font-size:12px">' + esc(hide ? (isEnvLike(p) ? maskEnv(t.text) : '<hidden>') : t.text) + '</pre>'; }
-      catch (e) { b2.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
+      openFileView(p, b2);
     });
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message || 'Could not read the folder') + '</div>'; }
+}
+
+/** Read-only file viewer: line numbers, syntax colours, copy. Secret files stay hidden. */
+async function openFileView(p, body) {
+  body.innerHTML = '<div class="note">Loading...</div>';
+  try {
+    const t = await fs.readText(S.folder.uri, p, 200000);
+    if (t.binary) { body.innerHTML = '<div class="note">Binary file, ' + fmtBytes(t.size) + '</div>'; return; }
+    const hide = isSecretPath(p) && await protectionOn();
+    const text = hide ? (isEnvLike(p) ? maskEnv(t.text) : '<hidden>') : t.text;
+    const n = text.replace(/\n$/, '').split('\n').length;
+    const gut = Array.from({ length: n }, (_, k) => k + 1).join('\n');
+    const lang = langOf(p);
+    body.innerHTML = '<div class="fv-bar"><span class="fv-meta">' + fmtBytes(t.size != null ? t.size : text.length) + ' · ' + n + ' line' + (n === 1 ? '' : 's') + (lang ? ' · ' + esc(lang) : '') + '</span><button id="fvCopy" class="mini" type="button"><span class="lbl">Copy</span></button></div>' +
+      (hide ? '<div class="note" style="text-align:left">Protected file. Its values are hidden here and from the agent.</div>' : '') +
+      '<div class="fv"><pre class="gut" aria-hidden="true">' + gut + '</pre><pre class="src"><code>' + (hide ? esc(text) : highlight(text, p)) + '</code></pre></div>' +
+      (t.truncated || t.size > 200000 ? '<div class="note">Showing the first part of a large file.</div>' : '');
+    $('#fvCopy').onclick = async () => { const ok = await copyText(text); $('#fvCopy').firstElementChild.textContent = ok ? 'Copied' : 'Failed'; setTimeout(() => { const b = $('#fvCopy'); if (b) b.firstElementChild.textContent = 'Copy'; }, 1400); };
+  } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
 
 async function openChanges() {
@@ -643,6 +666,7 @@ function openSettings() {
     '<div class="h3">Terminal (Termux)</div><div class="field">' + seg('setTerm', [['0', 'Off'], ['1', 'On']], st.termux ? '1' : '0') + '<small>Lets the agent run shell commands in Termux after you approve each one. Advanced.</small></div><div id="termBox"></div>' +
     '<div class="h3">Fast file access</div><div id="afBox"></div>' +
     '<div class="h3">Git</div><button id="gitId" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Identity and access tokens</span></button>' +
+    '<div class="h3">Help</div><button id="diagBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Diagnostics log</span></button>' +
     '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div>';
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => save({ mode: v })); bindSeg('setThink', (v) => save({ defaultThink: v }));
@@ -684,7 +708,7 @@ function openSettings() {
   rdTerm();
   mem();
   $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
-  $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
+  $('#diagBtn').onclick = openDiagnostics; $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
   $('#delAll').onclick = async () => {
     if (!await confirmBox('Delete all conversations?', 'Every chat, its messages and its change backups are removed from this phone. Your folders, files, settings, memory notes and keys are not touched. This cannot be undone.', 'Delete all')) return;
     if (S.running) stopRun();
@@ -749,6 +773,18 @@ function save(p) {
   return saveChain;
 }
 
+/** What the app did and what failed. Tokens and keys are masked, so the text is safe to share. */
+async function openDiagnostics() {
+  const body = sheet('Diagnostics log', { back: openSettings });
+  const list = await D.entries();
+  const info = { Version: APP_VERSION, Android: /Android ([\d.]+)/.exec(navigator.userAgent) ? /Android ([\d.]+)/.exec(navigator.userAgent)[1] : 'unknown', 'File access': (await AllFiles.status()).granted ? 'direct' : 'standard' };
+  const dt = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  body.innerHTML = '<div class="row" style="display:flex;gap:8px;margin-bottom:12px"><button id="dgCopy" class="btn" style="flex:1"><span class="lbl">Copy log</span></button><button id="dgClear" class="btn danger" style="flex:1"><span class="lbl">Clear</span></button></div>' +
+    (list.length ? '<div class="diag">' + list.slice(0, 120).map((e) => '<div class="dg ' + esc(e.k) + '"><span class="dt">' + esc(dt(e.t)) + '</span><span class="dm">' + esc(e.m) + '</span></div>').join('') + '</div>' : '<div class="note">Nothing logged yet. Errors and failed Git actions appear here.</div>') +
+    '<div class="note" style="margin-top:12px;text-align:left">Stays on this phone. Tokens and keys are masked before they are saved.</div>';
+  $('#dgCopy').onclick = async () => { await copyText(D.format(list, info)); toast('Copied'); };
+  $('#dgClear').onclick = async () => { await D.clear(); openDiagnostics(); };
+}
 async function openUsage() {
   const body = sheet('Token usage', { back: openSettings });
   const rows = await db.all('usage'); const days = new Map();
@@ -810,7 +846,7 @@ async function gitRun(label, fn, after, keep) {
     const m = (e && e.message) || String(e);
     if (ac.signal.aborted) { await openGit(GS.tab); toast('Cancelled'); return; }
     if (/^Set your Git name/.test(m)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGit()); return; }
-    await openGit(GS.tab, true); errLine(m);
+    D.log('git', label + ' failed: ' + m); await openGit(GS.tab, true); errLine(m);
   }
 }
 
@@ -963,7 +999,19 @@ function bindGit(folder, st, body) {
       try { ta.value = await A.suggestCommitMessage(currentModelId(), folder); ta.oninput(); } catch (e) { errLine(e.message); }
       b.disabled = false; l.textContent = 'Suggest';
     };
-    $('#gCommit').onclick = () => { const paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p)); run('Committing', () => G.commit(folder, ta.value, paths, st.changes), (ch) => ch.filter((c) => !paths.includes(c.path))); };
+    $('#gCommit').onclick = async () => {
+      let paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p));
+      const found = await G.scanSecrets(folder, st.changes.filter((c) => paths.includes(c.path)));
+      if (found.length) {
+        const names = [...new Set(found.map((f) => f.path))];
+        const detail = found.slice(0, 4).map((f) => f.path + ' (' + f.kind + ', line ' + f.line + ')').join('\n') + (found.length > 4 ? '\n+' + (found.length - 4) + ' more' : '');
+        D.log('git', 'Secret scan flagged ' + found.length + ' place(s) before commit');
+        const pick = await choiceBox('Possible secret found', 'These files look like they contain a key or token. Once pushed, it is public.\n\n' + detail, ['Leave them out', 'Commit anyway']);
+        if (pick === -1) return;
+        if (pick === 0) { paths = paths.filter((p) => !names.includes(p)); if (!paths.length) { toast('Nothing left to commit.'); return; } }
+      }
+      run('Committing', () => G.commit(folder, ta.value, paths, st.changes), (ch) => ch.filter((c) => !paths.includes(c.path)));
+    };
   }
   if ($('#gTok')) $('#gTok').onclick = async () => { const t = await askText('Access token for ' + st.remote.host, 'Paste the token'); if (t) { await G.saveToken(st.remote.host, t); await G.rememberHost(st.remote.host); toast('Token saved'); openGit(GS.tab); } };
   if ($('#gNew')) $('#gNew').onclick = async () => { const n = await askText('New branch', 'Branch name', 'feature/my-change'); if (n) run('Creating branch', () => G.createBranch(folder, n.replace(/\s+/g, '-')), true); };

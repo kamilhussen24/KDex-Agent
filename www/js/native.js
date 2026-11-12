@@ -227,6 +227,25 @@ export const App = isNative ? cap.registerPlugin('App') : null;
 /** Colours the Android status and navigation bars to match the theme. */
 export async function setBars(dark, color) { if (plugin) { try { await plugin.setBars({ dark, color }); } catch (e) { /* older build */ } } }
 
+// ---------------------------------------------------------------- native Git (JGit) and background work
+const gitWaiters = new Map(); let gitListener = null;
+/** Runs one Git operation in the native JGit library. Rejects with "native-git-unavailable..." when it cannot (the caller falls back to JavaScript Git). */
+export async function gitNative(uri, op, args = {}, { onProgress, signal } = {}) {
+  if (!plugin) throw new Error('native-git-unavailable: not running on Android');
+  if (!gitListener) gitListener = plugin.addListener('gitProgress', (ev) => { const f = gitWaiters.get(ev.id); if (f) f(ev); });
+  const id = 'g' + Math.random().toString(36).slice(2, 10);
+  if (onProgress) gitWaiters.set(id, (ev) => onProgress({ phase: String(ev.phase || '').replace(/^remote:\s*/, ''), loaded: ev.done, total: ev.total }));
+  const stop = () => { plugin.gitCancel({ id }).catch(() => {}); };
+  if (signal) { if (signal.aborted) stop(); signal.addEventListener('abort', stop); }
+  try { return await plugin.gitNative({ op, id, uri: treeOf(uri), path: baseOf(uri), args }); }
+  finally { gitWaiters.delete(id); if (signal) signal.removeEventListener('abort', stop); }
+}
+/** Keeps the app running (with a notification) while the agent works, so Android does not stop it when the screen turns off. */
+export const Work = {
+  async start(text) { if (plugin) { try { await plugin.workStart({ text }); } catch (e) { /* optional */ } } },
+  async stop() { if (plugin) { try { await plugin.workStop(); } catch (e) { /* optional */ } } },
+};
+
 /** "All files access": lets the app use normal file paths, which is much faster than Android's folder access. */
 export const AllFiles = {
   async status() { if (plugin) { try { return await plugin.allFilesStatus(); } catch (e) { return { supported: false, granted: false }; } } return { supported: false, granted: false, web: true }; },

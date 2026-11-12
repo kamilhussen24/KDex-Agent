@@ -236,3 +236,10 @@ Settings > Terminal (Termux) lets the agent run shell commands (`run_command`) i
 
 ### v1.21.2
 - Fetch icon is now a cloud with a down arrow, in the same weight and size as Pull and Push.
+
+### v1.22.0 – background work, native Git, safety and viewing
+- **Background work:** while the agent works, a foreground service with a notification and a wake lock keeps the app running when the screen turns off. Android 13+ asks for the notification permission once.
+- **Native Git (JGit):** status, commit, log, fetch, pull, push and full clones run in the JGit library on the phone when direct file access is on. Shallow clones, branches, checkout and merge still use the JavaScript Git. If native Git is unavailable the app falls back to JavaScript Git automatically. To build without JGit set the repository variable `KDEX_JGIT` to `0`. JGit needs Android 8 (minSdk 26).
+- **Diagnostics log:** Settings > Help > Diagnostics log lists errors and failed Git actions. Tokens and keys are masked; Copy log is safe to share.
+- **Secret scan:** before a commit, selected files are scanned for keys and tokens. You can leave the flagged files out or commit anyway. Values are never shown.
+- **Syntax colours and file viewer:** code blocks in chat are coloured, and the Files viewer shows line numbers and colours, with Copy.

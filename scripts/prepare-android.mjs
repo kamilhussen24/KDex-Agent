@@ -18,6 +18,10 @@ const write = (p, t) => fs.writeFileSync(p, t);
 // 1. native plugin + MainActivity
 fs.mkdirSync(javaDir, { recursive: true });
 fs.copyFileSync(path.join(root, 'native/KdexNativePlugin.java'), path.join(javaDir, 'KdexNativePlugin.java'));
+fs.copyFileSync(path.join(root, 'native/KdexWorkService.java'), path.join(javaDir, 'KdexWorkService.java'));
+// Fast native Git (JGit). Set KDEX_JGIT=0 to build without it; the app then uses its JavaScript Git.
+const useJgit = process.env.KDEX_JGIT !== '0';
+if (useJgit) fs.copyFileSync(path.join(root, 'native/KdexGit.java'), path.join(javaDir, 'KdexGit.java'));
 write(path.join(javaDir, 'MainActivity.java'),
 `package com.kdex.agent;
 
@@ -63,6 +67,11 @@ if (!m.includes('com.termux.permission.RUN_COMMAND')) {
 if (!m.includes('MANAGE_EXTERNAL_STORAGE')) {
   m = m.replace('<application', '<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <application');
 }
+// Keep working with the screen off: foreground service (notification) + wake lock
+for (const perm of ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_DATA_SYNC', 'POST_NOTIFICATIONS', 'WAKE_LOCK']) {
+  if (!m.includes('android.permission.' + perm + '"')) m = m.replace('<application', '<uses-permission android:name="android.permission.' + perm + '" />\n    <application');
+}
+if (!m.includes('KdexWorkService')) m = m.replace('</application>', '    <service android:name=".KdexWorkService" android:exported="false" android:foregroundServiceType="dataSync" />\n    </application>');
 write(mf, m);
 
 // 5. gradle: version + optional release signing
@@ -85,6 +94,16 @@ if (process.env.KDEX_KEYSTORE) {
   }
   if (!g.includes('signingConfig signingConfigs.release')) { console.error('Could not patch release signing into app/build.gradle'); process.exit(1); }
 }
+if (useJgit && !g.includes('org.eclipse.jgit')) {
+  g = g.replace(/dependencies\s*\{/, "dependencies {\n    implementation 'org.eclipse.jgit:org.eclipse.jgit:5.13.3.202401111512-r'");
+  g = g.replace(/android\s*\{/, "android {\n    packaging {\n        resources {\n            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/LICENSE.txt', 'META-INF/NOTICE', 'META-INF/NOTICE.txt', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'plugin.properties', 'about.html']\n        }\n    }");
+}
 write(gf, g);
+// JGit needs java.nio.file and java.time: Android 8.0 (API 26) or newer
+if (useJgit) {
+  const vf = path.join(android, 'variables.gradle');
+  if (fs.existsSync(vf)) write(vf, read(vf).replace(/minSdkVersion\s*=\s*\d+/, 'minSdkVersion = 26'));
+}
 
+console.log(`JGit ${useJgit ? 'on' : 'off'}`);
 console.log(`Prepared Android project: version ${versionName} (${versionCode}), ${splashCount} splash files, signing ${process.env.KDEX_KEYSTORE ? 'on' : 'off'}`);
