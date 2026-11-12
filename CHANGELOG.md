@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.44.2]
+
+### Fixed
+- Tapping a chat row while its ⋮ menu is open now only closes the menu on touch screens; it no longer also opens the chat underneath.
+
 ## [1.44.1]
 
 ### Fixed

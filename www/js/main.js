@@ -325,8 +325,11 @@ function openRowMenu(btn, id) {
   const c = S.chats.find((x) => x.id === id); if (!c) return;
   // A transparent layer under the menu: the first tap outside only closes the menu and does nothing else.
   const sc = document.createElement('div'); sc.id = 'rowScrim'; sc.className = 'rowscrim';
+  // Close on click (not pointerdown): the scrim must still be under the finger when the
+  // synthesized click arrives, otherwise that click lands on the chat row underneath.
   const away = (e) => { e.preventDefault(); e.stopPropagation(); closeRowMenu(); };
-  sc.addEventListener('pointerdown', away); sc.addEventListener('click', away); sc.addEventListener('contextmenu', away);
+  sc.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); });
+  sc.addEventListener('click', away); sc.addEventListener('contextmenu', away);
   document.body.appendChild(sc);
   const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
   m.innerHTML = '<button data-a="pin">' + ICON('pin') + '<span>' + (c.pinned ? 'Unpin' : 'Pin') + '</span></button><button data-a="rename">' + ICON('edit') + '<span>Rename</span></button><button data-a="del" class="danger">' + ICON('trash') + '<span>Delete</span></button>';
