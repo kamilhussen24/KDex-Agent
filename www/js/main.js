@@ -7,15 +7,17 @@ import { highlight, langOf } from './highlight.js';
 import { diffHtml } from './diffview.js';
 import { BINARY_EXT } from './tools.js';
 import { PRESETS, QUICK_FILL, listModels, popularModels, likelySeesImages } from './providers.js';
-import { getTermuxPath, setTermuxPath, hasCustomTermuxPath } from './termux.js';
+import { getTermuxPath, setTermuxPath, hasCustomTermuxPath, runTermux, isRiskyCommand } from './termux.js';
+import * as CI from './ci.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
 import * as G from './git.js';
-import { isSecretPath, isEnvLike, maskEnv, protectionOn } from './secrets.js';
+import { isSecretPath, isEnvLike, maskEnv, protectionOn, scrub } from './secrets.js';
 import { SUPPORT_EMAIL, APP_VERSION } from './config.js';
 import { checkUpdate, isNewer, REPO_URL } from './update.js';
 import { officeText, isOffice } from './docs.js';
 import { prepareImage } from './image.js';
+import { isHtmlName, bundleFromFolder, bundleText } from './preview.js';
 
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
@@ -155,7 +157,7 @@ function currentModelId() { return $('#modelSelect').value || (S.models[0] && S.
 // ------------------------------------------------------------ boot
 async function boot() {
   window.__stage = 'boot'; D.install(); fitViewport();
-  S.settings = await A.getSettings(); applyTheme();
+  S.settings = await A.getSettings(); applyTheme(); CI.onBuild((w) => drawCi(w));
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
   window.__stage = 'settings-ok';
   S.providers = await A.getProviders(); S.models = await A.getModels(); S.folders = await A.getFolders();
@@ -318,9 +320,28 @@ function drawChatList() {
     ? (pinned.length ? '<div class="chat-head">Pinned</div>' + pinned.map(row).join('') + (rest.length ? '<div class="chat-head">Recent</div>' : '') : '') + rest.map(row).join('')
     : '<div class="note">' + (q ? 'No chats match' : 'No chats yet') + '</div>';
 }
+let lpBlockUntil = 0;
+/** Press and hold a chat row to open the same menu as the three dots. Moving the finger (scrolling) cancels it. */
+function chatLongPress() {
+  const list = $('#chatList'); let t = null, row = null, x0 = 0, y0 = 0;
+  const cancel = () => { clearTimeout(t); t = null; if (row) { row.classList.remove('pressing'); row = null; } };
+  list.addEventListener('pointerdown', (e) => {
+    if (e.button > 0 || e.target.closest('[data-menu]')) return;
+    const it = e.target.closest('.chat-item[data-id]'); if (!it) return;
+    cancel(); row = it; x0 = e.clientX; y0 = e.clientY; it.classList.add('pressing');
+    t = setTimeout(() => {
+      const r = row; if (!r) return; const pt = { x: x0, y: y0 }; cancel(); lpBlockUntil = Date.now() + 700;
+      try { if (navigator.vibrate) navigator.vibrate(12); } catch (err) { /* not supported */ }
+      openRowMenu(r, r.dataset.id, pt);
+    }, 480);
+  });
+  list.addEventListener('pointermove', (e) => { if (t && (Math.abs(e.clientX - x0) > 8 || Math.abs(e.clientY - y0) > 8)) cancel(); });
+  ['pointerup', 'pointercancel', 'pointerleave', 'scroll'].forEach((n) => list.addEventListener(n, cancel, true));
+  list.addEventListener('contextmenu', (e) => { if (e.target.closest('.chat-item')) e.preventDefault(); });
+}
 function closeRowMenu() { const m = $('#rowMenu'); if (m) m.remove(); const c = $('#rowScrim'); if (c) c.remove(); }
 /** Small menu next to a chat row: Pin, Rename, Delete. */
-function openRowMenu(btn, id) {
+function openRowMenu(btn, id, pt) {
   closeRowMenu();
   const c = S.chats.find((x) => x.id === id); if (!c) return;
   // A transparent layer under the menu: the first tap outside only closes the menu and does nothing else.
@@ -335,8 +356,13 @@ function openRowMenu(btn, id) {
   m.innerHTML = '<button data-a="pin">' + ICON('pin') + '<span>' + (c.pinned ? 'Unpin' : 'Pin') + '</span></button><button data-a="rename">' + ICON('edit') + '<span>Rename</span></button><button data-a="del" class="danger">' + ICON('trash') + '<span>Delete</span></button>';
   document.body.appendChild(m);
   const r = btn.getBoundingClientRect(); const mh = m.offsetHeight, mw = m.offsetWidth;
-  m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw)) + 'px';
-  m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, r.bottom + 4)) + 'px';
+  if (pt) { // opened by a long press: appear next to the finger
+    m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, pt.x - mw / 2)) + 'px';
+    m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, pt.y + 12 > window.innerHeight - mh - 8 ? pt.y - mh - 12 : pt.y + 12)) + 'px';
+  } else {
+    m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw)) + 'px';
+    m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, r.bottom + 4)) + 'px';
+  }
   m.onclick = async (e) => {
     const b = e.target.closest('[data-a]'); if (!b) return; closeRowMenu();
     const row = await db.get('chats', id); if (!row) return;
@@ -421,7 +447,7 @@ function drawCtx() {
   $('#chipFolderName').textContent = S.folder ? S.folder.name : 'Add folder';
   $$('#ctxBar .nf').forEach((b) => b.classList.toggle('hidden', !S.folder));
   if (S.folder) { updateChangesChip(); updateGitChip(); }
-  updateTermChip();
+  updateTermChip(); drawCi(CI.getBuild());
 }
 async function updateGitChip() {
   if (!S.folder) return;
@@ -480,7 +506,7 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file', project_map: 'folder', project_checks: 'list', check_tools: 'terminal', github_runs: 'branch', github_run_log: 'branch', github_issues: 'branch', calculate: 'list', convert_units: 'list', remember: 'file', clipboard_read: 'file', clipboard_write: 'file', set_alarm: 'list', set_timer: 'list', generate_image: 'file' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file', project_map: 'folder', project_checks: 'list', check_tools: 'terminal', github_runs: 'branch', github_run_log: 'branch', github_issues: 'branch', calculate: 'list', convert_units: 'list', remember: 'file', clipboard_read: 'file', clipboard_write: 'file', set_alarm: 'list', set_timer: 'list', generate_image: 'file', pre_push_check: 'list', bump_version: 'edit', release: 'up', release_info: 'list', review_changes: 'search', report_findings: 'list' };
 function planCard(m) {
   const done = m.steps.filter((x) => x.status === 'done').length;
   return '<div class="tool plan"><div class="th">' + ICON('list') + '<span class="nm">Plan</span><span class="pa">' + done + ' of ' + m.steps.length + ' done</span></div><div class="steps">' +
@@ -504,21 +530,31 @@ function webCard(m) {
   }
   return h + '</div>';
 }
+function findingsCard(m) {
+  const f = m.findings || { items: [], summary: '' };
+  let h = '<div class="tool rvcard"><div class="th">' + ICON('search') + '<span class="nm">Review</span><span class="pa">' + esc(m.args || '') + '</span></div>';
+  if (!f.items.length) h += '<div class="rvok">' + ICON('check') + '<span>No problems found</span></div>';
+  else h += f.items.map((x, i) => '<div class="rvrow"><span class="rvic sv-' + x.severity + '">' + ICON(x.severity === 'risk' ? 'warn' : x.severity === 'leftover' ? 'bug' : 'info') + '</span><div class="rvtx"><div class="rvt">' + esc(x.title) + '</div>' + (x.path ? '<div class="rvp">' + esc(x.path) + (x.line ? ':' + x.line : '') + '</div>' : '') + '</div><button class="btn sm" data-tool="fixfind" data-id="' + m.id + '" data-i="' + i + '"><span class="lbl">Fix</span></button></div>').join('');
+  if (f.summary) h += '<div class="rvsum">' + esc(f.summary) + '</div>';
+  return h + '</div>';
+}
 function toolCard(m) {
   if (m.name === 'update_plan' && m.steps) return planCard(m);
+  if (m.name === 'report_findings' && m.findings) return findingsCard(m);
   if (m.name === 'web_fetch') return webCard(m);
   if (m.name === 'make_file' && m.file) {
     return '<div class="tool"><div class="th">' + ICON('file') + '<span class="nm">' + esc(m.file.name) + '</span><span class="pa">' + esc(fmtBytes(m.file.size)) + '</span></div>' +
       '<div class="tf"><span class="lbl" style="flex:1">Ready</span><button class="btn sm" data-tool="copyfile" data-id="' + m.id + '">' + ICON('copy') + '<span class="lbl">Copy</span></button>' +
-      '<button class="btn primary sm" data-tool="getfile" data-id="' + m.id + '">' + ICON('down') + '<span class="lbl">Download</span></button></div></div>';
+      (isHtmlName(m.file && m.file.name) ? '<button class="btn sm iconly" data-tool="prevfile" data-id="' + m.id + '" aria-label="Preview">' + ICON('eye') + '</button>' : '') + '<button class="btn primary sm" data-tool="getfile" data-id="' + m.id + '">' + ICON('down') + '<span class="lbl">Download</span></button></div></div>';
   }
   const st = m.status || 'running';
   let h = '<div class="tool"><div class="th">' + ICON(TOOL_ICON[m.name] || 'file') + '<span class="nm">' + esc(m.name) + '</span><span class="pa">' + esc(m.args || '') + '</span><span class="st ' + st + '">' + esc(st === 'running' ? 'working' : st) + '</span></div>';
   if (m.plan) {
     h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') +
       (m.plan.more ? '<span class="dl c">... ' + m.plan.more + ' more lines</span>' : '') + '</div>';
-    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal' || m.plan.path === 'device' || m.plan.path === 'image') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
-    if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : m.plan.web ? 'Read' : m.plan.path === 'image' ? 'Create' : m.plan.path === 'device' ? 'Allow' : 'Apply') + '</span></button>' +
+    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal' || m.plan.path === 'device' || m.plan.path === 'image' || m.plan.path === 'release' || m.plan.path === 'version') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
+    if (st === 'pending' && m.plan.warn) h += '</div><div class="tf warnrow"><button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Cancel</span></button><span style="flex:1"></span><button class="btn sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">Push anyway</span></button><button class="btn primary sm" data-tool="fix" data-id="' + m.id + '"><span class="lbl">Fix it</span></button>';
+    else if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : m.plan.web ? 'Read' : m.plan.path === 'image' ? 'Create' : m.plan.path === 'device' ? 'Allow' : m.plan.path === 'release' ? 'Release' : 'Apply') + '</span></button>' +
       ((m.plan.path === 'terminal' || m.plan.web) && m.plan.allowKeys && m.plan.allowKeys.length ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.map((k) => k.replace(/^web:/, '')).join(', ')) + ' in this chat</button>' : '');
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
     h += '</div>';
@@ -595,7 +631,7 @@ async function send(regenerate) {
   const ui = {
     onUser: (m) => renderMsg(m), onAssistant: (m) => renderMsg(m), onDelta: (m) => { netLine(''); renderMsg(m); },
     onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); },
-    requestSecret: (info, signal) => askSecret(info, signal),
+    requestSecret: (info, signal) => askSecret(info, signal), watchBuild: (folder, sha, label) => { CI.watchBuild(folder, sha, label); },
     onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
       const first = !pendingCount(); S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
@@ -615,6 +651,30 @@ async function send(regenerate) {
     m.id = await db.put('messages', m); renderMsg(m);
   }
   Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); updateChangesChip(); loadChats(); drawRing(); showTurnUndo(t0);
+}
+/** Puts a ready-made request in the chat and sends it (used by Fix buttons). */
+async function quickSend(text) {
+  if (S.running) { toast('Wait for the current task to finish'); return; }
+  if (!S.models.length) { noModelNotice(); return; }
+  const input = $('#input'); input.value = text; autoGrow(); await send();
+}
+/** Build status bar above the message box: shows the GitHub build of the last push and a Fix it button when it fails. */
+async function drawCi(w) {
+  const old = $('#ciBar'); if (old) old.remove();
+  if (!w || !S.folder || S.folder.id !== w.folderId || w.phase === 'off' && !w.msg) return;
+  const tries = await CI.fixTries(w.folderId);
+  const el = document.createElement('div'); el.id = 'ciBar'; el.className = 'cibar ' + w.phase;
+  const busy = w.phase === 'waiting' || w.phase === 'running';
+  const ic = busy ? '<span class="spin"></span>' : w.phase === 'passed' ? '<span class="ciic ok">' + ICON('check') + '</span>' : '<span class="ciic bad">' + ICON(w.phase === 'failed' ? 'warn' : 'info') + '</span>';
+  el.innerHTML = ic + '<span class="grow">' + esc(CI.describe(w, tries)) + '</span>' +
+    (w.phase === 'failed' && tries < CI.MAX_FIX_TRIES ? '<button class="btn primary sm" data-a="fix"><span class="lbl">Fix it</span></button>' : '') +
+    (!busy ? '<button class="btn sm" data-a="x" aria-label="Dismiss"><span class="lbl">Close</span></button>' : '');
+  $('#approveBar').before(el);
+  const fx = $('[data-a=fix]', el); if (fx) fx.onclick = async () => {
+    const n = await CI.addFixTry(w.folderId); CI.stopWatch();
+    await quickSend('The GitHub build for my last push failed' + (w.run ? ' (run #' + w.run.id + ')' : '') + '. Read its log with github_run_log, find the cause, fix it with the smallest edits, run pre_push_check, and commit. Do not push without asking me. This is fix try ' + n + ' of ' + CI.MAX_FIX_TRIES + '.');
+  };
+  const cx = $('[data-a=x]', el); if (cx) cx.onclick = () => CI.stopWatch();
 }
 /** After a task that changed two or more files: one tap to undo the whole task, or review the list. */
 async function showTurnUndo(since) {
@@ -921,14 +981,48 @@ async function openByPath() {
   setTimeout(() => inp.focus(), 150);
 }
 
+// ------------------------------------------------------------ HTML preview
+const pvState = { name: '', load: null, text: '' };
+function closePreview() { const o = $('#pv'); if (o) o.remove(); pvState.load = null; }
+/** Full-screen preview of a page in a closed box. load() returns { html, notes }; text is the source used for "Save a copy". */
+async function openPreview(name, first, text) { return showPreview(name, async () => first, text); }
+async function showPreview(name, load, text) {
+  closePreview();
+  const o = document.createElement('div'); o.id = 'pv'; o.className = 'pv';
+  o.innerHTML = '<div class="pv-bar"><button class="icon-btn" id="pvX" aria-label="Close preview">' + ICON('x') + '</button><div class="pv-name">' + esc(name) + '</div><button class="icon-btn" id="pvR" aria-label="Reload">' + ICON('refresh') + '</button><button class="icon-btn" id="pvS" aria-label="Save a copy">' + ICON('down') + '</button></div>' +
+    '<div class="pv-body"><div class="pv-load">Loading...</div></div><div class="pv-foot" id="pvF"></div>';
+  document.body.appendChild(o); pvState.name = name; pvState.load = load; pvState.text = text || '';
+  $('#pvX').onclick = closePreview; $('#pvR').onclick = () => pvRender(); $('#pvS').onclick = async () => { if (pvState.text) await saveOut(pvState.name.split('/').pop(), pvState.text); };
+  await pvRender();
+}
+async function pvRender() {
+  const o = $('#pv'); if (!o || !pvState.load) return;
+  const body = $('.pv-body', o);
+  try {
+    const r = await pvState.load(); if (!$('#pv')) return;
+    body.innerHTML = ''; const fr = document.createElement('iframe');
+    fr.className = 'pv-frame'; fr.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals'); fr.setAttribute('title', 'Page preview'); fr.setAttribute('referrerpolicy', 'no-referrer');
+    fr.srcdoc = r.html; body.appendChild(fr);
+    $('#pvF').innerHTML = '<div>The page runs in a closed box inside the app. Files and pictures on the web do not load.</div>' + (r.notes || []).map((n) => '<div class="pv-note">' + esc(n) + '</div>').join('');
+  } catch (e) { body.innerHTML = '<div class="err" style="margin:16px">' + esc(e.message || 'Could not open the preview.') + '</div>'; }
+}
+/** Preview a project file: reads the page and the local files it uses from the folder. */
+async function previewFile(p) {
+  if (!S.folder) return;
+  const folder = S.folder; let src = '';
+  try { const t = await fs.readText(folder.uri, p, 1500000); src = t.text || ''; } catch (e) { /* the loader reports it */ }
+  await showPreview(p.split('/').pop(), () => bundleFromFolder(folder, p), src);
+}
+
 async function openFiles(path = '') {
   if (!S.folder) return;
   const body = sheet(S.folder.name + (path ? ' / ' + path : ''), { back: path ? () => openFiles(path.split('/').slice(0, -1).join('/')) : null });
   body.innerHTML = '<div class="note">Loading...</div>';
   try {
     const es = (await fs.list(S.folder.uri, path)).sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name));
-    body.innerHTML = es.length ? es.map((e) => '<div class="row-item" data-p="' + esc(e.path) + '" data-d="' + (e.isDir ? 1 : 0) + '">' + ICON(e.isDir ? 'folder' : 'file') + '<div class="grow"><div class="t">' + esc(e.name) + '</div>' + (e.isDir ? '' : '<div class="s">' + fmtBytes(e.size) + '</div>') + '</div></div>').join('') : '<div class="note">This folder is empty</div>';
-    $$('[data-p]', body).forEach((r) => r.onclick = async () => {
+    body.innerHTML = es.length ? es.map((e) => '<div class="row-item" data-p="' + esc(e.path) + '" data-d="' + (e.isDir ? 1 : 0) + '">' + ICON(e.isDir ? 'folder' : 'file') + '<div class="grow"><div class="t">' + esc(e.name) + '</div>' + (e.isDir ? '' : '<div class="s">' + fmtBytes(e.size) + '</div>') + '</div>' + (!e.isDir && isHtmlName(e.name) ? '<button class="icon-btn" data-pv="' + esc(e.path) + '" aria-label="Preview ' + esc(e.name) + '">' + ICON('eye') + '</button>' : '') + '</div>').join('') : '<div class="note">This folder is empty</div>';
+    $$('[data-p]', body).forEach((r) => r.onclick = async (ev) => {
+      const pv = ev.target.closest('[data-pv]'); if (pv) { ev.stopPropagation(); previewFile(pv.dataset.pv); return; }
       if (r.dataset.d === '1') return openFiles(r.dataset.p);
       const p = r.dataset.p; const b2 = sheet(p, { back: () => openFiles(path) });
       openFileView(p, b2);
@@ -962,10 +1056,11 @@ async function openFileView(p, body) {
     const n = text.replace(/\n$/, '').split('\n').length;
     const gut = Array.from({ length: n }, (_, k) => k + 1).join('\n');
     const lang = langOf(p);
-    body.innerHTML = '<div class="fv-bar"><span class="fv-meta">' + fmtBytes(t.size != null ? t.size : text.length) + ' · ' + n + ' line' + (n === 1 ? '' : 's') + (lang ? ' · ' + esc(lang) : '') + '</span><button id="fvCopy" class="mini" type="button"><span class="lbl">Copy</span></button></div>' +
+    body.innerHTML = '<div class="fv-bar"><span class="fv-meta">' + fmtBytes(t.size != null ? t.size : text.length) + ' · ' + n + ' line' + (n === 1 ? '' : 's') + (lang ? ' · ' + esc(lang) : '') + '</span>' + (isHtmlName(p) && !hide ? '<button id="fvPrev" class="mini" type="button">' + ICON('eye') + '<span class="lbl">Preview</span></button>' : '') + '<button id="fvCopy" class="mini" type="button"><span class="lbl">Copy</span></button></div>' +
       (hide ? '<div class="note" style="text-align:left">Protected file. Its values are hidden here and from the agent.</div>' : '') +
       '<div class="fv"><pre class="gut" aria-hidden="true">' + gut + '</pre><pre class="src"><code>' + (hide ? esc(text) : highlight(text, p)) + '</code></pre></div>' +
       (t.truncated || t.size > 200000 ? '<div class="note">Showing the first ' + fmtBytes(Math.min(200000, t.size)) + ' of ' + fmtBytes(t.size) + '.</div>' : '');
+    if ($('#fvPrev')) $('#fvPrev').onclick = () => previewFile(p);
     $('#fvCopy').onclick = async () => { const ok = await copyText(text); $('#fvCopy').firstElementChild.textContent = ok ? 'Copied' : 'Failed'; setTimeout(() => { const b = $('#fvCopy'); if (b) b.firstElementChild.textContent = 'Copy'; }, 1400); };
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
@@ -1155,12 +1250,48 @@ async function openTerminal() {
     body.innerHTML = '<p class="note" style="text-align:left;margin-top:0">Let the agent run commands in Termux, inside this project, like on a computer. Every command asks for your approval first.</p>' +
       '<div class="field"><span>Terminal for the agent</span>' + seg(S.settings.termux ? '1' : '0') + '</div>' +
       '<div class="field"><span>Use my Git token in Termux</span><div class="seg" id="tTok">' + [['1', 'Allow'], ['0', 'Never']].map(([k, l]) => '<button type="button" class="btn sm' + ((S.settings.gitTokenTermux !== false ? '1' : '0') === k ? ' on' : '') + '" data-v="' + k + '"><span class="lbl">' + l + '</span></button>').join('') +
-      '</div><small>Allow: when a git clone, pull, fetch or push runs in Termux, your saved token is lent to that one command. Never: Termux gets no token, so private repositories and pushes will fail. The token is never stored in Termux and the model never sees it.</small></div><div id="termBox"></div>';
+      '</div><small>Allow: when a git clone, pull, fetch or push runs in Termux, your saved token is lent to that one command. Never: Termux gets no token, so private repositories and pushes will fail. The token is never stored in Termux and the model never sees it.</small></div><div id="savedBox"></div><div id="termBox"></div>';
     $$('#tSeg .btn', body).forEach((b) => b.onclick = async () => { await save({ termux: b.dataset.v === '1' }); updateTermChip(); draw(); });
     $$('#tTok .btn', body).forEach((b) => b.onclick = async () => { await save({ gitTokenTermux: b.dataset.v === '1' }); draw(); });
-    drawTerm(draw);
+    drawTerm(draw); drawSaved();
   };
   draw();
+}
+// Saved commands: your own shortcuts for this project. Run asks first, then runs in Termux without using the model.
+const SC_KEY = (f) => 'saved-cmds:' + f.id;
+const SECRETISH = /(token|passw(or)?d|secret|api[_-]?key)\s*[=:]\s*\S{6,}|\b(sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{12,})\b/i;
+async function drawSaved() {
+  const box = $('#savedBox'); if (!box) return;
+  if (!S.folder) { box.innerHTML = '<div class="h3">Saved commands</div><div class="note">Open a project to save commands for it.</div>'; return; }
+  const list = await kvGet(SC_KEY(S.folder), []);
+  box.innerHTML = '<div class="h3">Saved commands</div><p class="note" style="text-align:left;margin-top:0">One-tap shortcuts for this project. Run asks you first and does not use the model or any tokens. Do not put keys or passwords in a command.</p>' +
+    (list.length ? list.map((c, i) => '<div class="scrow"><div class="sctx"><div class="scn">' + esc(c.name) + '</div><div class="scc">' + esc(c.cmd) + '</div></div><button class="btn sm" data-sc="run" data-i="' + i + '"><span class="lbl">Run</span></button><button class="icon-btn" data-sc="edit" data-i="' + i + '" aria-label="Edit">' + ICON('edit') + '</button><button class="icon-btn" data-sc="del" data-i="' + i + '" aria-label="Delete">' + ICON('trash') + '</button></div>').join('')
+      : '<div class="ghint">Nothing saved yet. Examples: <code>npm test</code>, <code>git status</code>, or a server command like <code>ssh user@host "pm2 restart all"</code> (ssh needs openssh and your key set up in Termux).</div>') +
+    '<div style="margin:10px 0"><button id="scAdd" class="btn sm">' + ICON('plus') + '<span class="lbl">Add command</span></button></div><div id="scOut"></div>';
+  const save = async (l) => { await kvSet(SC_KEY(S.folder), l); drawSaved(); };
+  const ask = async (name, cmd) => {
+    const n = await askText('Name', 'Short name, for example Run tests', name || ''); if (n === null || !n.trim()) return null;
+    const c = await askText('Command', 'The shell command to run', cmd || '', true); if (c === null || !c.trim()) return null;
+    if (SECRETISH.test(c)) { toast('A saved command must not contain a key or password. Use an environment variable instead.'); return null; }
+    return { name: n.trim().slice(0, 40), cmd: c.trim().slice(0, 500) };
+  };
+  $('#scAdd').onclick = async () => { const v = await ask(); if (v) { if (list.length >= 30) { toast('Up to 30 saved commands'); return; } list.push(v); await save(list); } };
+  $$('[data-sc]', box).forEach((b) => b.onclick = async () => {
+    const i = Number(b.dataset.i); const c = list[i]; if (!c) return;
+    if (b.dataset.sc === 'del') { if (await confirmBox('Delete "' + c.name + '"?', c.cmd, 'Delete')) { list.splice(i, 1); await save(list); } return; }
+    if (b.dataset.sc === 'edit') { const v = await ask(c.name, c.cmd); if (v) { list[i] = v; await save(list); } return; }
+    if (!S.settings.termux) { toast('Turn the terminal on first (switch at the top)'); return; }
+    const path = await getTermuxPath(S.folder);
+    if (!path) { toast('The Termux path of this project is not set'); return; }
+    const risky = isRiskyCommand(c.cmd);
+    if (!await confirmBox('Run "' + c.name + '"?', c.cmd + '\n\nRuns in Termux in ' + path + '.' + (risky ? '\nWarning: this command can delete data, change the system or send data out.' : ''), 'Run')) return;
+    const out = $('#scOut'); out.innerHTML = '<div class="busy"><span class="spin"></span>Running ' + esc(c.name) + '...</div>'; out.scrollIntoView({ block: 'nearest' });
+    try {
+      const r = await runTermux({ command: c.cmd }, S.folder);
+      const ok = /Command succeeded\./.test(r);
+      out.innerHTML = '<div class="' + (ok ? 'ok' : 'err') + '">' + (ok ? 'Finished' : 'Failed') + ': ' + esc(c.name) + '</div><pre class="out">' + esc((await scrub(r, S.folder)).slice(-3000)) + '</pre>' + (!ok && /^\s*(ssh|scp|rsync)\b/.test(c.cmd) ? '<div class="ghint">ssh needs openssh installed in Termux (pkg install openssh) and your key added there.</div>' : '');
+    } catch (e) { out.innerHTML = '<div class="err">' + esc(e.message || String(e)) + '</div>'; }
+  });
 }
 function updateTermChip() {
   const l = $('#chipTermLbl'); if (l) l.textContent = S.settings.termux ? 'Terminal on' : 'Terminal';
@@ -1361,7 +1492,7 @@ function renderGitTab(folder, st, head, body) {
         '<div class="gbar"><span class="h4">Changes (' + unstaged.length + ')</span><span>' + (unstaged.length ? '<button id="gStageAll" class="linkbtn">Stage all</button>' : '') + '<button id="gDiscardAll" class="linkbtn danger" style="margin-left:14px">Discard all</button></span></div>' +
         (unstaged.map((c) => row(c, false)).join('') || '<div class="note" style="text-align:left">Everything is staged.</div>');
       foot.classList.remove('hidden');
-      foot.innerHTML = '<textarea id="gMessage" rows="1" placeholder="Commit message"></textarea><div id="gHint" class="ghint"></div><div class="row"><button id="gSuggest" class="btn' + (S.models.length ? '' : ' dim') + '" aria-label="Suggest a message">' + ICON('bulb') + '<span class="lbl">Suggest</span></button><button id="gCommit" class="btn primary"><span class="lbl"></span></button></div>';
+      foot.innerHTML = '<button id="gReview" class="btn sm' + (S.models.length ? '' : ' dim') + '" type="button">' + ICON('search') + '<span class="lbl">Review my changes</span></button><div class="gbox"><textarea id="gMessage" rows="1" placeholder="Commit message"></textarea><button id="gSuggest" class="sugpill' + (S.models.length ? '' : ' dim') + '" type="button" aria-label="Suggest a message">' + ICON('sparkles') + '<span class="lbl">Suggest</span></button></div><div id="gHint" class="ghint"></div><div class="row"><button id="gCommit" class="btn primary" style="flex:1"><span class="lbl"></span></button></div>';
     }
   } else if (GS.tab === 'branches') {
     h += '<button id="gNew" class="btn" style="width:100%;margin:10px 0 8px">' + ICON('plus') + '<span class="lbl">New branch from here</span></button>' +
@@ -1439,6 +1570,7 @@ function bindGit(folder, st, body) {
   if ($('#gCommit')) {
     syncCommit(st);
     const ta = $('#gMessage'); ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 96) + 'px'; };
+    $('#gReview').onclick = () => { if (!S.models.length) { noModelNotice(); return; } closeSheet(); quickSend('Review my uncommitted changes before I commit: call review_changes, check what it spotted, then report_findings.'); };
     $('#gSuggest').onclick = async () => {
       const hint = (m) => { const h = $('#gHint'); if (!h) return; h.textContent = m; clearTimeout(h._t); h._t = setTimeout(() => { h.textContent = ''; }, 5000); };
       if (!S.models.length) { hint('Connect a model first: Settings > Add provider.'); return; }
@@ -1744,7 +1876,9 @@ function wire() {
   $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal; $('#chipAuto').onclick = toggleAuto;
   $('#sheetClose').onclick = closeSheet; sheetDrag(); touchSwipes();
   $('#chatSearch').oninput = drawChatList;
+  chatLongPress();
   $('#chatList').onclick = async (e) => {
+    if (Date.now() < lpBlockUntil) { e.stopPropagation(); e.preventDefault(); return; } // the click that ends a long press must not open the chat
     const d = e.target.closest('[data-menu]');
     if (d) { e.stopPropagation(); openRowMenu(d, d.dataset.menu); return; }
     const it = e.target.closest('[data-id]'); if (it) openChat(it.dataset.id);
@@ -1760,7 +1894,7 @@ function wire() {
   document.addEventListener('click', (e) => { if (!e.target.closest('#thinkMenu')) $('#thinkMenu').classList.add('hidden'); });
   $('#modelSelect').onchange = persistChat;
   $('#modelSelect').addEventListener('pointerdown', (e) => { if (!S.models.length) { e.preventDefault(); showSetup(false, 'Connect a model'); } });
-  $('#approveAll').onclick = () => [...S.approvals.keys()].forEach((id) => decide(id, 'apply'));
+  $('#approveAll').onclick = () => [...S.approvals.keys()].forEach((id) => { const tm = S.approvalTm.get(id); if (tm && tm.plan && tm.plan.warn) return; decide(id, 'apply'); }); // a push held back by the pre-push check is never approved in bulk
   $('#messages').addEventListener('click', async (e) => {
     const c = e.target.closest('[data-copy]');
     if (c) {
@@ -1772,13 +1906,21 @@ function wire() {
     if (uf) { const [mid, ix] = uf.dataset.ufile.split(':'); const um = await db.get('messages', Number(mid)); const f = um && um.fileData && um.fileData[Number(ix)]; if (f) await saveOut(f.name, f.text); return; }
     const t = e.target.closest('[data-tool]');
     if (t) {
+      if (t.dataset.tool === 'prevfile') {
+        const fm = await db.get('messages', Number(t.dataset.id)); if (!fm || !fm.file) return;
+        openPreview(fm.file.name, bundleText(fm.fileContent), fm.fileContent); return;
+      }
       if (t.dataset.tool === 'getfile' || t.dataset.tool === 'copyfile') {
         const fm = await db.get('messages', Number(t.dataset.id)); if (!fm || !fm.file) return;
         if (t.dataset.tool === 'copyfile') { flashCopied(t, await copyText(fm.fileContent)); return; }
         await saveOut(fm.file.name, fm.fileContent); return;
       }
       if (t.dataset.tool === 'undo') { await undoOne(Number(t.dataset.b)); return; }
-      decide(t.dataset.id, t.dataset.tool === 'apply' ? 'apply' : t.dataset.tool === 'always' ? 'always' : t.dataset.tool === 'allweb' ? 'allweb' : 'reject'); return;
+      if (t.dataset.tool === 'fixfind') {
+        const fm = await db.get('messages', Number(t.dataset.id)); const it = fm && fm.findings && fm.findings.items[Number(t.dataset.i)]; if (!it) return;
+        quickSend('Fix this review finding: ' + it.title + (it.path ? ' (' + it.path + (it.line ? ':' + it.line : '') + ')' : '') + '.' + (it.fix ? ' ' + it.fix : '') + ' Make the smallest change and tell me what you changed.'); return;
+      }
+      decide(t.dataset.id, t.dataset.tool === 'apply' ? 'apply' : t.dataset.tool === 'fix' ? 'fix' : t.dataset.tool === 'always' ? 'always' : t.dataset.tool === 'allweb' ? 'allweb' : 'reject'); return;
     }
     const a = e.target.closest('[data-act]');
     if (a) {
@@ -1790,6 +1932,7 @@ function wire() {
   $('#input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(false); } });
   if (App && App.addListener) Promise.resolve(App.addListener('backButton', () => {
     if (!$('#dialog').classList.contains('hidden')) { $('#dlgNo').click(); return; }
+    if ($('#pv')) { closePreview(); return; }
     if (!$('#setup').classList.contains('hidden') && $('#sCancel')) { $('#sCancel').click(); return; }
     if (!$('#sheet').classList.contains('hidden')) { const b = $('#sheetBack'); if (!b.classList.contains('hidden')) b.click(); else closeSheet(); return; }
     if ($('#drawer').classList.contains('open')) { closeDrawer(); return; }

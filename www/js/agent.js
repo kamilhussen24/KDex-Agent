@@ -6,6 +6,7 @@ import { stream, complete } from './providers.js';
 import { TOOLS, WRITE_TOOLS, BINARY_EXT, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo, resetGitCache } from './git.js';
+import * as G from './git.js';
 import { protectionOn, isSecretPath, scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
 import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand, CHECK_TOOLS_TOOL, checkTools } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
@@ -16,6 +17,7 @@ import { EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, EXTRA_FOLDER_NAMES, EXTRA_ANY_NAME
 import { GITHUB_TOOLS, GITHUB_NAMES, runGithub } from './github.js';
 import { DEVICE_TOOLS, DEVICE_NAMES, previewDevice, runDevice } from './device.js';
 import { IMAGE_TOOL, imageSetup, requestImage, targetPath, previewOf } from './imagegen.js';
+import { RELEASE_TOOLS, RELEASE_READS, checkProject, formatCheck, planBump, bumpPreview, planRelease, releasePreview, releaseInfo, reviewChanges, cleanFindings } from './release.js';
 
 const CONTEXT_FULL = /context.{0,25}(length|window|limit)|maximum context|too many tokens|prompt is too long|input is too long|input.{0,20}too long|reduce the length|exceeds? (the )?(model|token|context)|token limit|string too long/i;
 export const BUDGETS = { economy: 3000, balanced: 9000, full: 60000 };
@@ -113,6 +115,10 @@ const WORK_TOOLS_GUIDE =
   'github_runs, github_run_log and github_issues read the project\'s GitHub builds, issues and pull requests: when the user says a build failed or asks what is open, use them instead of guessing. ' +
   'SCREENSHOTS: when the user attaches a screenshot of the app or a page and asks for a change or a fix, find the code behind what is visible by searching for its visible text, labels and class names, compare the code with the picture, make the smallest fix, and say what you changed. Do not ask for the file name. ' +
   'If you notice you are repeating the same step or the same error, stop, say plainly what is blocking you and ask the user; the app also stops repeated loops itself.\n';
+const RELEASE_GUIDE =
+  'RELEASE AND REVIEW. bump_version raises the version in package.json, package-lock.json and the app version constant with exact edits: always use it, never sed or a broad replace on version numbers. pre_push_check finds the usual causes of a failed build before you push (invalid package.json, version mismatch, dependency ranges that disagree with package-lock.json); git_push runs it by itself. For "release", "publish a new version" or "ship it": call release_info, write short user-facing notes from the commits, then call release (one approval card). ' +
+  'REVIEW: when the user asks you to review their changes or check before a commit, call review_changes, confirm each spotted item in the code, look for real mistakes, then call report_findings once with only real findings (an empty list when all is fine). Do not edit files during a review; the user taps Fix on a finding when they want it fixed. ' +
+  'CI FIX: when the user says the build failed and asks to fix it, call github_run_log, find the cause, make the smallest fix, run pre_push_check, and commit. Do not push without asking; push always asks.\n';
 const TERMINAL_TOOLS_GUIDE =
   'check_tools tells which programs are installed in Termux and how much space is free: use it before a task that needs a program and when something is "not found". ' +
   'FILE CONVERSION recipes (install the package first if check_tools says it is missing): PDF to text: pdftotext -layout in.pdf out.txt (pkg install poppler). Shrink or convert pictures: convert in.png -resize 1280x out.jpg (pkg install imagemagick). CSV or JSON tables: python3 with the csv and json modules. Zip: the zip and unzip tools. Keep results in the project folder and tell the user the file name.\n';
@@ -203,7 +209,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, i
   } else {
     parts.push('NO FOLDER in this chat. You have no file or terminal tools here, but you can still do everyday work: answer, write, explain, review attached photos and text files (code, notes, CSV, JSON, Word .docx, Excel .xlsx, PowerPoint .pptx; PDF is not supported, so ask for the text or a photo of the page), and write code. When the user needs a finished file (a script, a document, a config, a small page), call make_file with its name and full content; the chat shows a Download button. Never paste a long file into the reply when make_file fits. For real project work (several files, running commands, Git), tell the user to tap the folder button above the chat and pick the project folder, then continue.');
   }
-  if (folder) parts.push(WORK_TOOLS_GUIDE + (termuxPath ? TERMINAL_TOOLS_GUIDE : '') + (imgOn ? IMAGE_GUIDE : ''));
+  if (folder) parts.push(WORK_TOOLS_GUIDE + RELEASE_GUIDE + (termuxPath ? TERMINAL_TOOLS_GUIDE : '') + (imgOn ? IMAGE_GUIDE : ''));
   parts.push(DAILY_GUIDE);
   if (folder && kdex) parts.push('PROJECT INSTRUCTIONS (from KDEX.md in the project folder, written by the user; follow them for this project, unless they ask for something unsafe):\n' + kdex);
   if (folder && pmap) parts.push('PROJECT MAP (made automatically, may be slightly out of date; use list_dir to confirm before relying on it):\n' + pmap);
@@ -425,7 +431,7 @@ export async function runTurn(ctx) {
   const termuxPath = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
   const imgOn = !!(folder && settings.imageProvider && settings.imageModel);
   const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
-  const tools = folder ? (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS) : base) : [PLAN_TOOL, FILE_TOOL, WEB_TOOL].concat(EXTRA_ANY_TOOLS, DEVICE_TOOLS);
+  const tools = folder ? (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version'))) : [PLAN_TOOL, FILE_TOOL, WEB_TOOL].concat(EXTRA_ANY_TOOLS, DEVICE_TOOLS);
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
@@ -544,6 +550,42 @@ export async function runTurn(ctx) {
           tm.content = await runExtra(call.name, call.args, folder); tm.status = 'done';
         } else if (GITHUB_NAMES.has(call.name)) {
           tm.content = await runGithub(call.name, call.args, folder, signal); tm.status = 'done';
+        } else if (call.name === 'report_findings') {
+          const fnd = cleanFindings(call.args);
+          tm.findings = fnd; tm.args = fnd.items.length ? fnd.items.length + ' finding' + (fnd.items.length === 1 ? '' : 's') : 'no problems';
+          tm.content = fnd.items.length ? 'The findings are shown to the user as a list with a Fix button on each. Do not repeat them; add one short sentence at most.' : 'The user sees "No problems found". Say so in one sentence and mention what you checked.'; tm.status = 'done';
+        } else if (RELEASE_READS.has(call.name)) {
+          if (!hasGit) throw new Error('This project is not a Git repository.');
+          tm.content = call.name === 'pre_push_check' ? formatCheck(await checkProject(folder)) : call.name === 'release_info' ? await releaseInfo(folder) : await reviewChanges(folder);
+          tm.status = 'done';
+        } else if (call.name === 'bump_version' || call.name === 'release') {
+          const isRel = call.name === 'release';
+          if (isRel && !hasGit) throw new Error('A release needs a Git repository.');
+          const plan = isRel ? await planRelease(folder, call.args || {}) : await planBump(folder, call.args || {});
+          tm.args = 'v' + plan.to;
+          tm.plan = { path: isRel ? 'release' : 'version', op: isRel ? 'release v' + plan.to : 'raise version to ' + plan.to, added: 0, removed: 0, diff: isRel ? releasePreview(plan) : bumpPreview(plan), more: 0, risky: isRel, auto: !isRel && !!chat.auto };
+          let decision = 'apply';
+          if (!tm.plan.auto) { tm.status = 'pending'; await db.put('messages', tm); ui.onTool(tm); decision = await ui.requestApproval(tm, signal); }
+          if (decision !== 'apply') { tm.status = 'rejected'; tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user did not allow this. Do not retry it; ask what they want instead.'; }
+          else {
+            const done = [];
+            for (const e of plan.edits) {
+              const bk = { chatId: chat.id, folderId: folder.id, path: e.path, existed: true, content: e.before, op: 'edit', at: Date.now(), undone: false };
+              bk.id = await db.put('backups', bk); tm.backupId = tm.backupId || bk.id;
+              await fs.writeText(folder.uri, e.path, e.after); done.push(e.path);
+            }
+            pruneBackups(chat.id).catch(() => {});
+            readSeen.clear();
+            if (!isRel) { tm.content = 'Version raised from ' + plan.from + ' to ' + plan.to + ' in ' + done.join(', ') + '. Nothing else changed.'; tm.status = 'applied'; }
+            else {
+              const cr = await G.commit(folder, 'Release v' + plan.to);
+              tm.content = 'Edited ' + done.join(', ') + '. Committed as ' + cr.oid.slice(0, 7) + ' "Release v' + plan.to + '".' + (cr.skipped && cr.skipped.length ? ' Left out secret files: ' + cr.skipped.join(', ') + '.' : '');
+              tm.status = 'applied'; await db.put('messages', tm); ui.onTool(tm);
+              await G.push(folder, { signal });
+              tm.content += ' Pushed ' + plan.branch + '. GitHub now builds and publishes v' + plan.to + '; the chat shows the build status.';
+              if (ui.watchBuild) ui.watchBuild(folder, cr.oid, 'v' + plan.to);
+            }
+          }
         } else if (call.name === 'check_tools') {
           if (!termuxPath) throw new Error('The terminal is off or its path is unknown, so programs cannot be checked. Ask the user to turn Terminal on in Settings.');
           tm.content = await checkTools(folder); tm.status = 'done';
@@ -677,8 +719,13 @@ export async function runTurn(ctx) {
           const lines = await previewGitAction(call.name, call.args || {}, folder);
           // Publishing code is always the user's call, even in Auto mode.
           const riskyGit = call.name === 'git_push';
+          let pushProblems = null;
+          if (call.name === 'git_push') {
+            const pc = await checkProject(folder).catch(() => null);
+            if (pc && pc.problems.length) { pushProblems = pc.problems; lines.push({ t: 'ctx', text: '' }, { t: 'del', text: 'The pre-push check found ' + pc.problems.length + ' problem(s):' }); pc.problems.slice(0, 6).forEach((p) => lines.push({ t: 'del', text: p.text })); }
+          }
           const readOnly = gitActionIsRead(call.name, call.args || {});
-          tm.plan = { path: 'git', op: call.name, added: 0, removed: 0, diff: lines, more: 0, risky: riskyGit, auto: readOnly || (!!chat.auto && !riskyGit) };
+          tm.plan = { path: 'git', op: call.name, added: 0, removed: 0, diff: lines, more: 0, risky: riskyGit, auto: readOnly || (!!chat.auto && !riskyGit), warn: !!pushProblems };
           let decision = 'apply';
           if (!(readOnly || (chat.auto && !riskyGit))) {
             tm.status = 'pending';
@@ -686,13 +733,17 @@ export async function runTurn(ctx) {
             ui.onTool(tm);
             decision = await ui.requestApproval(tm, signal);
           }
-          if (decision !== 'apply') {
+          if (decision === 'fix' && pushProblems) {
+            tm.status = 'rejected';
+            tm.content = 'The user chose "Fix it". Fix these problems with the smallest edits (use bump_version for version numbers, and for a package.json and package-lock.json mismatch run "npm install --package-lock-only" if the terminal is on), run pre_push_check, then ask before pushing again:\n' + pushProblems.map((p, i) => (i + 1) + '. ' + p.text).join('\n');
+          } else if (decision !== 'apply') {
             tm.status = 'rejected';
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this. Do not retry it; ask what they want instead.';
           } else {
             tm.content = await runGitAction(call.name, call.args || {}, folder, signal);
             readSeen.clear();
             tm.status = 'applied';
+            if (call.name === 'git_push' && ui.watchBuild) { const lg = await G.log(folder, 1).catch(() => []); if (lg[0]) ui.watchBuild(folder, lg[0].oid, ''); }
           }
         } else if (GIT_READS.has(call.name)) {
           tm.content = await runGitRead(call.name, call.args || {}, folder);

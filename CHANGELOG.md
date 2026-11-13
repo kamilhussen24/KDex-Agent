@@ -7,6 +7,29 @@ for its version.
 
 ## [Unreleased]
 
+## [1.47.0]
+
+### Added
+- HTML preview. Pages the agent creates in chat get an eye button next to Copy and Download, and `.html` files in the Files screen have one too (plus a Preview button in the file viewer). The page opens full screen in a closed box inside the app: scripts run, but it cannot reach the network, the app's data or your keys. Local CSS, scripts and pictures next to the page are loaded from the project folder. Reload and Save a copy are in the top bar.
+- Press and hold a chat in the drawer to open the same Pin, Rename and Delete menu next to your finger. The three-dot button still works. Moving your finger (scrolling) cancels it, and releasing does not open the chat.
+
+### Changed
+- Git sheet footer: Commit is now one full-width button. Suggest moved into the commit message box as a small sparkles pill.
+
+## [1.46.0]
+
+### Added
+- **Build status after a push:** a bar above the message box follows the GitHub Actions build of the commit you pushed (waiting, running, passed, failed). When it fails, **Fix it** makes the agent read the build log, fix the cause with small edits and commit. It asks before pushing again and stops after 3 tries in a row.
+- **Pre-push check:** before every push the app checks package.json (valid JSON, valid dependency versions), that the version is the same in package.json, package-lock.json and the app's version constant, that package-lock.json matches package.json (the usual reason for a failed `npm ci`), and that the changes hold no merge-conflict marks or keys. If something is wrong the push card shows it with **Fix it** and **Push anyway**. The agent can also run it on its own (`pre_push_check`).
+- **Safe version bump** (`bump_version`): raises the version in package.json, package-lock.json and APP_VERSION with exact, verified edits, so version numbers are never changed with a search-and-replace again.
+- **One-tap release** (`release`): raises the version, writes the changelog entry from the notes, runs the pre-push check, commits "Release vX.Y.Z" and pushes, after one approval card. It always asks, even in Auto mode. It reads your workflow file first and stops with a clear message when the project publishes from a tag.
+- **Saved commands** in the Terminal sheet: your own shortcuts per project. Run shows the command, asks first, runs it in Termux and shows the result, without using the model or tokens. Commands that contain a key or password are refused.
+- **Review my changes:** a button in the Git sheet (and `review_changes` / `report_findings` for the agent) lists risks, leftovers and notes in your uncommitted changes with file and line and a **Fix** button on each. When nothing is wrong it says "No problems found".
+
+### Fixed
+- package-lock.json had the wrong version inside it (1.5.1); the version bump corrected it.
+- "Allow all" no longer approves a push that the pre-push check held back.
+
 ## [1.45.1]
 
 ### Fixed

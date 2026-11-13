@@ -466,3 +466,50 @@ a.link{color:var(--ink);font-weight:600;text-decoration:none}
 .turnundo .grow{flex:1;min-width:0}
 .turnundo .btn{min-height:32px;flex:none;white-space:nowrap}
 .turnundo .btn .lbl{white-space:nowrap}
+
+/* v1.46: build bar, review list, saved commands */
+:root{--warn:#b7791f;--note:#2f6fdb}
+html[data-theme=dark]{--warn:#f0b04a;--note:#7aa7ff}
+.cibar{display:flex;align-items:center;gap:8px;margin:0 12px 6px;padding:6px 6px 6px 12px;min-height:44px;border:1px solid var(--line);border-radius:12px;background:var(--card);font-size:13px}
+.cibar .grow{flex:1;min-width:0}
+.cibar .spin{margin:0;flex:none}
+.cibar .btn{min-height:32px;flex:none;white-space:nowrap}
+.cibar .btn .lbl{white-space:nowrap}
+.cibar .ciic{display:inline-flex;flex:none}.cibar .ciic .ic{width:18px;height:18px}
+.cibar .ciic.ok{color:var(--ok)}.cibar .ciic.bad{color:var(--bad)}
+.rvcard .rvrow{display:flex;align-items:center;gap:10px;min-height:52px;padding:6px 12px;border-top:1px solid var(--line)}
+.rvcard .rvic{display:flex;align-items:center;justify-content:center;width:20px;flex:none}
+.rvcard .rvic .ic{width:18px;height:18px}
+.rvcard .rvic.sv-risk{color:var(--bad)}.rvcard .rvic.sv-leftover{color:var(--warn)}.rvcard .rvic.sv-note{color:var(--note)}
+.rvcard .rvtx{flex:1;min-width:0;line-height:1.35}
+.rvcard .rvt{font-size:14px;overflow-wrap:anywhere}
+.rvcard .rvp{font:12px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.rvcard .rvrow .btn{min-height:32px;flex:none}
+.rvcard .rvok{display:flex;align-items:center;gap:10px;min-height:48px;padding:6px 12px;border-top:1px solid var(--line);color:var(--ok)}
+.rvcard .rvok .ic{width:18px;height:18px}
+.rvcard .rvsum{padding:8px 12px 10px;border-top:1px solid var(--line);font-size:12px;color:var(--mut)}
+.tool .tf.warnrow{border-top:0;padding-top:0}
+.scrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+.scrow .sctx{flex:1;min-width:0;line-height:1.35}
+.scrow .scn{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.scrow .scc{font:12px ui-monospace,Menlo,monospace;color:var(--mut);overflow-wrap:anywhere}
+.scrow .btn{min-height:34px;flex:none}
+.sheet-foot #gReview{min-height:34px;margin-bottom:8px}
+
+/* v1.47 */
+.btn.iconly{padding:0 10px;min-width:36px}
+.chat-item.pressing{background:var(--bg2);transition:background .15s}
+.chat-item{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.sheet-foot .gbox{position:relative}
+.sheet-foot .gbox textarea{padding-right:92px}
+.sugpill{position:absolute;right:6px;top:6px;display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 10px;border:0;border-radius:999px;background:color-mix(in srgb,var(--b2) 14%,transparent);color:var(--b2);font-weight:600;font-size:13px;font-family:inherit;cursor:pointer}
+.sugpill .ic{width:15px;height:15px}
+.sugpill:disabled{opacity:.6}.sugpill.dim{opacity:.5}
+.pv{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column}
+.pv-bar{display:flex;align-items:center;gap:4px;padding:calc(var(--sat) + 6px) 8px 6px;border-bottom:1px solid var(--line)}
+.pv-name{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-body{flex:1;min-height:0;background:#fff;position:relative}
+.pv-frame{width:100%;height:100%;border:0;background:#fff;display:block}
+.pv-load{padding:24px;color:#666}
+.pv-foot{padding:8px 14px calc(var(--sab) + 8px);border-top:1px solid var(--line);font-size:12px;color:var(--mut);line-height:1.4}
+.pv-note{margin-top:2px}
