@@ -489,7 +489,7 @@ export async function runTurn(ctx) {
     if (signal.aborted) return;
     steps++;
     if (steps > Math.max(1, settings.maxSteps)) {
-      const note = { chatId: chat.id, role: 'assistant', text: 'I stopped after ' + settings.maxSteps + ' steps to keep costs under control. Say "continue" if you want me to go on.', model: rt.model.id, status: 'done', at: Date.now() };
+      const note = { chatId: chat.id, role: 'assistant', text: 'I stopped after ' + settings.maxSteps + ' steps to keep costs under control. Say "continue" if you want me to go on.', model: rt.model.id, status: 'done', cont: true, at: Date.now() };
       note.id = await db.put('messages', note);
       ui.onAssistant(note);
       return;
@@ -887,7 +887,7 @@ export async function runTurn(ctx) {
     }
     if (signal.aborted) return;
     if (stuck) {
-      const note = { chatId: chat.id, role: 'assistant', text: 'I stopped because I seem to be going in circles (' + stuck + '). Tell me what to try differently, or say "continue" if you want me to try again.', model: rt.model.id, status: 'done', at: Date.now() };
+      const note = { chatId: chat.id, role: 'assistant', text: 'I stopped because I seem to be going in circles (' + stuck + '). Tell me what to try differently, or say "continue" if you want me to try again.', model: rt.model.id, status: 'done', cont: true, at: Date.now() };
       note.id = await db.put('messages', note);
       ui.onAssistant(note);
       return;

@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.51.2]
+
+### Added
+- A Continue button appears under the agent's "I stopped" message (step limit reached, or going in circles). One tap sends "continue" so you no longer type it. It shows only under the newest message.
+
 ## [1.51.1]
 
 ### Fixed

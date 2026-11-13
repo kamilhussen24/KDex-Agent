@@ -448,7 +448,7 @@ async function openChat(id) {
   const box = $('#messages'); box.innerHTML = '';
   if (!msgs.length) renderEmpty();
   msgs.forEach((m) => renderMsg(m));
-  scrollEnd(true); closeDrawer(); drawChatList(); setRunning(S.running); updateApproveBar(); drawRing();
+  trimCont(); scrollEnd(true); closeDrawer(); drawChatList(); setRunning(S.running); updateApproveBar(); drawRing();
 }
 /** Hand a text file to the user: share sheet when available; on the phone otherwise save it into a folder they pick; in a browser a normal download. */
 async function saveOut(name, text) {
@@ -531,6 +531,7 @@ function renderMsg(m) {
       h += '<div class="acts"><button class="icon-btn" data-act="copy" aria-label="Copy">' + ICON('copy') + '</button><button class="icon-btn" data-act="regen" aria-label="Regenerate">' + ICON('refresh') + '</button><button class="icon-btn" data-act="report" aria-label="Report this reply">' + ICON('flag') + '</button></div>';
       if (m.tin || m.tout) h += '<div class="meta">' + fmtTok(m.tin) + ' in · ' + fmtTok(m.tout) + ' out</div>';
     }
+    if (!live && m.cont) h += '<div class="controw"><button class="btn primary sm" type="button" data-act="cont"><span class="lbl">Continue</span></button></div>';
     const open = el.querySelector('details.think'); const wasOpen = open && open.open;
     el.innerHTML = h;
     const nd = el.querySelector('details.think'); if (nd && wasOpen) nd.open = true;
@@ -723,7 +724,7 @@ async function send(regenerate) {
   if (!regenerate) { input.value = ''; autoGrow(); S.attach = []; drawChips(); if (text) { lastSent.text = text; lastSent.at = Date.now(); ghostGuard(text); } }
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
   const tu = $('#turnUndo'); if (tu) tu.remove();
-  const pd = $('#planDone'); if (pd) pd.remove(); input.placeholder = 'Message KDex Agent';
+  $$('.controw').forEach((x) => x.remove()); const pd = $('#planDone'); if (pd) pd.remove(); input.placeholder = 'Message KDex Agent';
   delete S.chat.fresh; await persistChat(); loadChats();
   const chat = S.chat; const folder = S.folder; const think = S.think; const planOn = !!chat.plan; let runOk = true; S.queue = [];
   const here = () => !!(S.chat && S.chat.id === chat.id); // false while the user looks at another chat: the task keeps running, the screen is not touched
@@ -838,6 +839,8 @@ function warnNoVision() {
 function autoGrow() { const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; }
 
 // ------------------------------------------------------------ thinking pill
+/** The Continue button belongs only to the newest message of a chat. */
+function trimCont() { const last = $('#messages').lastElementChild; $$('.controw').forEach((x) => { if (x.closest('.msg') !== last) x.remove(); }); }
 function drawPlan() {
   const on = !!(S.chat && S.chat.plan); const b = $('#planBtn'); if (!b) return;
   b.classList.toggle('on', on); const l = 'Plan mode: ' + (on ? 'on' : 'off'); b.setAttribute('aria-label', l); b.title = l;
@@ -2425,6 +2428,7 @@ function wire() {
     const a = e.target.closest('[data-act]');
     if (a) {
       if (a.dataset.act === 'regen') regenerate();
+      else if (a.dataset.act === 'cont') { $$('.controw').forEach((x) => x.remove()); if (!S.running) quickSend('continue'); }
       else if (a.dataset.act === 'report') reportReply(Number(a.closest('.msg').dataset.id));
       else { const el = a.closest('.msg'); const m = await db.get('messages', Number(el.dataset.id)); flashCopied(a, await copyText(m.text || '')); }
     }
