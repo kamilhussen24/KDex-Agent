@@ -3,6 +3,7 @@
 import { repoOf, api } from './github.js';
 import { getToken } from './git.js';
 import { kvGet, kvSet } from './db.js';
+import { fs } from './native.js';
 
 export const MAX_FIX_TRIES = 3;
 const POLL_MS = 15000;
@@ -22,8 +23,14 @@ export async function resetFixTries(folderId) { await kvSet(triesKey(folderId), 
 export function stopWatch() { if (state.timer) clearTimeout(state.timer); state.timer = null; state.watch = null; emit(); }
 
 /** Starts watching the build of one commit. A new push replaces the previous watch. */
+async function hasWorkflows(folder) {
+  try { return (await fs.list(folder.uri, '.github/workflows')).some((e) => /\.ya?ml$/i.test(e.name)); } catch (e) { return false; }
+}
+
 export async function watchBuild(folder, sha, label) {
   if (state.timer) clearTimeout(state.timer);
+  // No GitHub Actions workflow in the project: no build will ever start, so show no waiting bar.
+  if (!(await hasWorkflows(folder))) { stopWatch(); return; }
   const w = { folderId: folder.id, folderName: folder.name, sha, label: label || '', phase: 'waiting', run: null, started: Date.now(), msg: '' };
   state.watch = w; emit();
   let rp;

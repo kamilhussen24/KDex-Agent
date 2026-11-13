@@ -7,6 +7,17 @@ for its version.
 
 ## [Unreleased]
 
+## [1.50.0]
+
+### Changed
+- Tool cards show plain names instead of code names: "Read file", "Compare changes", "Commit", "Push to GitHub", "Open page" and so on, for all 48 tools. The line under a card uses the same names ("Push to GitHub · risky", "Runs in Termux").
+- A tool added later that has no name yet still looks fine ("git_stash" shows as "Git stash"). A test fails if a tool has no name.
+
+## [1.49.10]
+
+### Changed
+- After a push, the "Waiting for the build to start..." bar is shown only when the project has a GitHub Actions workflow (`.github/workflows`). Projects without one no longer show a bar that waits for a build that will never start.
+
 ## [1.49.9]
 
 ### Fixed

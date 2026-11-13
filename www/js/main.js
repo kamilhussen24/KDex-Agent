@@ -20,6 +20,7 @@ import { prepareImage } from './image.js';
 import { isHtmlName, bundleFromFolder, bundleText } from './preview.js';
 import { testServer, saveSecret, dropSecret, getSecret, remoteFolderOf, rememberServer, closeServer, remoteRead, remoteWrite, BIG_FILE } from './remote.js';
 import { scratchFolder, scratchFiles, scratchCount, scratchClear, scratchUsage, SCRATCH_CAP } from './scratch.js';
+import { toolLabel, opLabel } from './toollabels.js';
 
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
@@ -588,11 +589,11 @@ function toolCard(m) {
       (isHtmlName(m.file && m.file.name) ? '<button class="btn sm iconly" data-tool="prevfile" data-id="' + m.id + '" aria-label="Preview">' + ICON('eye') + '</button>' : '') + '<button class="btn primary sm" data-tool="getfile" data-id="' + m.id + '">' + ICON('down') + '<span class="lbl">Download</span></button></div></div>';
   }
   const st = m.status || 'running';
-  let h = '<div class="tool"><div class="th">' + ICON(TOOL_ICON[m.name] || 'file') + '<span class="nm">' + esc(m.name) + '</span><span class="pa">' + esc(m.args || '') + '</span><span class="st ' + st + '">' + esc(st === 'running' ? 'working' : st) + '</span></div>';
+  let h = '<div class="tool"><div class="th">' + ICON(TOOL_ICON[m.name] || 'file') + '<span class="nm">' + esc(toolLabel(m.name)) + '</span><span class="pa">' + esc(m.args || '') + '</span><span class="st ' + st + '">' + esc(st === 'running' ? 'working' : st) + '</span></div>';
   if (m.plan) {
     h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : l.t === 'warn' ? 'w' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') +
       (m.plan.more ? '<span class="dl c">... ' + m.plan.more + ' more lines</span>' : '') + '</div>';
-    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + (m.plan.outside && st === 'pending' ? ' · outside folder' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal' || m.plan.path === 'device' || m.plan.path === 'image' || m.plan.path === 'release' || m.plan.path === 'version') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
+    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(opLabel(m.plan.op)) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + (m.plan.outside && st === 'pending' ? ' · outside folder' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal' || m.plan.path === 'device' || m.plan.path === 'image' || m.plan.path === 'release' || m.plan.path === 'version') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
     if (st === 'pending' && m.plan.warn) h += '</div><div class="tf warnrow"><button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Cancel</span></button><span style="flex:1"></span><button class="btn sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">Push anyway</span></button><button class="btn primary sm" data-tool="fix" data-id="' + m.id + '"><span class="lbl">Fix it</span></button>';
     else if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : m.plan.web ? 'Read' : m.plan.path === 'image' ? 'Create' : m.plan.path === 'device' ? 'Allow' : m.plan.path === 'release' ? 'Release' : 'Apply') + '</span></button>' +
       ((m.plan.path === 'terminal' || m.plan.web) && m.plan.allowKeys && m.plan.allowKeys.length && !m.plan.risky && !m.plan.ask ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.map((k) => k.replace(/^web:/, '')).join(', ')) + ' in this chat</button>' : '');
