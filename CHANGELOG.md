@@ -7,6 +7,19 @@ for its version.
 
 ## [Unreleased]
 
+## [1.50.7]
+
+### Changed
+- File menus (Scratch and server files) always show the file name as a small title at the top, shortened in the middle when long.
+- The "Press Back again to exit" hint now uses the same card colours and border as the other toasts in light and dark themes.
+
+## [1.50.6]
+
+### Changed
+- The line that says a task is running in another chat now sits just above the message box, with the other status lines, instead of between the top bar and the folder chip.
+- The small name above a file's long-press menu now appears only when the row itself cuts the name, the same in Scratch and in server and project file lists. A name that fits in full no longer shows it twice.
+- Changing the folder of a chat whose task is running now asks first ("Changing the folder stops it"), and deleting such a chat says its running task stops too. Before, both stopped the task without saying so.
+
 ## [1.50.5]
 
 ### Changed

@@ -558,5 +558,6 @@ html[data-theme=dark]{--warn:#f0b04a;--note:#7aa7ff}
 .runstrip .rs-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .runstrip .linkbtn{flex:none}
 /* First Back press on the main screen: a short hint above the message box. */
-.exithint{position:fixed;left:50%;bottom:calc(var(--sab, 0px) + 112px);z-index:60;transform:translate(-50%,8px);opacity:0;pointer-events:none;padding:8px 14px;border-radius:12px;background:var(--fg);color:var(--bg);font-size:13px;transition:opacity .18s,transform .18s}
+.exithint{position:fixed;left:50%;bottom:calc(var(--sab, 0px) + 112px);z-index:60;transform:translate(-50%,8px);opacity:0;pointer-events:none;padding:9px 14px;border-radius:14px;background:var(--card);color:var(--fg);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.14);font-size:13px;transition:opacity .18s,transform .18s}
+html[data-theme=dark] .exithint{box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .exithint.show{opacity:1;transform:translate(-50%,0)}

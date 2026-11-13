@@ -408,7 +408,8 @@ function openRowMenu(btn, id, pt) {
       if (!v) return;
       row.title = v.slice(0, 80); await db.put('chats', row); if (S.chat && S.chat.id === id) S.chat.title = row.title; await loadChats();
     } else {
-      if (!await confirmBox('Delete chat?', 'This chat and its backups are removed from the phone.', 'Delete')) return;
+      const busyHere = S.running && S.runChat && S.runChat.id === id;
+      if (!await confirmBox('Delete chat?', 'This chat and its backups are removed from the phone.' + (busyHere ? ' Its running task stops too.' : ''), 'Delete')) return;
       if (S.running && S.runChat && S.runChat.id === id) { stopRun(); await waitIdle(); }
       await A.removeChat(id); await loadChats(); if (S.chat && S.chat.id === id) await newChat(null);
     }
@@ -986,7 +987,10 @@ async function applyFolder(f) {
     if (r === 1) { closeSheet(); await newChat(f); await persistChat(); loadChats(); return; }
     if (r !== 0) return;
   }
-  if (S.running && S.runChat && S.runChat.id === c.id) { stopRun(); await waitIdle(); }
+  if (S.running && S.runChat && S.runChat.id === c.id) {
+    if (await choiceBox('Change folder?', 'A task is running in this chat. Changing the folder stops it.', ['Change']) !== 0) return;
+    stopRun(); await waitIdle();
+  }
   S.folder = f; c.folderId = f ? f.id : null;
   c.allow = []; // "Always allow" belongs to the old folder
   if (had) {
@@ -1276,7 +1280,7 @@ function popMenu(anchor, items, pick, title) {
   sc.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); closeRowMenu(); });
   document.body.appendChild(sc);
   const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
-  const shortT = title ? midName(title, 24) : '';
+  const shortT = title ? (midName(title, 24) || String(title)) : ''; // small name above the menu, always
   m.innerHTML = (shortT ? '<div class="rmt" title="' + esc(title) + '">' + esc(shortT) + '</div>' : '') + items.map((i) => '<button data-a="' + i.a + '"' + (i.danger ? ' class="danger"' : '') + '>' + ICON(i.icon) + '<span>' + i.label + '</span></button>').join('');
   document.body.appendChild(m);
   markMenuRow(anchor.closest('.row-item'), anchor.closest('.row-item') && anchor.closest('.row-item').parentElement);
