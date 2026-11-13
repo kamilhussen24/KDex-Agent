@@ -120,9 +120,15 @@ export function outsidePaths(command, root) {
   }
   return [...new Set(out)];
 }
+function shortPath(p) {
+  if (p.length <= 36) return p;
+  const seg = p.split('/'); let tail = seg[seg.length - 1] || seg[seg.length - 2] || '';
+  if (tail.length > 16) tail = tail.slice(0, 7) + '\u2026' + tail.slice(-7);
+  return seg.slice(0, 3).join('/') + '/\u2026/' + tail;
+}
 function outsideLine(command, root) {
   const o = outsidePaths(command, root); if (!o.length) return null;
-  return { t: 'warn', text: 'Outside the start folder: ' + o.slice(0, 2).join(', ') + (o.length > 2 ? ' +' + (o.length - 2) : '') };
+  return { t: 'warn', text: 'Outside the start folder:' + o.slice(0, 2).map((x) => '\n    ' + shortPath(x)).join('') + (o.length > 2 ? '\n    +' + (o.length - 2) + ' more' : '') };
 }
 
 export async function previewTermux(args, folder) {

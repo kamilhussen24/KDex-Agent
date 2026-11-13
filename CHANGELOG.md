@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.49.5]
+
+### Changed
+- The yellow "Outside the start folder" note on command cards now lines up with the other lines. The path sits on its own line, so it no longer breaks in the middle of a word, and a very long path is shortened in the middle.
+
 ## [1.49.4]
 
 ### Added
