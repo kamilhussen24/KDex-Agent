@@ -85,6 +85,13 @@ function swipeable(el) {
   };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
 }
+// While a notification is on screen the first touch anywhere only dismisses it (nothing else is triggered); the next touch works normally.
+let tapEat = 0;
+document.addEventListener('pointerdown', (e) => {
+  const el = $('#toast'); if (!el || el.classList.contains('hidden') || !el.classList.contains('show') || el.contains(e.target)) return;
+  if (el._dismiss) el._dismiss(); tapEat = Date.now() + 700; e.stopPropagation();
+}, true);
+document.addEventListener('click', (e) => { if (tapEat && Date.now() < tapEat) { tapEat = 0; e.stopPropagation(); e.preventDefault(); } }, true);
 /** Notification: a short pill for one line, a card when there is a detail. Tap a card to see the full text and copy it. `opts.action = { label, fn }` adds a button. */
 function toast(t, opts = {}) {
   const el = $('#toast'); const text = String(t == null ? '' : t).trim(); if (!text) return;
@@ -324,13 +331,15 @@ function drawChatList() {
     ? (pinned.length ? '<div class="chat-head">Pinned</div>' + pinned.map(row).join('') + (rest.length ? '<div class="chat-head">Recent</div>' : '') : '') + rest.map(row).join('')
     : '<div class="note">' + (q ? 'No chats match' : 'No chats yet') + '</div>';
 }
-let lpBlockUntil = 0;
+let lpBlockUntil = 0; let lpOpenAt = 0; // while the opening finger is down the guard is open-ended; it ends 300 ms after the finger lifts
+document.addEventListener('pointerup', () => { if (lpBlockUntil === Infinity) lpBlockUntil = Date.now() + 300; }, true);
+document.addEventListener('touchend', () => { if (lpBlockUntil === Infinity) lpBlockUntil = Date.now() + 300; }, true);
 /** Press and hold a chat row to open the same menu as the three dots. Works with the system long-press (contextmenu), so Android cannot steal it. */
 function chatLongPress() {
   const list = $('#chatList'); let t = null, row = null, x0 = 0, y0 = 0;
   const cancel = () => { clearTimeout(t); t = null; if (row) { row.classList.remove('pressing'); row = null; } };
   const open = (r, pt) => {
-    if ($('#rowMenu')) return; lpBlockUntil = Date.now() + 800;
+    if ($('#rowMenu')) return; lpBlockUntil = Infinity; lpOpenAt = Date.now();
     try { if (navigator.vibrate) navigator.vibrate(12); } catch (err) { /* not supported */ }
     openRowMenu(r, r.dataset.id, pt);
   };
@@ -352,16 +361,17 @@ function chatLongPress() {
 function closeRowMenu() { const m = $('#rowMenu'); if (m) m.remove(); const c = $('#rowScrim'); if (c) c.remove(); }
 /** Small menu next to a chat row: Pin, Rename, Delete. */
 function openRowMenu(btn, id, pt) {
-  closeRowMenu();
+  closeRowMenu(); if (!pt) lpBlockUntil = 0;
   const c = S.chats.find((x) => x.id === id); if (!c) return;
   // A transparent layer under the menu: the first tap outside only closes the menu and does nothing else.
   const sc = document.createElement('div'); sc.id = 'rowScrim'; sc.className = 'rowscrim';
   // Close on click (not pointerdown): the scrim must still be under the finger when the
   // synthesized click arrives, otherwise that click lands on the chat row underneath.
-  const away = (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() < lpBlockUntil) return; closeRowMenu(); };
+  // A tap has its own pointerdown on this layer; a click without one is the leftover of the finger that opened the menu.
+  const away = (e) => { e.preventDefault(); e.stopPropagation(); if (!sc._down && Date.now() < lpBlockUntil) return; closeRowMenu(); };
   // Close the moment the finger touches (Android can swallow the first click after a long press). The layer stays a moment so that tap cannot reach the chat under it.
-  sc.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() < lpBlockUntil) return; const mm = $('#rowMenu'); if (mm) mm.remove(); setTimeout(closeRowMenu, 450); });
-  sc.addEventListener('click', away); sc.addEventListener('contextmenu', away);
+  sc.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() - lpOpenAt < 150 && lpBlockUntil !== 0) return; sc._down = true; const mm = $('#rowMenu'); if (mm) mm.remove(); setTimeout(closeRowMenu, 450); });
+  sc.addEventListener('click', away); sc.addEventListener('contextmenu', (e) => { if (Date.now() < lpBlockUntil) { e.preventDefault(); return; } away(e); });
   document.body.appendChild(sc);
   const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
   m.innerHTML = '<button data-a="pin">' + ICON('pin') + '<span>' + (c.pinned ? 'Unpin' : 'Pin') + '</span></button><button data-a="rename">' + ICON('edit') + '<span>Rename</span></button><button data-a="del" class="danger">' + ICON('trash') + '<span>Delete</span></button>';
@@ -433,7 +443,7 @@ async function saveOut(name, text) {
       const f = await fs.pickFolder();
       await fs.writeText(f.uri, name, text);
       if (!S.folders.some((x) => x.uri === f.uri)) await fs.releaseFolder(f.uri).catch(() => {}); // a one-off save should not keep access to that folder
-      toast('Saved ' + name + ' in ' + (f.name || 'the folder'), { result: true });
+      toast('Saved ' + name + ' in ' + (f.name || 'the folder'));
     } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast('Could not save the file: ' + ((e && e.message) || 'unknown error')); }
     return;
   }
@@ -889,6 +899,7 @@ async function applyFolder(f) {
   drawCtx(); updateApproveBar(); closeSheet();
   toast(f ? 'Using ' + f.name + ' in this chat' : 'Folder removed from this chat');
   if (f) detectRepo(f);
+  if (f && !cur) { const n = await scratchCount(c.id).catch(() => 0); if (n) await offerScratchMove(c, f, n); }
 }
 /** Look at an existing repository (for example one made in Termux). Reads only; nothing is changed or deleted. */
 async function detectRepo(f) {
@@ -1002,7 +1013,7 @@ async function openPreview(name, first, text) { return showPreview(name, async (
 async function showPreview(name, load, text) {
   closePreview();
   const o = document.createElement('div'); o.id = 'pv'; o.className = 'pv';
-  o.innerHTML = '<div class="pv-bar"><button class="icon-btn" id="pvX" aria-label="Close preview">' + ICON('x') + '</button><div class="pv-name">' + esc(name) + '</div><button class="icon-btn" id="pvR" aria-label="Reload">' + ICON('refresh') + '</button><button class="icon-btn" id="pvS" aria-label="Save a copy">' + ICON('down') + '</button></div>' +
+  o.innerHTML = '<div class="pv-bar"><button class="icon-btn" id="pvX" aria-label="Close preview">' + ICON('x') + '</button><div class="pv-name">' + esc(name) + '</div><button class="icon-btn" id="pvR" aria-label="Reload">' + ICON('reload') + '</button><button class="icon-btn" id="pvS" aria-label="Save a copy">' + ICON('down') + '</button></div>' +
     '<div class="pv-body"><div class="pv-load">Loading...</div></div><div class="pv-foot" id="pvF"></div>';
   document.body.appendChild(o); pvState.name = name; pvState.load = load; pvState.text = text || '';
   $('#pvX').onclick = closePreview; $('#pvR').onclick = () => pvRender(); $('#pvS').onclick = async () => { if (pvState.text) await saveOut(pvState.name.split('/').pop(), pvState.text); };
@@ -1033,6 +1044,7 @@ async function drawScratch() {
   const chat = S.chat; const n = chat && !S.folder ? await scratchCount(chat.id).catch(() => 0) : 0;
   if (S.chat !== chat) return;
   b.classList.toggle('hidden', !n); if (n) $('#chipScratchLbl').textContent = 'Scratch · ' + n;
+  const au = $('#chipAuto'); if (au) au.classList.toggle('hidden', !(S.folder || n)); // approvals matter in Scratch too
 }
 /** Small menu next to a tapped row. items: [{ a, label, icon, danger }]. */
 function popMenu(anchor, items, pick) {
@@ -1058,12 +1070,12 @@ async function saveBytes(name, bytes, mime) {
       const f = await fs.pickFolder();
       await fs.writeBytes(f.uri, name, bytes);
       if (!S.folders.some((x) => x.uri === f.uri)) await fs.releaseFolder(f.uri).catch(() => {});
-      toast('Saved ' + name + ' in ' + (f.name || 'the folder'), { result: true });
+      toast('Saved ' + name + ' in ' + (f.name || 'the folder'));
     } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast('Could not save the file: ' + ((e && e.message) || 'unknown error'), { kind: 'err' }); }
     return;
   }
   const url = URL.createObjectURL(file); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000); toast('Saving ' + name, { result: true });
+  setTimeout(() => URL.revokeObjectURL(url), 5000); toast('Saving ' + name);
 }
 async function openScratch() {
   if (!S.chat || S.folder) return;
@@ -1097,34 +1109,43 @@ async function openScratch() {
     };
     $('#scClear').onclick = async () => {
       if (!await confirmBox('Clear this scratch?', files.length + ' file' + (files.length === 1 ? '' : 's') + ' will be deleted. The chat and its messages stay.', 'Clear')) return;
-      await scratchClear(chat.id); closeSheet(); drawScratch(); toast('Scratch cleared', { result: true });
+      await scratchClear(chat.id); closeSheet(); drawScratch(); toast('Scratch cleared');
     };
     $('#scMove').onclick = () => scratchMove(chat);
   };
   await draw();
 }
-/** Copies the Scratch files into a folder the user picks, then continues the chat in that folder. */
+/** Copies the Scratch files into a folder, then empties Scratch. A file whose name already exists is kept: the copy gets "-scratch" in its name. */
+async function moveScratchInto(chat, fo) {
+  const files = await scratchFiles(chat.id); let renamed = 0;
+  for (const f of files) {
+    let dest = f.path; const st = await fs.stat(fo.uri, dest).catch(() => null);
+    if (st && st.exists) { dest = dest.replace(/(\.[^./]+)?$/, (m) => '-scratch' + (m || '')); renamed++; }
+    await fs.writeBytes(fo.uri, dest, f.data);
+  }
+  await scratchClear(chat.id); return { n: files.length, renamed };
+}
+function movedToast(r, name) { toast('Moved ' + r.n + ' file' + (r.n === 1 ? '' : 's') + ' to ' + name + (r.renamed ? '. ' + r.renamed + ' renamed with "-scratch" because the name already existed' : ''), r.renamed ? { kind: 'warn' } : {}); }
+/** "Move to a folder" in the Scratch sheet: pick a folder, copy the files, continue the chat there. */
 async function scratchMove(chat) {
   let r; try { r = await fs.pickFolder(); } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast(e.message || 'Could not open the folder', { kind: 'err' }); return; }
   if (!r || !r.uri) return;
-  const files = await scratchFiles(chat.id); if (!files.length) return;
+  const n = await scratchCount(chat.id); if (!n) return;
   const name = r.name || 'the folder';
-  const choice = await choiceBox('Move ' + files.length + ' file' + (files.length === 1 ? '' : 's') + '?', 'They are copied into "' + name + '", and this chat then works in that folder. Files with the same name are kept, the new copy gets "-scratch" in its name.', ['Move and clear Scratch', 'Move and keep Scratch']);
-  if (choice < 0) return;
-  try {
-    for (const f of files) {
-      let dest = f.path; const st = await fs.stat(r.uri, dest).catch(() => null);
-      if (st && st.exists) dest = dest.replace(/(\.[^./]+)?$/, (m) => '-scratch' + (m || ''));
-      await fs.writeBytes(r.uri, dest, f.data);
-    }
-  } catch (e) { toast('Could not copy: ' + (e.message || 'unknown error'), { kind: 'err' }); return; }
+  if (!await confirmBox('Move ' + n + ' file' + (n === 1 ? '' : 's') + '?', 'It is copied into "' + name + '" and removed from Scratch. This chat then works in that folder.', 'Move')) return;
   let fo = S.folders.find((x) => x.uri === r.uri);
-  if (!fo) { fo = { id: uid(), name: r.name || 'Folder', uri: r.uri }; S.folders.push(fo); await A.saveFolders(S.folders); }
-  if (choice === 0) await scratchClear(chat.id);
-  await applyFolder(fo); drawScratch();
-  toast('Moved ' + files.length + ' file' + (files.length === 1 ? '' : 's') + ' to ' + name, { result: true });
+  if (!fo) fo = { id: uid(), name: r.name || 'Folder', uri: r.uri };
+  let res; try { res = await moveScratchInto(chat, fo); } catch (e) { toast('Could not copy: ' + (e.message || 'unknown error'), { kind: 'err' }); return; }
+  if (!S.folders.some((x) => x.id === fo.id)) { S.folders.push(fo); await A.saveFolders(S.folders); }
+  await applyFolder(fo); drawScratch(); movedToast(res, name);
 }
-
+/** A folder was just added to a chat that has Scratch files: offer to take them along. */
+async function offerScratchMove(chat, fo, n) {
+  const no = $('#dlgNo').firstElementChild; const was = no.textContent; no.textContent = 'Not now';
+  const ok = await confirmBox('Move ' + n + ' Scratch file' + (n === 1 ? '' : 's') + '?', 'This chat now works in "' + fo.name + '". Copy the Scratch files into it so the agent can use them.', 'Move');
+  no.textContent = was; if (!ok || S.chat !== chat) return;
+  try { const res = await moveScratchInto(chat, fo); drawScratch(); movedToast(res, fo.name); } catch (e) { toast('Could not copy: ' + (e.message || 'unknown error'), { kind: 'err' }); }
+}
 async function openFiles(path = '') {
   if (!S.folder) return;
   const body = sheet(S.folder.name + (path ? ' / ' + path : ''), { back: path ? () => openFiles(path.split('/').slice(0, -1).join('/')) : null });
@@ -1244,21 +1265,21 @@ function cleanupInit() {
   fill().catch(() => {});
   $('#clFreeBtn').onclick = async () => {
     const st = await storageStats();
-    if (!st.free) { toast('Nothing to clear', { result: true }); return; }
+    if (!st.free) { toast('Nothing to clear'); return; }
     const lines = []; if (st.oldBackups.length) lines.push('undo backups older than 30 days (' + fmtBytes(st.oldB) + ')'); if (st.log > 2) lines.push('the diagnostics log (' + fmtBytes(st.log) + ')'); if (st.oldScratch.length) lines.push('Scratch files of chats not used for 30 days (' + fmtBytes(st.oldS) + ')');
     if (!await confirmBox('Free up ' + fmtBytes(st.free) + '?', 'This deletes ' + lines.join(', ') + '. Changes older than 30 days can no longer be undone. Chats, keys and settings are not touched.', 'Free up')) return;
     for (const b of st.oldBackups) await db.del('backups', b.id);
     await D.clear();
     for (const u of st.oldScratch) await scratchClear(u.chatId);
-    drawScratch(); await fill(); toast('Freed ' + fmtBytes(st.free), { result: true });
+    drawScratch(); await fill(); toast('Freed ' + fmtBytes(st.free));
   };
   $('#clPics').onclick = async () => {
     const st = await storageStats();
-    if (!st.picN) { toast('No pictures in your chats', { result: true }); return; }
+    if (!st.picN) { toast('No pictures in your chats'); return; }
     if (!await confirmBox('Remove ' + st.picN + ' picture' + (st.picN === 1 ? '' : 's') + '?', 'Frees ' + fmtBytes(st.pics) + '. The text of every message stays, but the pictures are gone for good and the agent can no longer see them.', 'Remove')) return;
     for (const m of await db.all('messages')) if (m.images && m.images.length) { m.imagesRemoved = (m.imagesRemoved || 0) + m.images.length; delete m.images; await db.put('messages', m); }
     if (S.chat) { const id = S.chat.id; S.els.clear(); await openChat(id); openSettings(); }
-    toast('Removed ' + st.picN + ' picture' + (st.picN === 1 ? '' : 's'), { result: true });
+    toast('Removed ' + st.picN + ' picture' + (st.picN === 1 ? '' : 's'));
   };
 }
 
@@ -1455,8 +1476,8 @@ function updateTermChip() {
 async function toggleAuto() {
   if (!S.chat) return;
   S.chat.auto = !S.chat.auto; await db.put('chats', S.chat); updateTermChip();
-  if (S.chat.auto) { toast('Auto on: safe actions run without asking. Risky ones still ask.', { result: true }); for (const [id, tm] of [...S.approvalTm.entries()]) { if (!(tm.plan && tm.plan.risky) && S.approvals.has(id)) decide(id, 'apply'); } }
-  else toast('Auto off: asking before every action', { result: true });
+  if (S.chat.auto) { toast('Auto on: safe actions run without asking. Risky ones still ask.'); for (const [id, tm] of [...S.approvalTm.entries()]) { if (!(tm.plan && tm.plan.risky) && S.approvals.has(id)) decide(id, 'apply'); } }
+  else toast('Auto off: asking before every action');
 }
 let saveChain = Promise.resolve();
 /** Applies the change at once (so the UI never lags a tap behind), then writes it to storage in order. */
@@ -1977,7 +1998,7 @@ async function exportBackup() {
   const text = JSON.stringify(data);
   if (text.length > 60 * 1048576) { toast('This backup would be larger than 60 MB, too big to restore. Delete some old chats first.', { kind: 'warn' }); return; }
   await fs.writeText(r.uri, name, text);
-  toast('Saved ' + name + ' (' + fmtBytes(text.length) + ') in ' + (r.name || 'the folder'), { result: true });
+  toast('Saved ' + name + ' (' + fmtBytes(text.length) + ') in ' + (r.name || 'the folder'));
 }
 /** A backup file is only used when every part has the shape the app expects. Returns an error text or ''. */
 function backupProblem(d) {

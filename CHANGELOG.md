@@ -7,6 +7,21 @@ for its version.
 
 ## [Unreleased]
 
+## [1.48.1]
+
+### Added
+- The Auto chip now shows next to the Scratch chip in a chat without a folder, so approvals can be set there too.
+- Adding a folder to a chat that has Scratch files asks "Move N Scratch files?" with "Not now" and "Move".
+
+### Changed
+- The Move dialog is simpler: Cancel or Move. The files are copied, then Scratch is emptied. A file whose name already exists is kept as a copy with "-scratch" in its name, and a warning says so.
+- Notifications: Quiet shows only errors, warnings and results you cannot see (Git, clone, restore, updates). All shows everything. Short confirmations (Auto on/off, Moved, Freed, Saved and similar) are now All only.
+- While a notification is visible, the first touch anywhere only dismisses it. The next touch works normally.
+- The reload button in the HTML preview bar uses a simpler single-arc icon.
+
+### Fixed
+- The chat long-press menu now closes with one tap instead of two.
+
 ## [1.48.0]
 
 ### Added
