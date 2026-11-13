@@ -13,7 +13,7 @@ Bring your own API key. No server, no account, no analytics: your keys, chats an
 **Chat**
 - Works with your own key from Anthropic, OpenAI, Gemini, DeepSeek, xAI, Groq, Mistral, OpenRouter or any OpenAI-compatible endpoint.
 - Thinking levels (Off, Low, High), memory notes, chat history with search, token saving, and usage with estimated cost.
-- Attach images, text and code files, and Word, Excel and PowerPoint files (PDF is not supported). Built-in ZIP tools (the model cannot run `unzip`, so the app does it).
+- Attach images, text and code files, and Word, Excel and PowerPoint files, and PDF files that contain text (scanned PDFs have no text to read). Built-in ZIP tools (the model cannot run `unzip`, so the app does it).
 - Reads a public web page when you ask for fresh information or give a link (no key needed; you approve each site).
 
 **Project folders**
@@ -108,7 +108,7 @@ cd android && ./gradlew assembleDebug
 ```
 
 ### Publish a release (maintainer)
-1. Add the entry to `CHANGELOG.md` and raise `version` in `package.json` and `www/js/config.js`.
+1. Add the entry to `CHANGELOG.md` (move the lines from `[Unreleased]` under a new `## [X.Y.Z]` heading) and raise the version in all four places: `package.json` (line 3), `package-lock.json` (lines 3 and 9) and `www/js/config.js` (`APP_VERSION`). Keep them identical.
 2. Push to `main`. GitHub Actions builds the signed APK, creates the tag `vX.Y.Z` and the GitHub Release (notes come from `CHANGELOG.md`) and attaches `KDex-Agent-release.apk`. If the tag already exists nothing happens.
 
 Signing needs four repository secrets (Settings > Secrets and variables > Actions): `KEYSTORE_BASE64` (the keystore file as base64), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. Create the keystore once and keep a backup; updates install over an older version only when signed with the same key.
@@ -121,7 +121,7 @@ base64 -w0 kdex.keystore
 Ideas, bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up, the conventions and the review checklist. Report security problems privately, see [SECURITY.md](SECURITY.md).
 
 ## License
-KDex Agent is **source-available**, not open source in the OSI sense. You can read the code, use the app, change it for yourself and send improvements back. You may not redistribute it (modified or not), publish it under your own name, or sell it. See [LICENSE](LICENSE) for the exact terms. Versions 1.38.0 and earlier were released under the MIT License. Third-party components keep their own licenses (Settings > About > Licenses).
+KDex Agent is **source-available**, not open source in the OSI sense. You can read the code, use the app, change it for yourself and send improvements back. You may not redistribute it (modified or not), publish it under your own name, or sell it. See [LICENSE](LICENSE) for the exact terms. Versions 1.38.0 and earlier were released under the MIT License. Third-party components keep their own licenses (Settings > About > Licenses); the bundled libraries in `www/vendor/` (pdf.js, fflate, isomorphic-git) ship with their license files.
 
 ## Privacy and limits
 - No server, accounts or analytics. See [PRIVACY.md](PRIVACY.md).

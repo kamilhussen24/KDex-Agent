@@ -15,7 +15,7 @@ import * as G from './git.js';
 import { isSecretPath, isEnvLike, maskEnv, protectionOn, scrub } from './secrets.js';
 import { SUPPORT_EMAIL, APP_VERSION } from './config.js';
 import { checkUpdate, isNewer, REPO_URL } from './update.js';
-import { officeText, isOffice } from './docs.js';
+import { officeText, isOffice, isPdf, pdfText, PDF_MAX_BYTES } from './docs.js';
 import { prepareImage } from './image.js';
 import { isHtmlName, bundleFromFolder, bundleText } from './preview.js';
 import { testServer, saveSecret, dropSecret, getSecret, remoteFolderOf, rememberServer, closeServer, remoteRead, remoteWrite, BIG_FILE } from './remote.js';
@@ -758,6 +758,10 @@ async function addFiles(list) {
   for (const f of Array.from(list)) {
     try {
       if (WEIRD_MIME.test(f.type)) { const im = await prepareImage(f); S.attach.push({ img: true, name: f.name, mime: im.mime, data: im.data }); imageNote = true; }
+      else if (isPdf(f.name)) {
+        if (f.size > PDF_MAX_BYTES) toast(f.name + ' is too large (max 15 MB).', { kind: 'warn' });
+        else { const r = await pdfText(f); S.attach.push({ name: f.name, text: '[PDF: ' + r.pages + ' page' + (r.pages === 1 ? '' : 's') + (r.cut ? ', first ' + r.read + ' pages read because the file is long' : '') + ']\n' + r.text }); }
+      }
       else if (isOffice(f.name)) { if (f.size > 8 * 1048576) toast(f.name + ' is too large (max 8 MB).', { kind: 'warn' }); else { let t = await officeText(f); let note = ''; if (t.length > 400 * 1024) { t = t.slice(0, 400 * 1024); note = '\n[Text cut: the file is long]'; } S.attach.push({ name: f.name, text: t + note }); } }
       else if (f.size > 400 * 1024) toast(f.name + ' is too large (max 400 KB). Put it in a project folder instead.', { kind: 'warn' });
       else { const t = await f.text(); if (t.includes('\u0000')) toast(f.name + ' looks like a binary file.', { kind: 'warn' }); else S.attach.push({ name: f.name, text: t }); }
@@ -868,32 +872,56 @@ function touchSwipes() {
     cancel: (calm) => { card.style.transition = calm ? 'none' : 'transform .2s ease'; root.style.transition = calm ? 'none' : 'background .2s ease'; card.style.transform = ''; root.style.background = ''; setTimeout(rs, calm ? 0 : 220); },
   });
 }
-/** Settings > About: shows the last known update result and lets the user check now. */
+// Update checks: when the app starts or comes back after a while (6 hours), when Settings > About is opened (1 hour),
+// and on demand. A failed check waits 15 minutes before the next quiet try, and an unchanged answer (304) costs no rate limit.
+const UPD_AUTO_MS = 6 * 3600 * 1000; const UPD_OPEN_MS = 3600 * 1000; const UPD_RETRY_MS = 15 * 60 * 1000;
+let updBusy = null;
+/** One check at a time. Returns { r } with the fresh answer, or { skipped } when the saved answer is recent enough. */
+function refreshUpdate(maxAgeMs, force) {
+  if (updBusy) return updBusy;
+  updBusy = (async () => {
+    const last = await kvGet('updLast', null); const now = Date.now(); const good = last && last.r && last.r.ok ? last.r : null;
+    if (!force) {
+      if (good && now - last.at < maxAgeMs) return { skipped: true };
+      if (now - (await kvGet('updFail', 0)) < UPD_RETRY_MS) return { skipped: true };
+    }
+    const r = await checkUpdate(APP_VERSION, null, good);
+    if (r.ok) { await kvSet('updLast', { at: now, r }); await kvSet('updFail', 0); } else await kvSet('updFail', now);
+    return { r };
+  })().finally(() => { updBusy = null; });
+  return updBusy;
+}
+/** Settings > About: shows the last known update result, refreshes it quietly when it is over an hour old, and lets the user check now. */
 async function drawUpdate(body) {
   const st = $('#updState', body); const box = $('#updBox', body); if (!st || !box) return;
   const show = (r) => {
     if (!r) { st.textContent = 'Not checked'; box.innerHTML = '<button id="updGo" class="btn" style="width:100%"><span class="lbl">Check for updates</span></button>'; }
     else if (!r.ok) { st.textContent = r.error || 'Could not check'; box.innerHTML = '<button id="updGo" class="btn" style="width:100%"><span class="lbl">Try again</span></button>'; }
-    else if (r.newer) { st.textContent = r.latest + ' available'; box.innerHTML = '<a class="btn primary" style="display:flex;width:100%;justify-content:center;text-decoration:none" href="' + esc(r.apk || r.url) + '" target="_blank" rel="noopener"><span class="lbl">Download ' + esc(r.latest) + (r.size ? ' (' + fmtBytes(r.size) + ')' : '') + '</span></a><small style="display:block;margin-top:6px;color:var(--mut);font-size:13px">Open the downloaded file to install. Your chats and settings stay.</small>'; }
+    else if (r.newer) { st.textContent = r.latest + ' available'; box.innerHTML = '<a class="btn primary" style="display:flex;width:100%;justify-content:center;text-decoration:none" href="' + esc(r.apk || r.url) + '" target="_blank" rel="noopener"><span class="lbl">Download ' + esc(r.latest) + (r.size ? ' (' + fmtBytes(r.size) + ')' : '') + '</span></a><small style="display:block;margin-top:6px;color:var(--mut);font-size:13px;line-height:1.4">Open the downloaded file to install. Your chats and settings stay.</small>'; }
     else { st.textContent = r.none ? 'No releases yet' : 'Up to date'; box.innerHTML = '<button id="updGo" class="btn" style="width:100%"><span class="lbl">Check for updates</span></button>'; }
-    const g = $('#updGo', body); if (g) g.onclick = async () => { st.textContent = 'Checking...'; g.disabled = true; const x = await checkUpdate(APP_VERSION); if (x.ok) await kvSet('updLast', { at: Date.now(), r: x }); show(x); };
+    const g = $('#updGo', body); if (g) g.onclick = async () => { st.textContent = 'Checking...'; g.disabled = true; const x = await refreshUpdate(0, true); if (body.isConnected) show(x.r || null); };
   };
-  const last = await kvGet('updLast', null); show(last && last.r && last.r.ok ? Object.assign({}, last.r, { newer: isNewer(last.r.latest, APP_VERSION) }) : null);
+  const last = await kvGet('updLast', null);
+  const known = last && last.r && last.r.ok ? Object.assign({}, last.r, { newer: isNewer(last.r.latest, APP_VERSION) }) : null;
+  show(known);
+  if (!known || Date.now() - last.at >= UPD_OPEN_MS) {
+    const hold = known; if (known) st.textContent = 'Checking...';
+    const x = await refreshUpdate(UPD_OPEN_MS, false);
+    if (body.isConnected) show(x.r && x.r.ok ? x.r : hold);
+  }
 }
-/** Once a day, quietly. Tells the user once per new version. */
+/** Quietly, at most every 6 hours, on start and when the app comes back to the screen. Tells the user once per new version. */
 async function autoUpdateCheck() {
   if (!isNative) return;
-  const last = await kvGet('updLast', null);
-  if (last && Date.now() - last.at < 24 * 3600 * 1000) return;
-  const r = await checkUpdate(APP_VERSION); if (!r.ok) return;
-  await kvSet('updLast', { at: Date.now(), r });
-  if (r.newer && (await kvGet('updToldFor', '')) !== r.latest) { await kvSet('updToldFor', r.latest); toast('Update ' + r.latest + ' is available. See Settings > About.', { result: true }); }
+  const x = await refreshUpdate(UPD_AUTO_MS, false); const r = x.r;
+  if (r && r.ok && r.newer && (await kvGet('updToldFor', '')) !== r.latest) { await kvSet('updToldFor', r.latest); toast('Update ' + r.latest + ' is available. See Settings > About.', { result: true }); }
 }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoUpdateCheck().catch(() => {}); });
 function openLicenses() {
   const body = sheet('Licenses', { back: () => openSettings() });
   const item = (n, l, t) => '<div class="kv" style="display:block"><b>' + esc(n) + '</b> <span style="color:var(--mut)">' + esc(l) + '</span><div style="color:var(--mut);font-size:13px;margin-top:2px">' + esc(t) + '</div></div>';
   body.innerHTML = '<div class="note" style="text-align:left">KDex Agent is source-available. Source: <a class="link" href="' + REPO_URL + '" target="_blank" rel="noopener">GitHub</a></div>' +
-    item('KDex Agent', 'KDex Agent License', 'Copyright (c) 2026 Kamil Hussen (KDex). You may use it and send improvements; you may not redistribute or sell it.') + item('Capacitor', 'MIT', 'Ionic and contributors') + item('Inter font', 'SIL OFL 1.1', 'The Inter Project Authors') + item('Eclipse JGit', 'EDL (BSD-3-Clause)', 'Eclipse Foundation and contributors') + item('AndroidX libraries', 'Apache 2.0', 'Google');
+    item('KDex Agent', 'KDex Agent License', 'Copyright (c) 2026 Kamil Hussen (KDex). You may use it and send improvements; you may not redistribute or sell it.') + item('Capacitor', 'MIT', 'Ionic and contributors') + item('Inter font', 'SIL OFL 1.1', 'The Inter Project Authors') + item('Eclipse JGit', 'EDL (BSD-3-Clause)', 'Eclipse Foundation and contributors') + item('AndroidX libraries', 'Apache 2.0', 'Google') + item('pdf.js', 'Apache 2.0', 'Mozilla and contributors') + item('fflate', 'MIT', 'Arjun Barrett') + item('isomorphic-git and LightningFS', 'MIT', 'The isomorphic-git authors') + item('buffer', 'MIT', 'Feross Aboukhadijeh and contributors');
 }
 function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').classList.add('hidden'); S.sheetStack = []; }
 
@@ -1471,8 +1499,8 @@ function openSettings() {
     '<div class="field"><span>Protect secret files</span>' + seg('setProt', [['1', 'On'], ['0', 'Off']], st.protectSecrets !== false ? '1' : '0') + '<small>.env files, keys and credentials stay hidden from the agent and the chat. The agent can still run your project with them. Secret values are removed from terminal output, and new secret files are never committed automatically.</small></div>' +
     '<div class="h3">Appearance</div>' + '<div class="field">' + seg('setTheme', [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], st.theme) + '</div>' +
     '<div class="field"><span>Notifications</span>' + seg('setQuiet', [['1', 'Quiet'], ['0', 'All']], st.quietToasts !== false ? '1' : '0') + '<small>Quiet shows only errors, warnings and results of long tasks like push, pull, clone and backup. All also shows short confirmations.</small></div>' +
-    '<div class="h3">Memory</div><div class="field">' + seg('setLearn', [['1', 'Learn about me'], ['0', 'Off']], st.autoLearn ? '1' : '0') + '<small>Short notes saved on this phone and shared with the model so it knows you.</small></div><div id="memList"></div>' +
-    '<button id="memAdd" class="btn" style="width:100%">' + ICON('plus') + '<span class="lbl">Add a note</span></button>' +
+    '<div class="h3">Memory</div><div class="field">' + seg('setLearn', [['1', 'Learn about me'], ['0', 'Off']], st.autoLearn ? '1' : '0') + '<small>Short notes saved on this phone and shared with the model so it knows you.</small></div>' +
+    '<button id="memBtn" class="btn" style="width:100%"><span class="lbl">Saved notes</span><span class="lbl" id="memCount" style="color:var(--mut)"></span>' + ICON('right') + '</button>' +
     '<div class="h3">Data</div>' +
     '<button id="usageBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Token usage</span></button>' +
     '<button id="expBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Export this chat as text</span></button>' +
@@ -1522,14 +1550,10 @@ function openSettings() {
     S.providers = S.providers.filter((p) => p.id !== b.dataset.rp); S.models = S.models.filter((m) => m.providerId !== b.dataset.rp);
     await A.saveProviders(S.providers); await A.saveModels(S.models); fillModels(); openSettings();
   });
-  const mem = async () => {
-    const list = await A.getMemory();
-    $('#memList').innerHTML = list.map((m) => '<div class="row-item"><div class="grow s" style="white-space:normal;color:var(--fg)">' + esc(m.text) + '</div><button class="icon-btn" data-dm="' + m.id + '">' + ICON('x') + '</button></div>').join('') || '<div class="note">No notes yet.</div>';
-    $$('[data-dm]', body).forEach((b) => b.onclick = async () => { await A.saveMemory((await A.getMemory()).filter((x) => x.id !== b.dataset.dm)); mem(); });
-  };
+  const mem = async () => { const n = (await A.getMemory()).length; $('#memCount').textContent = n ? String(n) : ''; };
   rdTerm();
   mem();
-  $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) mem(); };
+  $('#memBtn').onclick = openMemory;
   $('#diagBtn').onclick = openDiagnostics; $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
   $('#delAll').onclick = async () => {
     if (!await confirmBox('Delete all conversations?', 'Every chat except pinned ones, with its messages and change backups, is removed from this phone. Your folders, files, settings, memory notes and keys are not touched. This cannot be undone.', 'Delete all')) return;
@@ -1626,8 +1650,11 @@ async function drawSaved() {
     const out = $('#scOut'); out.innerHTML = '<div class="busy"><span class="spin"></span>Running ' + esc(c.name) + '...</div>'; out.scrollIntoView({ block: 'nearest' });
     try {
       const r = await runTermux({ command: c.cmd }, S.folder);
-      const ok = /Command succeeded\./.test(r);
-      out.innerHTML = '<div class="' + (ok ? 'ok' : 'err') + '">' + (ok ? 'Finished' : 'Failed') + ': ' + esc(c.name) + '</div><pre class="out">' + esc((await scrub(r, S.folder)).slice(-3000)) + '</pre>' + (!ok && /^\s*(ssh|scp|rsync)\b/.test(c.cmd) ? '<div class="ghint">ssh needs openssh installed in Termux (pkg install openssh) and your key added there.</div>' : '');
+      const ok = /Command succeeded\./.test(r); const code = /\[exit code (-?\d+)/.exec(r);
+      const text = (await scrub(r, S.folder)).replace(/\n?\[exit code[^\]]*\][^\n]*$/, '').replace(/\n?\[hint\][\s\S]*$/, '').trim();
+      out.innerHTML = '<div class="scst ' + (ok ? 'ok' : 'err') + '">' + ICON(ok ? 'check' : 'alert') + '<span class="scm">' + (ok ? 'Done: ' : 'Failed: ') + esc(c.name) + (!ok && code ? ' · exit ' + code[1] : '') + '</span>' + (text ? '<button class="linkbtn" data-sc-out="1" aria-expanded="false"><span class="lbl">Show output</span>' + ICON('chev') + '</button>' : '') + '</div>' +
+        (text ? '<pre class="scpre hidden">' + esc(text.slice(-3000)) + '</pre>' : '') + (!ok && /^\s*(ssh|scp|rsync)\b/.test(c.cmd) ? '<div class="ghint">ssh needs openssh installed in Termux (pkg install openssh) and your key added there.</div>' : '');
+      const tg = $('[data-sc-out]', out); if (tg) tg.onclick = () => { const p = $('.scpre', out); const open = p.classList.toggle('hidden') === false; tg.setAttribute('aria-expanded', open ? 'true' : 'false'); $('.lbl', tg).textContent = open ? 'Hide output' : 'Show output'; };
     } catch (e) { out.innerHTML = '<div class="err">' + esc(e.message || String(e)) + '</div>'; }
   });
 }
@@ -1660,6 +1687,21 @@ async function openDiagnostics() {
     '<div class="note" style="margin-top:12px;text-align:left">Keeps the last 7 days. Stays on this phone. Tokens and keys are masked before they are saved.</div>';
   $('#dgCopy').onclick = async () => { flashCopied($('#dgCopy'), await copyText(D.format(list, info))); };
   $('#dgClear').onclick = async () => { await D.clear(); openDiagnostics(); };
+}
+async function openMemory() {
+  const body = sheet('Saved notes', { back: openSettings });
+  body.innerHTML = '<div class="search" style="margin-top:0"><svg class="ic"><use href="#i-search"/></svg><input id="memFind" type="search" placeholder="Search notes" autocomplete="off"></div><div class="note" id="memHow" style="text-align:left;margin:4px 0 8px"></div><div id="memRows"></div>';
+  const foot = $('#sheetFoot'); foot.classList.remove('hidden'); foot.innerHTML = '<button id="memAdd" class="btn" style="width:100%">' + ICON('plus') + '<span class="lbl">Add a note</span></button>';
+  const draw = async () => {
+    const all = await A.getMemory(); const q = $('#memFind').value.trim().toLowerCase();
+    const list = q ? all.filter((m) => m.text.toLowerCase().includes(q)) : all;
+    $('#memHow').textContent = !all.length ? 'No notes yet.' : q ? list.length + ' of ' + all.length + ' notes' : all.length + (all.length === 1 ? ' note' : ' notes');
+    $('#memRows').innerHTML = list.map((m) => '<div class="row-item"><div class="grow s" style="white-space:normal;color:var(--fg)">' + esc(m.text) + '</div><button class="icon-btn" data-dm="' + m.id + '" aria-label="Delete note">' + ICON('x') + '</button></div>').join('') || (all.length ? '<div class="note">No note matches.</div>' : '');
+    $$('[data-dm]', body).forEach((b) => b.onclick = async () => { await A.saveMemory((await A.getMemory()).filter((x) => x.id !== b.dataset.dm)); draw(); });
+  };
+  $('#memFind').oninput = draw;
+  $('#memAdd').onclick = async () => { const v = await askText('Add a note', 'One short fact'); if (v && await A.addMemoryNote(v, 'manual')) { $('#memFind').value = ''; draw(); } };
+  draw();
 }
 async function openUsage() {
   const body = sheet('Token usage', { back: openSettings });

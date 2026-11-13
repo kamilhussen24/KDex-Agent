@@ -7,6 +7,33 @@ for its version.
 
 ## [Unreleased]
 
+## [1.50.4]
+
+### Changed
+- Settings > About > Licenses now lists pdf.js, fflate, isomorphic-git, LightningFS and buffer.
+- README: the release steps now include `package-lock.json` and explain the CHANGELOG entry; CONTRIBUTING explains how to check a change and how to handle the bundled libraries.
+
+## [1.50.3]
+
+### Changed
+- A saved command now shows its result as one short line ("Failed: git status · exit 128" or "Done: Say hello") with a "Show output" button. The output is closed at first and, when opened, wraps inside the screen instead of running off the right edge.
+- Git commands in Termux no longer stop with "dubious ownership" on the phone's shared storage. Before the first git command in a project after the app starts, the app adds exactly that project folder to git's safe list (never every folder). Servers are not touched.
+
+## [1.50.2]
+
+### Changed
+- Update checks are more reliable and still gentle on GitHub. Settings > About now refreshes the result by itself when it is over an hour old (it shows "Checking..." for a moment), instead of showing an old "Up to date" until you press the button. Opening it again within the hour sends nothing.
+- The quiet check at app start now runs every 6 hours (was 24), and also when the app comes back to the screen after being in the background.
+- Rate limits are respected: an unchanged answer (304) is reused and does not count against GitHub's limit, and after a failed or limited check the app waits 15 minutes before trying quietly again. The "Check for updates" button always asks, and says so plainly when GitHub is busy.
+
+## [1.50.1]
+
+### Added
+- PDF files with text can be attached to a chat. The text is read on the phone (with pdf.js, loaded only when a PDF is attached) and sent to the model with the page count. Up to 15 MB and the first 150 pages. A scanned PDF has no text, so the app says so and suggests attaching photos of the pages.
+
+### Changed
+- Settings > Memory shows one "Saved notes" button with the number of notes instead of the whole list. It opens a sheet with a search box, the notes (each with a delete button) and "Add a note", so Settings stays short however many notes there are.
+
 ## [1.50.0]
 
 ### Changed

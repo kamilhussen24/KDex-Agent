@@ -543,3 +543,11 @@ html[data-theme=dark]{--warn:#f0b04a;--note:#7aa7ff}
 
 #modelSelect{flex:1;min-width:0;max-width:none}.top #modelSelect+.spacer{display:none}
 .dimming>:not(.menu-on){opacity:.45}.chat-item.menu-on,.row-item.menu-on{background:var(--bg2)}.row-item.menu-on{border-color:var(--mut)}.chat-item.menu-on{box-shadow:inset 0 0 0 1px var(--mut)}
+
+.scst{display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:13px;line-height:1.3}
+.scst>.ic{flex:none;width:16px;height:16px}
+.scst .scm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scst .linkbtn{flex:none;display:flex;align-items:center;gap:4px;padding:4px 0 4px 6px;font-weight:500;font-size:13px;color:var(--mut)}
+.scst .linkbtn .ic{width:15px;height:15px}
+.scst .linkbtn[aria-expanded=true] .ic{transform:rotate(180deg)}
+.scpre{margin:8px 0 0;padding:10px;border-radius:10px;background:var(--code);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto}

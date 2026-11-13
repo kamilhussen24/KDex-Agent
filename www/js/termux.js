@@ -214,9 +214,19 @@ async function runServer(args, folder, signal) {
     '[exit code ' + r.exitCode + (r.errmsg ? '; ' + r.errmsg : '') + '] ' + (ok ? 'Command succeeded.' : 'Command FAILED. Read the output above before answering.');
 }
 
+// Android shared storage belongs to another user than Termux, so git refuses it ("dubious ownership").
+// Before the first git command in a project, add exactly that project folder to git's safe list (once per app start, never "*").
+const safeDone = new Set();
+async function ensureSafeDir(folder) {
+  const dir = await getTermuxPath(folder); if (!dir || safeDone.has(dir)) return;
+  safeDone.add(dir);
+  try { await Termux.run('command -v git >/dev/null 2>&1 && { git config --global --get-all safe.directory | grep -qxF ' + shq(dir) + ' || git config --global --add safe.directory ' + shq(dir) + '; }; true', undefined, 15000); } catch (e) { safeDone.delete(dir); }
+}
+
 export async function runTermux(args, folder, signal) {
   if (folder && folder.remote) return runServer(args, folder, signal);
   const original = String(args.command || '').trim();
+  if (folder && /\bgit\b/.test(original)) await ensureSafeDir(folder);
   const cwd = await workdir(args, folder);
   const secs = Math.max(5, Math.min(600, parseInt(args.timeout_seconds, 10) || 120));
   const w = await withGitToken(original, folder);

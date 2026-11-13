@@ -1,5 +1,5 @@
 // Reads text out of Word, Excel and PowerPoint files (they are zip files with XML inside), so they can be attached to a chat.
-// PDF and old binary formats (.doc, .xls, .ppt) are not supported.
+// PDF files with real text are read with pdf.js (loaded only when a PDF is attached). Scanned PDFs have no text, and old binary formats (.doc, .xls, .ppt) are not supported.
 const lib = () => { if (!window.fflate) throw new Error('The zip engine did not load.'); return window.fflate; };
 const dec = (u8) => new TextDecoder('utf-8').decode(u8);
 const unent = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&');
@@ -47,4 +47,50 @@ export async function officeText(file) {
   let t; try { t = n.endsWith('.docx') ? docx(buf) : n.endsWith('.pptx') ? pptx(buf) : n.endsWith('.xlsx') ? xlsx(buf) : odf(buf); } catch (e) { throw new Error(file.name + ' could not be read (damaged, protected or not a real Office file).'); }
   if (!t.trim()) throw new Error('No readable text in ' + file.name + '.');
   return t;
+}
+
+// ---------------------------------------------------------------- PDF
+export const isPdf = (name) => /\.pdf$/i.test(name || '');
+export const PDF_MAX_BYTES = 15 * 1048576;
+const PDF_MAX_PAGES = 150;
+const PDF_MAX_CHARS = 400 * 1024;
+let pdfLoad = null;
+function loadPdfLib() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!pdfLoad) {
+    pdfLoad = new Promise((ok, no) => {
+      const s = document.createElement('script'); s.src = 'vendor/pdf.min.js';
+      s.onload = () => { if (!window.pdfjsLib) { pdfLoad = null; no(new Error('The PDF reader did not load.')); return; } window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js'; ok(window.pdfjsLib); };
+      s.onerror = () => { pdfLoad = null; no(new Error('The PDF reader did not load.')); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfLoad;
+}
+/** Reads the text of a PDF. Returns { text, pages, read, cut }. Throws a plain message for scans, protected and damaged files. */
+export async function pdfText(file) {
+  const lib = await loadPdfLib();
+  const data = new Uint8Array(await file.arrayBuffer());
+  let doc;
+  try { doc = await lib.getDocument({ data, isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0 }).promise; }
+  catch (e) {
+    if (e && e.name === 'PasswordException') throw new Error(file.name + ' is password protected.');
+    throw new Error(file.name + ' could not be read (damaged or not a real PDF).');
+  }
+  const pages = doc.numPages; let out = ''; let read = 0; let cut = false;
+  try {
+    for (let i = 1; i <= Math.min(pages, PDF_MAX_PAGES); i++) {
+      const page = await doc.getPage(i); const tc = await page.getTextContent(); let line = '';
+      for (const it of tc.items) { if (typeof it.str !== 'string') continue; line += it.str; line += it.hasEOL ? '\n' : ' '; }
+      page.cleanup(); read = i;
+      const body = line.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+      out += 'Page ' + i + ':\n' + body + '\n\n';
+      if (out.length > PDF_MAX_CHARS) { cut = true; break; }
+    }
+  } finally { try { doc.destroy(); } catch (e) { /* already closed */ } }
+  if (!cut && pages > PDF_MAX_PAGES) cut = true;
+  const plain = out.replace(/Page \d+:\n/g, '').trim();
+  if (plain.length < 20) throw new Error(file.name + ' is a scan, so it has no text to read. Attach photos of the pages instead.');
+  if (out.length > PDF_MAX_CHARS) out = out.slice(0, PDF_MAX_CHARS);
+  return { text: out.trim(), pages, read, cut };
 }

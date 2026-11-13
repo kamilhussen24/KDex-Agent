@@ -27,6 +27,10 @@ cd KDex-Agent/www && python3 -m http.server 8080
 ```
 Open `http://localhost:8080`. The app has a browser fallback (an in-memory demo folder), so the UI, chat and diffs can be developed without a phone. The interface is plain ES modules; there is no bundler and no build step for `www/`.
 
+There is no automated test suite in the repository. Check your change by hand in the browser (light and dark, 320 to 412 px wide) and run a quick syntax check with `node --check www/js/<file>.js` for each JavaScript file you edited.
+
+Libraries in `www/vendor/` are bundled copies (pdf.js, fflate, isomorphic-git, LightningFS) with their license files. Do not edit them; to update one, replace the file, keep its `LICENSE-*.md` and add it to Settings > About > Licenses.
+
 Native features (Keystore, real folders, Git on real repositories, notifications, Share, Termux) need a phone. Build a debug APK with **Actions > Build Android APK > Run workflow > debug** on your fork and install it. Java cannot be compiled in a browser, so keep native changes small and describe how you tested them.
 
 ## Conventions
