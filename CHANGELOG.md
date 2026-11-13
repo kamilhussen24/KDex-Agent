@@ -7,6 +7,14 @@ for its version.
 
 ## [Unreleased]
 
+## [1.50.10]
+
+### Security
+- Keys and tokens written directly into ordinary code files (a Telegram bot token, an API key, a wallet private key, a seed phrase, a password inside a database URL) are now hidden from the AI. Before, only files such as .env and key files were hidden. The same check now covers file reads, search, Git diffs and logs, change reviews, project checks and Git command results. Terminal output uses the wider check too.
+- The agent cannot write the hidden "***" back into a file, so a secret is never overwritten by stars.
+- Notes the agent or the auto-learner saves to memory are never saved if they look like a secret.
+- Turning off Settings > Protect secrets also turns this check off.
+
 ## [1.50.9]
 
 ### Added

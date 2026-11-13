@@ -43,7 +43,7 @@ const cache = new Map(); // folder id -> { t, values }
 /** All secret values found in the project's secret files (cached briefly). */
 export async function secretValues(folder) {
   if (!folder || !(await protectionOn())) return [];
-  const c = cache.get(folder.id); if (c && Date.now() - c.t < 20000) return c.values;
+  const c = cache.get(folder.id); if (c && Date.now() - c.t < 60000) return c.values;
   const values = new Set();
   try {
     const { files } = await fs.walk(folder.uri, '', 3000);
@@ -71,7 +71,27 @@ export function redactPatterns(text) {
     .replace(/\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g, '***')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{20,}=*/g, 'Bearer ***')
     .replace(/\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|PRIVATE|CREDENTIALS?|AUTH(?!OR))[A-Z0-9_]*)(\s*[=:]\s*)(["']?)([^\s"']{6,})\3/g, '$1$2$3***$3')
-    .replace(/"([\w.-]*(?:key|secret|token|passw(?:or)?d|pwd|credentials?|authorization)|pass)"(\s*:\s*)"([^"]{6,})"/gi, '"$1"$2"***"');
+    .replace(/"([\w.-]*(?:key|secret|token|passw(?:or)?d|pwd|credentials?|authorization)|pass)"(\s*:\s*)"([^"]{6,})"/gi, '"$1"$2"***"')
+    .replace(/\b\d{8,10}:[A-Za-z0-9_-]{30,45}\b/g, '***') // Telegram bot token
+    .replace(/\b(?:(?:sk|rk)_(?:live|test)_|whsec_)[A-Za-z0-9]{16,}/g, '***') // Stripe style keys
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\/\s:@'"]+:)[^\/\s@'"]+@/gi, '$1***@') // password inside any URL (postgres://user:pw@host)
+    .split('\n').map(redactSecretLine).join('\n');
+}
+const SECRET_LINE = /(private|secret|seed|mnemonic|keypair|wallet|recovery|phrase|api[_-]?key|apikey|token|passw|credential|auth)/i;
+/** On a line that talks about a secret, hide long key-like string values (any name style) and seed phrases. */
+function redactSecretLine(line) {
+  if (line.length < 20 || !SECRET_LINE.test(line)) return line;
+  return line
+    .replace(/(["'])((?:[a-z]{3,9} ){11,23}[a-z]{3,9})\1/g, '$1***$1') // a 12 to 24 word seed phrase
+    .replace(/\b0x[0-9a-fA-F]{64}\b/g, '***')
+    .replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, '***')
+    .replace(/(["'])([A-Za-z0-9+\/_=.:-]{20,})\1/g, (m, q, v) => (/\d/.test(v) && /[A-Za-z]/.test(v) && !/:\/\//.test(v) && !/^\.{0,2}\//.test(v) ? q + '***' + q : m));
+}
+/** What a tool may show the model: secret values and secret-looking strings hidden, with a one-line note when something was hidden. */
+export async function shield(text, folder) {
+  if (typeof text !== 'string' || !text || !(await protectionOn())) return text;
+  const out = await scrub(text, folder);
+  return out === text ? text : out + '\n[Values that look like secrets were hidden as ***. Never write *** into a file; change only the other lines, or tell the user to edit that line.]';
 }
 export const PROTECTED_MSG = 'This file is protected. Its contents are hidden from me and from the chat on purpose. Programs you run in the terminal can still use it. Do not ask the user to paste secret values. If a variable is missing, call request_env_var: the user types the value in a private box and you never see it.';
 

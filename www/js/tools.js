@@ -235,6 +235,12 @@ export function lineDiff(a, b) {
   return { lines: out.slice(0, 400), added, removed, more: out.length > 400 };
 }
 
+/** *** in a change would replace a real hidden secret with three stars. */
+function refuseStars(before, after) {
+  const n = (t) => (String(t || '').match(/\*\*\*/g) || []).length;
+  if (n(after) > n(before)) throw new Error('The new text contains "***", which stands for a hidden secret. Do not write it. Change only the other lines with edit_file, or tell the user to edit that line themselves.');
+}
+
 export async function planWrite(name, args, folder) {
   args = args || {};
   if (name === 'move_file' || name === 'copy_file') {
@@ -295,6 +301,7 @@ export async function planWrite(name, args, folder) {
 
   if (name === 'write_file') {
     const after = fix(args.content == null ? '' : args.content);
+    refuseStars(before, after);
     if (after.length > 1048576) throw new Error('Content is larger than 1 MB.');
     const d = lineDiff(before || '', after);
     return { path: rel, op: before === null ? 'create' : 'overwrite', before, after, diff: d, added: d.added, removed: d.removed };
@@ -314,6 +321,7 @@ export async function planWrite(name, args, folder) {
       if (count > 1 && !e.replace_all) throw new Error(tag + 'The text to replace appears ' + count + ' times in ' + rel + '. Add more surrounding lines to make it unique, or set replace_all.' + (k > 0 ? ' Nothing was changed.' : ''));
       after = e.replace_all ? after.split(find).join(rep) : after.replace(find, () => rep);
     });
+    refuseStars(before, after);
     if (after === before) throw new Error('The change would leave ' + rel + ' exactly as it is.');
     const d = lineDiff(before, after);
     return { path: rel, op: 'edit', before, after, diff: d, added: d.added, removed: d.removed };

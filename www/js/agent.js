@@ -8,7 +8,7 @@ import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo, resetGitCache } from './git.js';
 import { scratchFolder } from './scratch.js';
 import * as G from './git.js';
-import { protectionOn, isSecretPath, scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
+import { protectionOn, isSecretPath, scrub, shield, redactPatterns, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
 import { SERVER_TOOLS, TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand, CHECK_TOOLS_TOOL, checkTools } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { VIEW_TOOL, loadFolderImage } from './image.js';
@@ -34,6 +34,8 @@ const ASK_TOOL = {
   description: 'Ask the user one short question with 2 to 4 answer buttons when you need a choice that you cannot make safely yourself (for example which of two ways to do it, or which file). The answer comes back to you. Do not use it for things you can decide or check yourself, and do not use it to ask permission for a normal change (the user already approves those).',
   parameters: { type: 'object', properties: { question: { type: 'string' }, options: { type: 'array', items: { type: 'string' }, description: '2 to 4 short answers' } }, required: ['question', 'options'] },
 };
+/** Tools whose output can contain file text. Terminal and job output is cleaned separately. */
+const SHIELDED = new Set(['read_file', 'search', 'git_diff', 'git_log', 'review_changes', 'project_map', 'project_checks', 'pre_push_check', 'release_info', 'git_remote', 'git_push', 'git_pull', 'git_fetch', 'git_commit', 'git_branch']);
 const PLAN_TOOL = {
   name: 'update_plan',
   description: 'Show the user a short checklist of the steps of a multi-step task and keep it up to date. Call it at the start of any task with 3 or more steps, then again each time a step starts or finishes. Send the full list every time.',
@@ -394,6 +396,7 @@ const LEARN_SYSTEM =
 export async function addMemoryNote(text, src) {
   const t = String(text || '').trim().slice(0, 240);
   if (!t) return false;
+  if (src !== 'manual' && (/(password|passwd|api[_ -]?key|secret|token|private key|seed phrase|mnemonic|\b\d{12,19}\b)/i.test(t) || redactPatterns(t) !== t)) return false; // notes the model or the auto-learner makes never hold secrets
   let list = await getMemory();
   if (list.some((m) => m.text.toLowerCase() === t.toLowerCase())) return false;
   list.push({ id: uid(), text: t, src: src || 'manual', at: Date.now() });
@@ -830,6 +833,7 @@ export async function runTurn(ctx) {
           tm.content = 'Error: ' + (e && e.message ? e.message : String(e));
         }
       }
+      if (SHIELDED.has(call.name) && typeof tm.content === 'string') tm.content = await shield(tm.content, folder).catch(() => tm.content); // keys and tokens never reach the model or the chat
       await db.put('messages', tm);
       ui.onTool(tm);
       // Loop guard: the same call giving the same result three times, or four errors in a row, means the model is stuck.
