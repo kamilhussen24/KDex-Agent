@@ -562,3 +562,21 @@ html[data-theme=dark]{--warn:#f0b04a;--note:#7aa7ff}
 .exithint{position:fixed;left:50%;bottom:calc(var(--sab, 0px) + 112px);z-index:60;transform:translate(-50%,8px);opacity:0;pointer-events:none;padding:9px 14px;border-radius:14px;background:var(--card);color:var(--fg);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.14);font-size:13px;transition:opacity .18s,transform .18s}
 html[data-theme=dark] .exithint{box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .exithint.show{opacity:1;transform:translate(-50%,0)}
+
+.pbtn.on{color:var(--b2);background:rgba(240,68,120,.12)}
+.box.plan{border-color:var(--b2)}
+.planhint{display:flex;align-items:center;gap:6px;margin:0 4px 6px;font-size:12px;line-height:1;color:var(--b2)}
+.planhint .ic{width:14px;height:14px}
+.box .row .send+.send{margin-left:0}
+.queuebar{display:flex;flex-direction:column;gap:6px;margin:0 0 8px}
+.qchip{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:12px;padding:2px 4px 2px 12px;font-size:13px;background:var(--bg2);min-height:36px}
+.qchip .ic{width:16px;height:16px;color:var(--mut);flex:none}
+.qchip span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qchip .icon-btn{width:32px;height:32px;color:var(--mut);flex:none}
+.msg.user .steer{margin:2px 4px 0;font-size:11px;color:var(--mut);text-align:right}
+.tool .tf.chk{align-items:center}
+.tool .tf.chk .ic{width:16px;height:16px;flex:none}
+.tool .tf.chk.bad{color:var(--bad)}
+.tool .tf.chk.good .ic{color:var(--ok)}
+.ckform{display:flex;flex-direction:column;gap:4px}
+#planDone .grow{white-space:nowrap;flex:none}#planDone{flex-wrap:nowrap}#planDone .btn{margin-left:auto}#planDone .btn+.btn{margin-left:0}

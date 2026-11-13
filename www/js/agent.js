@@ -3,7 +3,7 @@
 import { db, kvGet, kvSet } from './db.js';
 import { secure, fs } from './native.js';
 import { stream, complete } from './providers.js';
-import { TOOLS, WRITE_TOOLS, BINARY_EXT, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
+import { TOOLS, WRITE_TOOLS, BINARY_EXT, runRead, planWrite, applyWrite, undoBackup, globRe } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo, resetGitCache } from './git.js';
 import { scratchFolder } from './scratch.js';
@@ -35,7 +35,25 @@ const ASK_TOOL = {
   parameters: { type: 'object', properties: { question: { type: 'string' }, options: { type: 'array', items: { type: 'string' }, description: '2 to 4 short answers' } }, required: ['question', 'options'] },
 };
 /** Tools whose output can contain file text. Terminal and job output is cleaned separately. */
-const SHIELDED = new Set(['read_file', 'search', 'git_diff', 'git_log', 'review_changes', 'project_map', 'project_checks', 'pre_push_check', 'release_info', 'git_remote', 'git_push', 'git_pull', 'git_fetch', 'git_commit', 'git_branch']);
+const SHIELDED = new Set(['read_file', 'search', 'find_symbol', 'git_diff', 'git_log', 'review_changes', 'project_map', 'project_checks', 'pre_push_check', 'release_info', 'git_remote', 'git_push', 'git_pull', 'git_fetch', 'git_commit', 'git_branch']);
+/** Plan mode: only tools that cannot change anything. */
+const PLAN_OK = new Set(['list_dir', 'find_files', 'search', 'find_symbol', 'read_file', 'update_plan', 'ask_user', 'view_image', 'web_fetch', 'git_status', 'git_diff', 'git_log', 'pre_push_check', 'release_info', 'review_changes', 'project_map', 'calculate', 'convert_units']);
+const PLAN_TEXT = 'PLAN MODE (read only): the user turned on Plan mode. You can read, search and inspect, but you cannot change anything: no writing, editing, moving or deleting files, no commands, no commits. Look at what you need (find_symbol and search are cheap), then reply with the plan: a short numbered list of the steps, the files each step changes, and any risk or open question. Do not start the work and do not ask whether to start; the user sees a Build this plan button. Keep it under about 15 lines.';
+/** Runs the project\'s own check (for example npm run lint) after the agent changed files. Returns null when no changed file matches the project\'s file patterns. */
+async function runChecks(ck, paths, folder, signal) {
+  const globs = String(ck.glob || '').split(',').map((g) => g.trim()).filter(Boolean).map(globRe);
+  const hit = paths.filter((p) => !globs.length || globs.some((g) => g.test(g.base ? p.split('/').pop() : p)));
+  if (!hit.length) return null;
+  const q = (x) => "'" + String(x).replace(/'/g, "'\\''") + "'";
+  const cmd = String(ck.cmd).trim();
+  const run = cmd.includes('{files}') ? cmd.replace(/\{files\}/g, hit.slice(0, 20).map(q).join(' ')) : cmd;
+  const out = await runTermux({ command: run, timeout_seconds: 90 }, folder, signal);
+  const m = /\[exit code (\d+)/.exec(out);
+  const ok = !!m && Number(m[1]) === 0;
+  const body = String(out).replace(/\[exit code[\s\S]*$/, '').trim();
+  const text = (await scrub(body, folder).catch(() => body)).slice(-1500);
+  return { ok, cmd, files: hit, text };
+}
 const PLAN_TOOL = {
   name: 'update_plan',
   description: 'Show the user a short checklist of the steps of a multi-step task and keep it up to date. Call it at the start of any task with 3 or more steps, then again each time a step starts or finishes. Send the full list every time.',
@@ -190,12 +208,12 @@ async function readKdex(folder) {
   return '';
 }
 
-function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, imgOn) {
+function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, imgOn, planMode) {
   const local = !!(folder && !folder.scratch && !folder.remote); // a real folder on the phone
   const parts = [ABOUT, 'LANGUAGE AND LENGTH: reply in the language of the user\'s latest message: an English message gets English; Bengali, or Bengali typed in English letters, gets Bengali. Never switch language on your own. Keep every reply as short as the question allows: a greeting such as "Hi" gets one short line in the same language, without emoji, without a feature list and without describing the app. Longer answers only when the task needs them; this saves the user money.'];
   if (folder && folder.remote) {
     parts.push(
-      'SERVER: you work on the remote server "' + folder.name + '" (' + folder.host + ', user ' + folder.user + ') over SSH, in the server folder ' + (folder.root || '/') + '. Tools: list_dir, find_files, search, read_file, write_file, edit_file, delete_file work on that folder; all paths are relative to it and you cannot reach anything outside it. ' +
+      'SERVER: you work on the remote server "' + folder.name + '" (' + folder.host + ', user ' + folder.user + ') over SSH, in the server folder ' + (folder.root || '/') + '. Tools: list_dir, find_files, search, find_symbol, read_file, write_file, edit_file, delete_file work on that folder; all paths are relative to it and you cannot reach anything outside it. ' +
       'run_command runs a bash command ON THE SERVER (not on the phone), starting in that folder. The user approves every file change and every command. ' +
       'This is a LIVE server, so be careful: change only what was asked, read a file before you change it, keep edits small, and never delete or overwrite without a clear request. A change to a site files is live at once. ' +
       'Commands must finish on their own (no prompts, editors or programs that never exit; add -y flags). After a command you receive stdout, stderr and the exit code: exit code 0 is success, anything else is a failure, so read the output and tell the user the real result in plain words. ' +
@@ -207,7 +225,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, i
   } else if (folder && !folder.scratch) {
     parts.push(
       'PROJECT: you are working inside the folder "' + folder.name + '". Tools: list_dir, find_files, search, read_file, create/edit/delete files. All paths are relative to this folder; you cannot reach anything outside it.\n' +
-      'Rules: look before you change (list_dir, find_files or search, then read_file). Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
+      'Rules: look before you change (list_dir, find_files or search, then read_file). To see where a function or variable is defined and every place it is used (before you rename or change it), call find_symbol once instead of several searches. Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
       'SECRET FILES: .env files, keys and credentials in the project are protected. You cannot read or change them and their contents never appear in the chat; for .env files you see only variable names. You CAN run the project, scripts and tests, which use those files normally. Terminal output has secret values replaced by ***. Never ask the user to paste a secret into the chat. If variables are missing, do not ask what project type or defaults: look at the project (package.json, requirements.txt, code) and make ONE request_env_var call with vars for everything missing. Plain settings (PORT, HOST, NODE_ENV, APP_NAME, APP_URL on localhost, DEBUG, LOG_LEVEL, TZ, a sqlite DATABASE_URL) you CAN set yourself: give each a sensible example value and the app adds it without asking. Secrets (API keys, tokens, passwords) get no value from you: add them to vars with a one-line description of what they are and where to get them; the user types each in a private box or skips it. Keep your message short, and do not lecture about protection. Afterwards continue the task. Do not try to get around this (no cat, base64, copying the file or printing environment values). ' +
       'Do what the user asked and nothing else. The user approves every change and can undo it. ' +
       (termuxPath
@@ -232,6 +250,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, i
   }
   if (local) parts.push(WORK_TOOLS_GUIDE + RELEASE_GUIDE + (termuxPath ? TERMINAL_TOOLS_GUIDE : '') + (imgOn ? IMAGE_GUIDE : ''));
   parts.push(DAILY_GUIDE);
+  if (planMode) parts.push(PLAN_TEXT);
   if (local && kdex) parts.push('PROJECT INSTRUCTIONS (from KDEX.md in the project folder, written by the user; follow them for this project, unless they ask for something unsafe):\n' + kdex);
   if (local && pmap) parts.push('PROJECT MAP (made automatically, may be slightly out of date; use list_dir to confirm before relying on it):\n' + pmap);
   if (custom && custom.trim()) parts.push('User instructions:\n' + custom.trim());
@@ -248,7 +267,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, i
 // ------------------------------------------------------------------ history -> neutral messages
 function toNeutral(m, opts) {
   if (m.role === 'user') {
-    const o = { role: 'user', text: (m.fileData && m.fileData.length ? m.fileData.map((f) => '[File: ' + f.name + ']\n' + f.text).join('\n\n') + (m.text ? '\n\n' : '') : '') + (m.text || '') };
+    const o = { role: 'user', text: (m.steered ? '[The user sent this while you were working. Follow it from now on.]\n' : '') + (m.fileData && m.fileData.length ? m.fileData.map((f) => '[File: ' + f.name + ']\n' + f.text).join('\n\n') + (m.text ? '\n\n' : '') : '') + (m.text || '') };
     if (m.images && m.images.length) {
       if (opts.keepImages) o.images = m.images.map((i) => ({ mime: i.mime, data: i.data }));
       else o.text += '\n[image omitted to save tokens]';
@@ -361,7 +380,7 @@ async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
   const pmap = real ? await projectMap(folder) : '';
   const kdex = real ? await readKdex(folder) : '';
   const imgOn = !!(real && settings.imageProvider && settings.imageModel);
-  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx, pmap, kdex, imgOn), messages: msgs };
+  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx, pmap, kdex, imgOn, !!settings.planMode), messages: msgs };
 }
 
 /** How full the chat history is compared with the token budget of the chosen mode (what the next message would send). */
@@ -433,7 +452,8 @@ export async function runTurn(ctx) {
   const { chat, signal, ui } = ctx;
   const scratch = !ctx.folder; // a chat without a folder works on its private Scratch desk
   const folder = ctx.folder || scratchFolder(chat.id);
-  const settings = await getSettings();
+  const settings = { ...(await getSettings()), planMode: !!ctx.plan };
+  const planMode = !!ctx.plan;
   const rt = await runtimeFor(ctx.modelId);
   const memory = await getMemory();
   const think = ctx.think || 'off';
@@ -458,6 +478,7 @@ export async function runTurn(ctx) {
   const imgOn = !!(!scratch && !remote && settings.imageProvider && settings.imageModel);
   const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
   const tools = scratch ? TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL, FILE_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS) : remote ? TOOLS.concat([PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS, SERVER_TOOLS) : (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version')));
+  const toolsRun = planMode ? tools.filter((t) => PLAN_OK.has(t.name)) : tools;
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
@@ -473,6 +494,12 @@ export async function runTurn(ctx) {
       return;
     }
 
+    if (ui.takeQueued) { // messages the user typed while the task was running join the chat before the next step
+      for (const qt of (await ui.takeQueued()) || []) {
+        const um = { chatId: chat.id, role: 'user', text: String(qt), steered: true, at: Date.now(), status: 'done' };
+        um.id = await db.put('messages', um); ui.onUser(um);
+      }
+    }
     let built = await buildContext(chat, rt, folder, settings, memory, scale);
     const asst = { chatId: chat.id, role: 'assistant', text: '', thought: '', thinkMs: 0, calls: [], model: rt.model.id, status: 'streaming', tin: 0, tout: 0, at: Date.now() };
     asst.id = await db.put('messages', asst);
@@ -487,7 +514,7 @@ export async function runTurn(ctx) {
       try {
         for await (const ev of stream({
           provider: rt.provider, apiKey: rt.apiKey, apiModel: rt.apiModel, system: built.system, messages: built.messages,
-          tools, maxTokens, think, signal,
+          tools: toolsRun, maxTokens, think, signal,
         })) {
           if (ev.t === 'thought') {
             if (!thinkStart) thinkStart = Date.now();
@@ -543,9 +570,11 @@ export async function runTurn(ctx) {
       asst.text = 'The steps above are finished. Ask me if you want a summary or a next step.';
       await db.put('messages', asst); ui.onAssistant(asst);
     }
-    if (failed || !asst.calls.length) return;
+    if (failed) return;
+    if (!asst.calls.length) { if (ui.hasQueued && ui.hasQueued() && !signal.aborted) continue; return; }
 
     // ---- run the tool calls
+    const dirty = new Set(); let lastWrite = null;
     for (const call of asst.calls) {
       if (signal.aborted) {
         const m = { chatId: chat.id, role: 'tool', callId: call.id, name: call.name, content: 'Cancelled by the user.', status: 'cancelled', at: Date.now() };
@@ -558,6 +587,7 @@ export async function runTurn(ctx) {
       ui.onTool(tm);
       try {
         if (call.bad) throw new Error('The tool arguments were not valid JSON. Try again with valid arguments.');
+        if (planMode && !PLAN_OK.has(call.name)) throw new Error('Plan mode is on, so nothing can be changed. Finish the plan in words; the user will switch Plan mode off to build it.');
         if (!folder && call.name !== 'update_plan' && call.name !== 'ask_user' && call.name !== 'make_file' && call.name !== 'web_fetch' && !EXTRA_ANY_NAMES.has(call.name) && !DEVICE_NAMES.has(call.name)) throw new Error('No project folder is open. Tell the user to tap the folder button above the chat and pick the project folder.');
         if (call.name === 'update_plan') {
           const steps = (Array.isArray(call.args && call.args.steps) ? call.args.steps : []).slice(0, 20).map((x) => ({ text: String((x && x.text) || '').slice(0, 160), status: ['todo', 'doing', 'done'].includes(x && x.status) ? x.status : 'todo' })).filter((x) => x.text);
@@ -820,6 +850,7 @@ export async function runTurn(ctx) {
             readSeen.clear();
             tm.status = 'applied';
             if (bk) tm.backupId = bk.id;
+            dirty.add(plan.path); lastWrite = tm;
           }
         } else {
           const rk = call.name === 'read_file' ? JSON.stringify([call.args && call.args.path, call.args && call.args.offset, call.args && call.args.limit]) : null;
@@ -843,6 +874,14 @@ export async function runTurn(ctx) {
         errRun = tm.status === 'error' ? errRun + 1 : 0;
         if (!stuck && n >= 3 && !WRITE_TOOLS.has(call.name)) stuck = 'I got the same result from the same step three times';
         else if (!stuck && errRun >= 4) stuck = 'four steps in a row failed';
+      }
+    }
+    if (dirty.size && lastWrite && !signal.aborted && (termuxPath || remote) && folder.checks && folder.checks.on && String(folder.checks.cmd || '').trim()) {
+      const res = await runChecks(folder.checks, [...dirty], folder, signal).catch(() => null);
+      if (res) {
+        lastWrite.check = { ok: res.ok, cmd: res.cmd, text: res.text };
+        lastWrite.content = (lastWrite.content || '') + '\n[Automatic check after your edit: ' + res.cmd + ' ' + (res.ok ? 'passed.]' : 'FAILED. Fix these problems before you go on:]\n' + res.text);
+        await db.put('messages', lastWrite); ui.onTool(lastWrite);
       }
     }
     if (signal.aborted) return;

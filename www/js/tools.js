@@ -36,6 +36,11 @@ export const TOOLS = [
     },
   },
   {
+    name: 'find_symbol',
+    description: 'Find where a function, class, variable or constant is defined and every place it is used, in one call. Returns definitions and usages as path:line grouped by file. Matches by name (not a full code index), so read the file before you change anything.',
+    parameters: { type: 'object', properties: { name: { type: 'string', description: 'The exact identifier, for example askChoice or UserService' }, path: { type: 'string', description: 'Optional folder to limit the search' }, glob: { type: 'string', description: 'Optional file pattern, for example *.js or src/**/*.ts' }, max_results: { type: 'number', description: 'Most usages to list (default 60, max 200)' } }, required: ['name'] },
+  },
+  {
     name: 'read_file',
     description: 'Read a text file with line numbers. Returns up to 2000 lines per call, so most files fit in one call. For a very large file, use search first to find the lines you need, then read only that range with offset and limit. Never re-read a part you already have.',
     parameters: {
@@ -90,7 +95,7 @@ export const BINARY_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|pdf|zip|gz|tar|7z|rar|a
 const MAX_OUT = 40000;
 
 /** A file pattern (* any letters in a name, ** across folders, ? one letter) as a regular expression. A pattern without a slash matches the file name only (re.base). */
-function globRe(g) {
+export function globRe(g) {
   const src = String(g).trim().replace(/^\.\//, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '(?:.*/)?');
   const re = new RegExp('^' + src + '$', 'i');
   re.base = !String(g).includes('/');
@@ -158,6 +163,51 @@ export async function runRead(name, args, folder) {
     }
     const note = (skippedFiles ? '\n(Stopped early: ' + skippedFiles + ' more files were not searched. Narrow it with path or glob.)' : '') + (results.length >= maxRes ? '\n(Showing the first ' + maxRes + ' matches. Narrow it with path or glob, or raise max_results.)' : '');
     return results.length ? clip(results.join('\n')) + note : 'No matches (searched ' + scanned + ' files).' + note;
+  }
+
+  if (name === 'find_symbol') {
+    const sym = String(args.name || '').trim();
+    if (!/^[A-Za-z_$][\w$]*$/.test(sym)) throw new Error('name must be one identifier such as askChoice (letters, digits, _ and $).');
+    const esc = sym.replace(/\$/g, '\\$');
+    const hit = new RegExp('(?<![\\w$])' + esc + '(?![\\w$])');
+    const defs = [
+      new RegExp('(?<![\\w$])(?:function\\*?|class|interface|type|enum|struct|trait|def|fn|func|fun|const|let|var|val|object|record|module|namespace)\\s+' + esc + '(?![\\w$])'),
+      new RegExp('^\\s*(?:export\\s+)?(?:(?:public|private|protected|static|readonly)\\s+)*' + esc + '\\s*[:=]\\s*(?:async\\s*)?(?:function|\\(|[A-Za-z_$][\\w$]*\\s*=>|class\\b)'),
+      new RegExp('^\\s*(?:(?:public|private|protected|static|async|override|final|abstract|get|set)\\s+)*' + esc + '\\s*\\([^)]*\\)\\s*(?::\\s*[\\w<>\\[\\]| ]+)?\\s*\\{\\s*$'),
+    ];
+    const base = cleanRel(args.path || '');
+    const globs = String(args.glob || '').split(',').map((g) => g.trim()).filter(Boolean).map(globRe);
+    const maxUse = Math.max(1, Math.min(200, parseInt(args.max_results, 10) || 60));
+    const { files } = await fs.walk(folder.uri, base, 3000);
+    const prot = await protectionOn();
+    const defHits = []; const useHits = new Map(); let nUse = 0; let scanned = 0; let left = 0;
+    const started = Date.now();
+    for (const f of files) {
+      if (isGitInternal(f.path) || BINARY_EXT.test(f.path) || f.size > 200000 || (prot && isSecretPath(f.path))) continue;
+      if (/(^|\/)(node_modules|dist|build|\.next|vendor|coverage)\//.test(f.path) || /\.min\.(js|css)$/.test(f.path)) continue;
+      if (globs.length && !globs.some((g) => g.test(g.base ? f.path.split('/').pop() : f.path))) continue;
+      if (scanned >= 800 || Date.now() - started > 10000) { left++; continue; }
+      scanned++;
+      try {
+        const r = await fs.readText(folder.uri, f.path, 200000);
+        if (r.binary || !r.text.includes(sym)) continue;
+        const lines = r.text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          if (!hit.test(lines[i])) continue;
+          const t = lines[i].trim().slice(0, 160);
+          if (defs.some((re) => re.test(lines[i])) && defHits.length < 20) { defHits.push(f.path + ':' + (i + 1) + ': ' + t); continue; }
+          nUse++;
+          if (nUse <= maxUse) { if (!useHits.has(f.path)) useHits.set(f.path, []); useHits.get(f.path).push('  ' + (i + 1) + ': ' + t); }
+        }
+      } catch (e) { /* skip unreadable files */ }
+    }
+    const out = [];
+    out.push(defHits.length ? 'Definitions of ' + sym + ':\n' + defHits.join('\n') : 'No definition of ' + sym + ' found (it may come from a library or be built dynamically).');
+    if (nUse) {
+      out.push('Usages (' + nUse + ' in ' + useHits.size + ' file' + (useHits.size === 1 ? '' : 's') + (nUse > maxUse ? ', first ' + maxUse + ' shown' : '') + '):\n' + [...useHits].map(([p, ls]) => p + '\n' + ls.join('\n')).join('\n'));
+    } else out.push('No other usages found.');
+    out.push('(Name match in ' + scanned + ' files' + (left ? '; ' + left + ' more not scanned, narrow it with path or glob' : '') + '. Read the file to confirm before you change anything.)');
+    return clip(out.join('\n\n'));
   }
 
   if (name === 'read_file') {

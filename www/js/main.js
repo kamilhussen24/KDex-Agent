@@ -25,7 +25,7 @@ import { toolLabel, opLabel } from './toollabels.js';
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
   chat: null, folder: null, think: 'off', running: false, abort: null, runChat: null,
-  approvals: new Map(), approvalTm: new Map(), els: new Map(), attach: [], sheetStack: [],
+  approvals: new Map(), approvalTm: new Map(), els: new Map(), attach: [], sheetStack: [], queue: [],
 };
 const ICON = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
 /** The folder the file tools work on right now: the project, or this chat's Scratch desk. */
@@ -419,7 +419,7 @@ async function newChat(folder) {
   S.chat = { id: uid(), title: '', model: currentModelId(), think: S.settings.defaultThink || 'off', auto: !!S.settings.autoDefault && !(folder && folder.remote), folderId: folder ? folder.id : null, updated: Date.now() };
   S.folder = folder || null; S.think = S.chat.think; S.chat.fresh = true;
   S.els.clear(); if (!S.running) S.approvals.clear();
-  fillModels(S.chat.model); drawCtx(); drawThink(); $('#messages').innerHTML = ''; renderEmpty(); setRunning(S.running); updateApproveBar(); closeDrawer(); drawRing();
+  fillModels(S.chat.model); drawCtx(); drawThink(); drawPlan(); $('#messages').innerHTML = ''; renderEmpty(); setRunning(S.running); updateApproveBar(); closeDrawer(); drawRing();
 }
 /** Content shared from another app, or a notification tap: open the right chat and drop the shared text/files into the composer. */
 async function handleLaunch(l) {
@@ -441,7 +441,7 @@ async function openChat(id) {
   const c = live ? S.runChat : await db.get('chats', id); if (!c) return newChat();
   S.chat = c; S.folder = S.folders.find((f) => f.id === c.folderId) || null; S.think = c.think || 'off'; touchFolder(S.folder);
   await db.put('kv', { key: 'lastChat', value: id });
-  fillModels(c.model); drawCtx(); drawThink();
+  fillModels(c.model); drawCtx(); drawThink(); drawPlan();
   S.els.clear(); if (!S.running) S.approvals.clear();
   if (!live) await A.repairHistory(id);
   const msgs = (await db.byIndex('messages', 'chatId', id)).sort((a, b) => a.id - b.id);
@@ -519,7 +519,7 @@ function renderMsg(m) {
   if (m.role === 'user') {
     el.className = 'msg user';
     el.innerHTML = (m.images && m.images.length ? '<div class="thumbs">' + m.images.map((i) => '<img alt="" src="data:' + i.mime + ';base64,' + i.data + '">').join('') + '</div>' : m.imagesRemoved ? '<div class="gone">' + m.imagesRemoved + ' picture' + (m.imagesRemoved > 1 ? 's' : '') + ' removed</div>' : '') +
-      (m.fileData && m.fileData.length ? '<div class="ufiles">' + m.fileData.map((f, i) => '<button type="button" class="ufile" data-ufile="' + m.id + ':' + i + '" aria-label="Save ' + esc(f.name) + '">' + ICON('file') + '<span class="nm">' + esc(f.name) + '</span><span class="sz">' + esc(fmtBytes(f.size)) + '</span></button>').join('') + '</div>' : (m.files && m.files.length ? '<div class="fnames">' + m.files.map(esc).join(', ') + '</div>' : '')) + (m.text ? '<div class="bubble">' + esc(m.text) + '</div>' : '');
+      (m.fileData && m.fileData.length ? '<div class="ufiles">' + m.fileData.map((f, i) => '<button type="button" class="ufile" data-ufile="' + m.id + ':' + i + '" aria-label="Save ' + esc(f.name) + '">' + ICON('file') + '<span class="nm">' + esc(f.name) + '</span><span class="sz">' + esc(fmtBytes(f.size)) + '</span></button>').join('') + '</div>' : (m.files && m.files.length ? '<div class="fnames">' + m.files.map(esc).join(', ') + '</div>' : '')) + (m.text ? '<div class="bubble">' + esc(m.text) + '</div>' : '') + (m.steered ? '<div class="steer">Sent while working</div>' : '');
   } else if (m.role === 'assistant') {
     el.className = 'msg assistant';
     const live = m.status === 'streaming';
@@ -548,7 +548,7 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file', project_map: 'folder', project_checks: 'list', check_tools: 'terminal', github_runs: 'branch', github_run_log: 'branch', github_issues: 'branch', calculate: 'list', convert_units: 'list', remember: 'file', clipboard_read: 'file', clipboard_write: 'file', set_alarm: 'list', set_timer: 'list', generate_image: 'file', pre_push_check: 'list', bump_version: 'edit', release: 'up', release_info: 'list', review_changes: 'search', report_findings: 'list' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', find_symbol: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file', project_map: 'folder', project_checks: 'list', check_tools: 'terminal', github_runs: 'branch', github_run_log: 'branch', github_issues: 'branch', calculate: 'list', convert_units: 'list', remember: 'file', clipboard_read: 'file', clipboard_write: 'file', set_alarm: 'list', set_timer: 'list', generate_image: 'file', pre_push_check: 'list', bump_version: 'edit', release: 'up', release_info: 'list', review_changes: 'search', report_findings: 'list' };
 function planCard(m) {
   const done = m.steps.filter((x) => x.status === 'done').length;
   return '<div class="tool plan"><div class="th">' + ICON('list') + '<span class="nm">Plan</span><span class="pa">' + done + ' of ' + m.steps.length + ' done</span></div><div class="steps">' +
@@ -601,6 +601,7 @@ function toolCard(m) {
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
     h += '</div>';
     if (m.plan.path === 'terminal' && m.content && st !== 'pending') { const oc = m.content.slice(-3000); h += '<pre class="out">' + esc(oc) + '</pre>' + (oc.split('\n').length > 12 ? '<div class="tf outx"><span class="fsz hidden"><button class="fbtn" data-tool="fs-" type="button" aria-label="Smaller text">A\u2212</button><button class="fnum' + (outFs() !== 11 ? ' chg' : '') + '" data-tool="fs0" type="button" aria-label="Reset text size">' + outFs() + '</button><button class="fbtn" data-tool="fs+" type="button" aria-label="Larger text">A+</button></span><span style="flex:1"></span><button class="linkbtn" data-tool="xout" type="button">Expand</button></div>' : ''); }
+    if (m.check) h += '<div class="tf chk ' + (m.check.ok ? 'good' : 'bad') + '">' + ICON('shield-check') + '<span class="lbl" style="flex:1">' + (m.check.ok ? 'Check passed' : 'Check failed') + ' \u00b7 ' + esc(String(m.check.cmd).slice(0, 36)) + '</span></div>' + (m.check.ok ? '' : '<pre class="out">' + esc(m.check.text) + '</pre>');
     if (m.preview && m.preview.length) h += '<div class="genimg"><img alt="Generated picture" src="data:' + m.preview[0].mime + ';base64,' + m.preview[0].data + '"></div>';
   } else if (m.status === 'error' || m.status === 'cancelled') {
     h += '<pre class="out wrap">' + esc((m.content || '').slice(0, 400)) + '</pre>';
@@ -660,9 +661,8 @@ async function showRing() {
 }
 function setRunning(v) {
   S.running = v; if (!v) S.runChat = null;
-  const b = $('#sendBtn'); const stop = runHere();
-  b.classList.toggle('stop', stop); b.innerHTML = ICON(stop ? 'stop' : 'up'); b.setAttribute('aria-label', stop ? 'Stop' : 'Send');
-  drawRunStrip();
+  const stop = runHere(); const sb = $('#stopBtn'); if (sb) sb.classList.toggle('hidden', !stop);
+  drawQueue(); drawRunStrip();
 }
 /** Back on the main screen. It never stops a task: while one runs it asks first, otherwise it needs a second press to leave. */
 let backAt = 0; let backAsking = false;
@@ -694,12 +694,19 @@ function noModelNotice() {
 }
 const lastSent = { text: '', at: 0 };
 /** Some phone keyboards give back the word they were still composing right after the box is cleared. Clear it again if the same text returns. */
+let ghostSeq = 0;
 function ghostGuard(sent) {
-  const input = $('#input');
-  [60, 200, 500, 1000].forEach((ms) => setTimeout(() => { if (input.value.trim() === sent) { input.value = ''; autoGrow(); } }, ms));
+  const input = $('#input'); const my = ++ghostSeq;
+  [60, 200, 500, 1000].forEach((ms) => setTimeout(() => { if (my === ghostSeq && input.value.trim() === sent) { input.value = ''; autoGrow(); } }, ms));
 }
 async function send(regenerate) {
-  if (S.running && runHere()) { stopRun(); return; }
+  if (S.running && runHere()) { // a task runs here: a typed message waits in line and joins at the next step
+    if (regenerate) return;
+    const qt = $('#input').value.trim();
+    if (!qt && !S.attach.length) return;
+    if (S.attach.length) { toast('Attachments can be added when the task is done', { kind: 'warn' }); return; }
+    S.queue.push(qt); $('#input').value = ''; autoGrow(); ghostGuard(qt); drawQueue(); return;
+  }
   if (S.running) { // a task runs in another chat: one task at a time, so ask what to do
     if (!regenerate && !$('#input').value.trim() && !S.attach.length) return;
     const v = await choiceBox('Another task is running', 'Finish or stop \u201c' + (S.runChat && S.runChat.title || 'New chat') + '\u201d before starting a new one here.', ['Wait', 'Stop it'], { noCancel: true });
@@ -716,14 +723,16 @@ async function send(regenerate) {
   if (!regenerate) { input.value = ''; autoGrow(); S.attach = []; drawChips(); if (text) { lastSent.text = text; lastSent.at = Date.now(); ghostGuard(text); } }
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
   const tu = $('#turnUndo'); if (tu) tu.remove();
+  const pd = $('#planDone'); if (pd) pd.remove(); input.placeholder = 'Message KDex Agent';
   delete S.chat.fresh; await persistChat(); loadChats();
-  const chat = S.chat; const folder = S.folder; const think = S.think;
+  const chat = S.chat; const folder = S.folder; const think = S.think; const planOn = !!chat.plan; let runOk = true; S.queue = [];
   const here = () => !!(S.chat && S.chat.id === chat.id); // false while the user looks at another chat: the task keeps running, the screen is not touched
   S.abort = new AbortController(); S.runChat = chat; setRunning(true);
   Work.start('Working on your request'); const t0 = Date.now();
   const ui = {
     onUser: (m) => { if (here()) renderMsg(m); }, onAssistant: (m) => { if (here()) renderMsg(m); }, onDelta: (m) => { if (here()) { netLine(''); renderMsg(m); } },
     onTool: (m) => { if (!here()) return; renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); else if (m.name === 'make_file' && m.status === 'done') drawScratch(); },
+    takeQueued: async () => { const q = S.queue.splice(0); drawQueue(); return q; }, hasQueued: () => S.queue.length > 0,
     requestSecret: (info, signal) => askSecret(info, signal), askUser: (q, opts, signal) => { Work.needs('A question is waiting for you', chat.id); return askChoice(q, opts, signal); }, watchBuild: (folder, sha, label) => { CI.watchBuild(folder, sha, label); },
     onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t, { kind: 'warn' }); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
@@ -733,20 +742,24 @@ async function send(regenerate) {
     }),
   };
   try {
-    await A.runTurn({ chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder, modelId: currentModelId(), think, signal: S.abort.signal, ui, regenerate: !!regenerate });
+    await A.runTurn({ chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder, modelId: currentModelId(), think, plan: planOn, signal: S.abort.signal, ui, regenerate: !!regenerate });
     netLine('');
     if (!S.abort || !S.abort.signal.aborted) Work.done(true, 'Your request is done.', chat.id);
     D.log('run', 'Agent run \u00b7 ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
   } catch (e) {
-    netLine(''); D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120), chat.id);
+    runOk = false; netLine(''); D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120), chat.id);
     toast(e.message || 'Something went wrong', { kind: 'err' });
     const m = { chatId: chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
     m.id = await db.put('messages', m); if (here()) renderMsg(m);
   }
+  if (S.queue.length) { // a message that never got picked up goes back into the box so nothing is lost
+    const left = S.queue.splice(0).join('\n'); ghostSeq++;
+    if (here()) { const inp = $('#input'); inp.value = left + (inp.value ? '\n' + inp.value : ''); autoGrow(); toast('Your message was not sent. It is back in the box.', { kind: 'warn' }); }
+  }
   const wasAway = !here(); const stopped = !!(S.abort && S.abort.signal.aborted);
   Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); loadChats();
   if (wasAway) { if (!stopped) toast('Task finished in \u201c' + (chat.title || 'New chat') + '\u201d', { result: true, action: { label: 'View', fn: () => openChat(chat.id) } }); return; }
-  updateChangesChip(); drawRing(); showTurnUndo(t0);
+  updateChangesChip(); drawRing(); if (planOn && runOk && !stopped) showPlanCard(); showTurnUndo(t0);
 }
 /** Puts a ready-made request in the chat and sends it (used by Fix buttons). */
 async function quickSend(text) {
@@ -825,6 +838,29 @@ function warnNoVision() {
 function autoGrow() { const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; }
 
 // ------------------------------------------------------------ thinking pill
+function drawPlan() {
+  const on = !!(S.chat && S.chat.plan); const b = $('#planBtn'); if (!b) return;
+  b.classList.toggle('on', on); const l = 'Plan mode: ' + (on ? 'on' : 'off'); b.setAttribute('aria-label', l); b.title = l;
+  $('#planHint').classList.toggle('hidden', !on); $('#composer .box').classList.toggle('plan', on);
+}
+/** Messages typed while the task runs wait here as small chips until the agent picks them up. */
+function drawQueue() {
+  const el = $('#queueBar'); if (!el) return;
+  const show = runHere() && S.queue.length > 0;
+  el.classList.toggle('hidden', !show);
+  el.innerHTML = show ? S.queue.map((t, i) => '<div class="qchip">' + ICON('clock') + '<span>' + esc(t) + '</span><button class="icon-btn" type="button" data-q="' + i + '" aria-label="Remove this message">' + ICON('x') + '</button></div>').join('') : '';
+  $$('[data-q]', el).forEach((b) => { b.onclick = () => { S.queue.splice(+b.dataset.q, 1); drawQueue(); }; });
+}
+/** After a Plan mode answer: build it, or ask for changes. */
+function showPlanCard() {
+  const old = $('#planDone'); if (old) old.remove();
+  if (!S.chat) return;
+  const el = document.createElement('div'); el.id = 'planDone'; el.className = 'turnundo';
+  el.innerHTML = '<span class="grow">Plan ready</span><button class="btn sm" data-a="rev">' + ICON('edit') + '<span class="lbl">Revise</span></button><button class="btn primary sm" data-a="go">' + ICON('check') + '<span class="lbl">Build this plan</span></button>';
+  $('#messages').appendChild(el); scrollEnd(true);
+  $('[data-a=rev]', el).onclick = () => { const i = $('#input'); i.placeholder = 'What should change in the plan?'; i.focus(); };
+  $('[data-a=go]', el).onclick = async () => { el.remove(); if (S.chat) { S.chat.plan = false; drawPlan(); persistChat(); } await quickSend('Build the plan above now. Make the changes.'); };
+}
 function drawThink() {
   const tl = 'Thinking: ' + S.think[0].toUpperCase() + S.think.slice(1);
   $('#thinkBtn').setAttribute('aria-label', tl); $('#thinkBtn').title = tl; $('#thinkBtn').classList.toggle('on', S.think !== 'off');
@@ -1038,7 +1074,7 @@ async function openProjects() {
       (S.folders.length ? '<div class="h3">Your folders</div>' : '') +
       (S.folders.length >= 6 ? '<label class="fsearch">' + ICON('search') + '<input id="fQ" placeholder="Search folders" autocomplete="off" value="' + esc(fq) + '"></label>' : '') +
       byRecent().map((f) => '<div class="row-item frow" data-f="' + f.id + '">' + ICON(f.remote ? 'server' : 'folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">' + (S.folder && S.folder.id === f.id ? 'Used in this chat' : f.used ? 'Opened ' + ago(f.used) : 'Tap to use in this chat') + '</div></div>' +
-        '<button class="icon-btn rbtn" data-nf="' + f.id + '" aria-label="New chat in this folder">' + ICON('plus') + '</button>' + (f.remote ? '<button class="icon-btn rbtn" data-es="' + f.id + '" aria-label="Edit server">' + ICON('edit') + '</button>' : '') + '<button class="icon-btn rbtn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button>' +
+        '<button class="icon-btn rbtn" data-nf="' + f.id + '" aria-label="New chat in this folder">' + ICON('plus') + '</button>' + (f.remote ? '<button class="icon-btn rbtn" data-es="' + f.id + '" aria-label="Edit server">' + ICON('edit') + '</button>' : '') + '<button class="icon-btn rbtn" data-ck="' + f.id + '" aria-label="Checks after edits for ' + esc(f.name) + '">' + ICON('shield-check') + '</button><button class="icon-btn rbtn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button>' +
         '<div class="fp"><span class="fpath">' + esc(paths[f.id] || 'Path unknown').replace(/\//g, '/<wbr>') + '</span>' + (paths[f.id] && !f.remote ? '<button class="icon-btn rbtn" data-cp="' + f.id + '" aria-label="Copy path of ' + esc(f.name) + '">' + ICON('copy') + '</button>' : '') + '</div></div>').join('') +
       '<div class="note" style="margin-top:12px">Android does not allow picking the whole storage or the Download folder. Choose a subfolder, for example one you create for a project.</div>';
     $('#pOpen').onclick = async () => {
@@ -1056,10 +1092,11 @@ async function openProjects() {
     $('#pClone').onclick = cloneFlow;
     $('#pServer').onclick = () => openServerForm();
     $$('[data-es]', body).forEach((b) => b.onclick = () => openServerForm(S.folders.find((x) => x.id === b.dataset.es)));
+    $$('[data-ck]', body).forEach((b) => b.onclick = () => openChecks(S.folders.find((x) => x.id === b.dataset.ck)));
     if ($('#pDetach')) $('#pDetach').onclick = () => applyFolder(null);
     $('#pNone').onclick = () => { closeSheet(); newChat(null); };
     $$('[data-f]', body).forEach((r) => r.onclick = async (e) => {
-      if (e.target.closest('[data-rmf]') || e.target.closest('[data-nf]') || e.target.closest('[data-cp]') || e.target.closest('[data-es]')) return;
+      if (e.target.closest('[data-rmf]') || e.target.closest('[data-nf]') || e.target.closest('[data-cp]') || e.target.closest('[data-es]') || e.target.closest('[data-ck]')) return;
       await applyFolder(S.folders.find((x) => x.id === r.dataset.f));
     });
     $$('[data-cp]', body).forEach((b) => b.onclick = async () => { flashCopied(b, await copyText(paths[b.dataset.cp])); });
@@ -1074,6 +1111,22 @@ async function openProjects() {
     });
   };
   draw();
+}
+
+/** Per-folder check that runs after the agent changes a file (for example npm run lint). */
+function openChecks(f) {
+  if (!f) return;
+  const body = sheet('Checks after edits', { back: openProjects });
+  const ck = f.checks || { on: false, cmd: '', glob: '' };
+  const needTerm = !f.remote && !(S.settings && S.settings.termux);
+  body.innerHTML = '<div class="note" style="text-align:left;margin-top:0">Runs after I change a file in <b>' + esc(f.name) + '</b>. If it fails, I see the errors right away and fix them. A passing check shows as one line.</div>' +
+    '<label class="gr" style="border:0"><input type="checkbox" class="cb" id="ckOn"' + (ck.on ? ' checked' : '') + '><span>Run a check after edits</span></label>' +
+    '<label class="field"><span>Command</span><input id="ckCmd" value="' + esc(ck.cmd || '') + '" placeholder="npm run lint" autocapitalize="off" autocomplete="off" spellcheck="false"></label>' +
+    '<label class="field"><span>Files</span><input id="ckGlob" value="' + esc(ck.glob || '') + '" placeholder="*.js, *.ts" autocapitalize="off" autocomplete="off" spellcheck="false"></label>' +
+    '<div class="note" style="text-align:left">Only runs when a changed file matches Files (empty means every file). Use {files} in the command to pass the changed files. ' + (f.remote ? 'It runs on the server.' : needTerm ? 'It needs Terminal: turn it on in Settings.' : 'It runs in Termux.') + '</div>';
+  const save = async () => { f.checks = { on: $('#ckOn').checked, cmd: $('#ckCmd').value.trim(), glob: $('#ckGlob').value.trim() }; await A.saveFolders(S.folders); };
+  ['#ckOn', '#ckCmd', '#ckGlob'].forEach((q) => { $(q).onchange = save; });
+  $('#ckCmd').oninput = () => { if ($('#ckCmd').value.trim() && !$('#ckOn').checked) { $('#ckOn').checked = true; } };
 }
 
 /** Open any folder by typing its path. The path is checked as you type, and nothing is opened until it exists. */
@@ -2332,6 +2385,8 @@ function wire() {
   $('#fileInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
   $('#chips').onclick = (e) => { const b = e.target.closest('[data-rm]'); if (b) { S.attach.splice(Number(b.dataset.rm), 1); drawChips(); } };
   $('#ctxBtn').onclick = showRing;
+  $('#planBtn').onclick = () => { if (!S.chat) return; S.chat.plan = !S.chat.plan; drawPlan(); persistChat(); toast(S.chat.plan ? 'Plan mode on: I only read and plan' : 'Plan mode off'); };
+  $('#stopBtn').onclick = () => { if (S.running && runHere()) stopRun(); };
   $('#thinkBtn').onclick = (e) => { e.stopPropagation(); $('#thinkMenu').classList.toggle('hidden'); };
   $('#thinkMenu').onclick = (e) => { const b = e.target.closest('[data-think]'); if (!b) return; S.think = b.dataset.think; drawThink(); $('#thinkMenu').classList.add('hidden'); persistChat(); };
   document.addEventListener('click', (e) => { if (!e.target.closest('#thinkMenu')) $('#thinkMenu').classList.add('hidden'); });

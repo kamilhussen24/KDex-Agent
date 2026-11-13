@@ -7,6 +7,17 @@ for its version.
 
 ## [Unreleased]
 
+## [1.51.0]
+
+### Added
+- Send a new instruction while the agent is working. The message waits as a small line above the box (tap the cross to remove it) and the agent reads it before its next step. A Stop button now sits next to Send. If you press Stop first, your waiting message goes back into the box.
+- Plan mode: a new button next to the thinking button. While it is on, the agent can only read, search and look at Git; it cannot change anything or run commands. It ends with a plan, and the chat shows Build this plan (turns Plan mode off and starts the work) and Revise.
+- Checks after edits: in Folders, each folder has a new button. Set a command (for example npm run lint) and the files it applies to. After the agent changes a matching file the app runs it; a pass shows one line, a failure shows the errors and the agent fixes them at once. Works in Termux and on servers.
+- find_symbol tool: shows where a function, class or variable is defined and every place it is used, in one call. It saves several searches and many tokens when renaming or changing code.
+
+### Changed
+- The Send button no longer turns into Stop while a task runs; Stop is its own button.
+
 ## [1.50.10]
 
 ### Security

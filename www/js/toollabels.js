@@ -1,7 +1,7 @@
 // Friendly names for the tool cards. The code names (read_file, git_push ...) are never shown to the person.
 export const TOOL_LABEL = {
   read_file: 'Read file', write_file: 'Write file', edit_file: 'Edit file', delete_file: 'Delete file', make_file: 'Create file', move_file: 'Move file', copy_file: 'Copy file', make_folder: 'New folder', ask_user: 'Question',
-  list_dir: 'List folder', find_files: 'Find files', search: 'Search', view_image: 'View image', zip: 'Zip', unzip: 'Unzip',
+  list_dir: 'List folder', find_files: 'Find files', search: 'Search', find_symbol: 'Find symbol', view_image: 'View image', zip: 'Zip', unzip: 'Unzip',
   git_status: 'Git status', git_diff: 'Compare changes', git_log: 'Git history', git_commit: 'Commit', git_push: 'Push to GitHub',
   git_pull: 'Pull', git_fetch: 'Fetch', git_branch: 'Branch', git_remote: 'Remote', git_merge: 'Merge', git_discard: 'Discard changes', git_undo_commit: 'Undo commit',
   github_runs: 'Build runs', github_run_log: 'Build log', github_issues: 'Issues', release_info: 'Release info', release: 'Release',
