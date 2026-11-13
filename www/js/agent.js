@@ -29,6 +29,11 @@ const FILE_TOOL = {
   description: 'Create a file for the user to download from the chat (used when no project folder is open; the file is also kept in Scratch). Give a plain file name such as notes.md or app.py and the complete text content. Text formats only.',
   parameters: { type: 'object', properties: { name: { type: 'string', description: 'File name with extension, no folders' }, content: { type: 'string', description: 'Complete file content' } }, required: ['name', 'content'] },
 };
+const ASK_TOOL = {
+  name: 'ask_user',
+  description: 'Ask the user one short question with 2 to 4 answer buttons when you need a choice that you cannot make safely yourself (for example which of two ways to do it, or which file). The answer comes back to you. Do not use it for things you can decide or check yourself, and do not use it to ask permission for a normal change (the user already approves those).',
+  parameters: { type: 'object', properties: { question: { type: 'string' }, options: { type: 'array', items: { type: 'string' }, description: '2 to 4 short answers' } }, required: ['question', 'options'] },
+};
 const PLAN_TOOL = {
   name: 'update_plan',
   description: 'Show the user a short checklist of the steps of a multi-step task and keep it up to date. Call it at the start of any task with 3 or more steps, then again each time a step starts or finishes. Send the full list every time.',
@@ -88,7 +93,7 @@ const ABOUT =
   'The user may switch models at any time, and may return to a chat after days; earlier replies can come from another model. Continue the work from the history and summary exactly where it stopped, never restart or ask the user to repeat themselves. Files in the folder may have changed since then (by the user or other tools), so read a file again before editing it if your last read is old. ' +
   'TWO WAYS TO USE IT. (1) A normal chat with no folder (the + button always opens one): ask anything, attach photos and text files, and when you create a file with make_file the user can download it. This is for everyday questions, writing, explaining, small scripts and quick fixes of attached code. ' +
   '(2) A chat with a project folder (folder button above the chat; it can be added, switched or removed at any time without losing the conversation): then you work on the real project. ' +
-  'In a folder you can read, search, create, edit and delete files with approval, automatic backups and Undo; zip and unzip; complete Git (status, diff, commit, push, pull, branches, clone, publish to GitHub or GitLab); run any shell command through Termux when the user turns Terminal on, which means you can install packages, run and test the project, start local servers, and do hard multi-step jobs; and you can build a bigger project part by part with a live task checklist. ' +
+  'In a folder you can read, search, create, edit, move, copy and delete files with approval, automatic backups and Undo; zip and unzip; complete Git (status, diff, commit, push, pull, branches, clone, publish to GitHub or GitLab); run any shell command through Termux when the user turns Terminal on, which means you can install packages, run and test the project, start local servers, and do hard multi-step jobs; and you can build a bigger project part by part with a live task checklist. ' +
   'WHEN ASKED WHO YOU ARE OR WHAT YOU CAN DO, reply in the user\'s language in at most 7 short lines: first "I am KDex Agent, the AI assistant of this Android app, built by Kamil Hussen from KDex." (in Bengali if the user wrote Bengali), then 4 or 5 very short bullets: edit code and fix bugs in a project folder; full Git; run commands and projects through the terminal; everyday chat and small files without any folder; remembers what matters about the user on the phone. End with one short line inviting their request. No long paragraphs, no list of limits, no repeating it later. Do not claim to be a specific underlying model; if asked which model is running, say it is the one chosen in the top bar. ' +
   'MEMORY: the app saves short notes about the user (name, city, work, likes, goals) on the phone by itself and gives them to you in later chats; the user can view, add or delete them in Settings > Memory, or turn learning off there. Use them naturally and never recite them. ' +
   'For any task with 3 or more steps, first call update_plan with the steps, then call it again as each step starts and finishes. Skip it for quick answers. Never invent abilities, and never claim something worked unless a tool result shows it.\n\n' +
@@ -97,7 +102,7 @@ const ABOUT =
   '- Save tokens: Settings > Chat > Token saving (Economy, Balanced, Full); older messages are summarised automatically and reading each file once also saves cost. Memory and learning: Settings > Memory. Theme: Settings > Appearance. Token usage: Settings > Data > Token usage.\n' +  '- Connect a model: Settings > Add provider, pick the service, paste the API key, choose models (a few popular ones are listed; any other model id can be typed). Thinking: bulb button (Off, Low, Medium, High). Token usage: Settings > Token usage.\n' +
   '- Open a project: folder button > Open a folder, then pick the folder. Only that folder is accessible.\n' +
   '- Project instructions: a file named KDEX.md in the project folder is read at the start of every message of that chat (rules such as language, test command, files not to touch; up to 4000 characters). Pictures: Settings > Images (choose the provider and image model; each picture asks first).\n' +
-  '- Approvals: the chip above the chat switches Ask first and Auto. Auto runs everyday actions and still asks for risky ones (rm, sudo, every git push, publishing). File changes keep backups and Undo.\n' +
+  '- Approvals: the chip above the chat switches Ask first and Auto. Auto runs everyday actions and still asks for risky ones (rm, sudo, every git push, discarding changes, publishing). File changes keep backups and Undo.\n' +
   '- Git: the Git chip. Folder without Git: Clone, New repo (publishes to GitHub or GitLab) or Local only. Pushing, and private repositories, need a name, email and access token: Settings > Git > Identity and access tokens (GitHub classic token with the repo scope, or fine-grained with Contents: Read and write). The built-in Git supports https only, one branch at a time, no Git LFS, no submodules and no SSH, and it is slow on very large repositories. When Terminal is on, real git in Termux (pkg install git) handles those cases, and the app lends it the saved token automatically for clone, fetch, pull and push.\n' +
 
   '- TERMINAL SETUP, needed once before commands work: (1) Install the Termux app from F-Droid or GitHub, not Google Play. (2) Open Termux and run: mkdir -p ~/.termux && echo "allow-external-apps=true" >> ~/.termux/termux.properties, then close and reopen Termux. ' +
@@ -211,13 +216,14 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, i
           'Install only what the task needs, prefer small tools (SQLite, python3 -m http.server, plain Node), and never install or run heavy things: Docker, Android Studio or Gradle builds, PyTorch, TensorFlow or large AI models, full IDEs, big databases, browsers. If a request needs something that heavy, say so plainly and suggest a lighter way or doing that part on a PC or server. ' +
           'Before installing, check with command -v tool, df -h . (free space) and free -m (memory). If pip or npm fails building native code, try the pkg version (for example pkg install python-numpy) or a pure Python or JavaScript alternative. Tell the user roughly how big an install is before a large one (rough sizes: git 15 MB, sqlite 5 MB, php 40 MB, nodejs 60 MB, python 70 MB, ruby 60 MB, golang 150 MB, clang 200 MB, openjdk 300 MB or more, rust 600 MB or more; npm and pip packages add more). Take the heavy ones only when the task truly needs them and there is free space. ' +
           'BUILDING PROJECTS: you may create any kind of project in the folder (websites, APIs, Telegram bots, scripts, CLI tools, data tools): write the files, pkg install the runtime it needs, install its dependencies (npm install, pip install -r requirements.txt), run it, test it and fix what fails. Choose light, phone-friendly tools. ' +
+          'SHARED STORAGE LIMITS: when the project path starts with /storage/ or /sdcard/, that storage cannot hold symbolic links or executable files. So: npm install needs --no-bin-links (without it npm fails with EPERM or symlink errors); run tools as node node_modules/<pkg>/bin/<cli>.js or npx, and scripts as sh script.sh or python3 script.py, never ./script.sh; chmod +x and ln -s do nothing useful there; Python virtual environments do not work there, use pip install --user or a venv under $HOME. For a heavy build or install, copy the project to $HOME (cp -r), work there, then copy the results back. ' +
           'SERVERS AND LONG-RUNNING COMMANDS: never run them with run_command (it would hang). Use start_job with a short name, then check_job to confirm it is running and read the log, and stop_job when done. To serve a website use for example start_job python3 -m http.server 8080 --bind 0.0.0.0 (or the project\'s own dev command), then give the user the link http://localhost:8080 (same phone) and mention that other devices on the same Wi-Fi can use the phone\'s IP address. ' +
           'If it failed, fix the cause (a missing package, a wrong path, a typo) and retry at most twice before explaining. Check results with a quick command (ls, cat, a test) instead of assuming. '
         : 'You cannot run shell commands. You do have built-in unzip and zip tools; use them instead of telling the user to run a command. If the user wants scripts, installs or builds run, give them the TERMINAL SETUP steps from the app guide. ') +
       'PLAN FIRST: if the task changes more than two files, or needs several commands, or the request is vague, first reply with a short plan (3 to 6 lines: what you will change, in which files, and anything you are unsure about) and wait for the user to say go. Do not make changes before that. For a small, clear fix in one or two files, just do it. If the user already told you to go ahead, skip the plan. ' +
       'CHECK YOUR WORK: after you change files, verify before you say it is done. Read back the changed part, and if a test, lint or build command exists (see package.json scripts or the PROJECT MAP) and the terminal is available, run the lightest one. If it fails, fix it. In your final summary say what you checked and the real result, or say plainly that you could not check. ' +
       'When finished, summarize what you changed in a few lines. ' +
-      'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval, and git_push always asks, even in Auto mode). git_branch, git_fetch and git_remote are also available. When a git step fails, read the message: it says whether the token is missing, rejected or lacks write permission, whether a file is too big or the branch is protected, or whether the network is down. Tell the user exactly that and where to fix it (Settings > Git > Identity and access tokens); do not retry blindly. For huge repositories, LFS, submodules or SSH, use git in the terminal if it is on.'
+      'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval, and git_push always asks, even in Auto mode). git_branch, git_fetch, git_remote and git_merge are also available. git_undo_commit takes back the last unpushed commit but keeps its changes, and git_discard throws away uncommitted changes for good, so use it only when the user asked and it always needs approval, even in Auto mode. There is no stash tool: to set work aside, commit it on a branch. After a pull or merge conflict nothing is changed; tell the user plainly and offer to compare the files or use the terminal. When a git step fails, read the message: it says whether the token is missing, rejected or lacks write permission, whether a file is too big or the branch is protected, or whether the network is down. Tell the user exactly that and where to fix it (Settings > Git > Identity and access tokens); do not retry blindly. For huge repositories, LFS, submodules or SSH, use git in the terminal if it is on.'
     );
   } else {
     parts.push('NO PROJECT FOLDER in this chat, but you have a private SCRATCH desk: temporary files kept only inside this chat in the app (not a real folder on the phone, and no terminal or Git). Tools: list_dir, find_files, search, read_file, write_file, edit_file, delete_file, zip, unzip and view_image work on Scratch with the same approvals and Undo as a project. Use it for everyday jobs: answer, write, explain, review attached photos and text files (code, notes, CSV, JSON, Word .docx, Excel .xlsx, PowerPoint .pptx; PDF is not supported, so ask for the text or a photo of the page), write a script, a document, a config or a small page, and fix or convert one file. When the user needs a finished file, call make_file with its name and full content: it is also saved in Scratch and the chat shows a Download button. To change a file you made earlier, read it from Scratch and use edit_file. Never paste a long file into the reply when a file fits. For real project work (several files, running commands, Git), tell the user to tap the folder button above the chat and pick the project folder; the Scratch chip also has "Move to a folder" to take these files along.');
@@ -447,8 +453,8 @@ export async function runTurn(ctx) {
   const hasGit = scratch || remote ? false : await isRepo(folder).catch(() => false);
   const termuxPath = !scratch && !remote && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
   const imgOn = !!(!scratch && !remote && settings.imageProvider && settings.imageModel);
-  const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
-  const tools = scratch ? TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL, FILE_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS) : remote ? TOOLS.concat([PLAN_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS, SERVER_TOOLS) : (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version')));
+  const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
+  const tools = scratch ? TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL, FILE_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS) : remote ? TOOLS.concat([PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS, SERVER_TOOLS) : (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version')));
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
@@ -549,11 +555,24 @@ export async function runTurn(ctx) {
       ui.onTool(tm);
       try {
         if (call.bad) throw new Error('The tool arguments were not valid JSON. Try again with valid arguments.');
-        if (!folder && call.name !== 'update_plan' && call.name !== 'make_file' && call.name !== 'web_fetch' && !EXTRA_ANY_NAMES.has(call.name) && !DEVICE_NAMES.has(call.name)) throw new Error('No project folder is open. Tell the user to tap the folder button above the chat and pick the project folder.');
+        if (!folder && call.name !== 'update_plan' && call.name !== 'ask_user' && call.name !== 'make_file' && call.name !== 'web_fetch' && !EXTRA_ANY_NAMES.has(call.name) && !DEVICE_NAMES.has(call.name)) throw new Error('No project folder is open. Tell the user to tap the folder button above the chat and pick the project folder.');
         if (call.name === 'update_plan') {
           const steps = (Array.isArray(call.args && call.args.steps) ? call.args.steps : []).slice(0, 20).map((x) => ({ text: String((x && x.text) || '').slice(0, 160), status: ['todo', 'doing', 'done'].includes(x && x.status) ? x.status : 'todo' })).filter((x) => x.text);
           tm.steps = steps; tm.args = steps.filter((x) => x.status === 'done').length + '/' + steps.length + ' done';
           tm.content = 'Plan updated.'; tm.status = 'done';
+        } else if (call.name === 'ask_user') {
+          const q = String((call.args && call.args.question) || '').trim().slice(0, 300);
+          const opts = (Array.isArray(call.args && call.args.options) ? call.args.options : []).map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean).slice(0, 4);
+          if (!q || opts.length < 2) throw new Error('Give a question and 2 to 4 short answers.');
+          tm.args = q.slice(0, 80);
+          if (!ui.askUser) { tm.content = 'Questions are not available here. Choose the safest reasonable option yourself, or ask in plain words.'; tm.status = 'done'; }
+          else {
+            ui.onTool(tm);
+            const ans = await ui.askUser(q, opts, signal);
+            tm.args = q.slice(0, 60) + (ans ? ' \u2192 ' + ans.slice(0, 40) : ' \u2192 skipped');
+            tm.content = signal.aborted ? 'Cancelled by the user.' : ans ? 'The user chose: ' + ans : 'The user skipped the question. Pick the safest reasonable option yourself, or ask again in plain words.';
+            tm.status = 'done';
+          }
         } else if (call.name === 'make_file') {
           const nm = String((call.args && call.args.name) || '').split(/[\\/]/).pop().replace(/[^\w .()+-]/g, '_').trim().slice(0, 80);
           const body = String((call.args && call.args.content) || '');
@@ -739,7 +758,7 @@ export async function runTurn(ctx) {
         } else if (GIT_ACTIONS.has(call.name)) {
           const lines = await previewGitAction(call.name, call.args || {}, folder);
           // Publishing code is always the user's call, even in Auto mode.
-          const riskyGit = call.name === 'git_push';
+          const riskyGit = call.name === 'git_push' || call.name === 'git_discard';
           let pushProblems = null;
           if (call.name === 'git_push') {
             const pc = await checkProject(folder).catch(() => null);
@@ -783,14 +802,21 @@ export async function runTurn(ctx) {
             tm.status = 'rejected';
             tm.content = signal.aborted ? 'Cancelled by the user.' : 'The user rejected this change. Do not retry it; ask what they want instead.';
           } else {
-            const bk = { chatId: chat.id, folderId: folder.id, path: plan.path, existed: plan.before !== null, content: plan.before === null ? '' : plan.before, op: plan.op, at: Date.now(), undone: false };
-            bk.id = await db.put('backups', bk);
-            pruneBackups(chat.id).catch(() => {});
+            let bk = null; // a binary file is not kept for Undo; an empty new folder needs none
+            if (plan.op === 'move_file' || plan.op === 'copy_file') {
+              bk = { chatId: chat.id, folderId: folder.id, path: plan.path, from: plan.from, existed: false, content: '', op: plan.op === 'move_file' ? 'move_file' : 'create', at: Date.now(), undone: false };
+              bk.id = await db.put('backups', bk);
+              pruneBackups(chat.id).catch(() => {});
+            } else if (!plan.binary && plan.op !== 'make_folder') {
+              bk = { chatId: chat.id, folderId: folder.id, path: plan.path, existed: plan.before !== null, content: plan.before === null ? '' : plan.before, op: plan.op, at: Date.now(), undone: false };
+              bk.id = await db.put('backups', bk);
+              pruneBackups(chat.id).catch(() => {});
+            }
             tm.content = await applyWrite(plan, folder);
             kvSet('pmap:' + folder.id, null).catch(() => {});
             readSeen.clear();
             tm.status = 'applied';
-            tm.backupId = bk.id;
+            if (bk) tm.backupId = bk.id;
           }
         } else {
           const rk = call.name === 'read_file' ? JSON.stringify([call.args && call.args.path, call.args && call.args.offset, call.args && call.args.limit]) : null;

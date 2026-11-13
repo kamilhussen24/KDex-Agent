@@ -2,6 +2,7 @@
 // Every path is relative to that folder; anything that could leave it is rejected.
 import { isSecretPath, isEnvLike, maskEnv, protectionOn, PROTECTED_MSG, ENV_TOOL } from './secrets.js';
 import { fs } from './native.js';
+import { isScratchUri } from './scratch.js';
 import { cleanRel, fmtBytes } from './util.js';
 
 const GIT_INTERNAL = /(^|\/)\.git(\/|$)/;
@@ -15,7 +16,7 @@ export const TOOLS = [
   },
   {
     name: 'find_files',
-    description: 'Find files by part of their name anywhere in the project. Returns up to 100 paths.',
+    description: 'Find files by part of their name anywhere in the project, or by a pattern such as *.test.js or src/**/*.css. Returns up to 100 paths.',
     parameters: { type: 'object', properties: { query: { type: 'string', description: 'Part of the file name, case-insensitive' } }, required: ['query'] },
   },
   {
@@ -27,6 +28,9 @@ export const TOOLS = [
         pattern: { type: 'string', description: 'Regular expression or plain text' },
         path: { type: 'string', description: 'Optional folder to limit the search' },
         ignore_case: { type: 'boolean', description: 'Default true' },
+        glob: { type: 'string', description: 'Only search files matching this pattern, for example *.js or src/**/*.ts (comma separated for several)' },
+        context: { type: 'integer', description: 'Lines to show before and after each match, 0 to 5, default 0' },
+        max_results: { type: 'integer', description: 'Default 60, max 200' },
       },
       required: ['pattern'],
     },
@@ -47,25 +51,51 @@ export const TOOLS = [
   },
   {
     name: 'edit_file',
-    description: 'Replace exact text in an existing file. "find" must match exactly once (include enough surrounding lines), unless replace_all is true. Read the file first.',
+    description: 'Replace exact text in an existing file. "find" must match exactly once (include enough surrounding lines), unless replace_all is true. Read the file first. To make several changes in the same file, pass them all in one call as "edits" (a list of {find, replace, replace_all}); they apply in order and the user approves them once.',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string' }, find: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } },
-      required: ['path', 'find', 'replace'],
+      properties: {
+        path: { type: 'string' }, find: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' },
+        edits: { type: 'array', description: 'Several changes to one file, applied in order', items: { type: 'object', properties: { find: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['find', 'replace'] } },
+      },
+      required: ['path'],
     },
   },
   {
     name: 'delete_file',
-    description: 'Delete a file. The user must approve it.',
+    description: 'Delete a file (any type, including binary files such as .apk; a binary file cannot be restored with Undo). The user must approve it. For a whole folder or many files at once use run_command with rm.',
+    parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+  },
+  {
+    name: 'move_file',
+    description: 'Move or rename one file (not a folder). It fails if the destination already exists. The user must approve it. For a folder use run_command with mv.',
+    parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] },
+  },
+  {
+    name: 'copy_file',
+    description: 'Copy one file (any type) to a new path. It fails if the destination already exists. The user must approve it. For a folder use run_command with cp -r.',
+    parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] },
+  },
+  {
+    name: 'make_folder',
+    description: 'Create a folder (parent folders too). The user must approve it. Not needed before write_file, which creates its own parent folders.',
     parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
   },
   ENV_TOOL,
 ];
 
-export const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'delete_file']);
+export const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'delete_file', 'move_file', 'copy_file', 'make_folder']);
 
 export const BINARY_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|pdf|zip|gz|tar|7z|rar|apk|aab|jar|class|so|dll|exe|bin|mp3|mp4|m4a|wav|ogg|mov|avi|mkv|ttf|otf|woff2?|db|sqlite|docx?|xlsx?|pptx?|odt|ods|iso|dmg|dex|obb|psd|heic|avif|flac|aac|webm|3gp|woff|eot)$/i;
 const MAX_OUT = 40000;
+
+/** A file pattern (* any letters in a name, ** across folders, ? one letter) as a regular expression. A pattern without a slash matches the file name only (re.base). */
+function globRe(g) {
+  const src = String(g).trim().replace(/^\.\//, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '(?:.*/)?');
+  const re = new RegExp('^' + src + '$', 'i');
+  re.base = !String(g).includes('/');
+  return re;
+}
 
 function clip(s) {
   return s.length > MAX_OUT ? s.slice(0, MAX_OUT) + '\n[output cut]' : s;
@@ -85,10 +115,12 @@ export async function runRead(name, args, folder) {
   }
 
   if (name === 'find_files') {
-    const q = String(args.query || '').toLowerCase();
+    const q = String(args.query || '').trim();
     if (!q) throw new Error('query is required');
+    const re = /[*?]/.test(q) ? globRe(q) : null; // a pattern like *.js or src/**/*.test.ts, otherwise part of a name
+    const lq = q.toLowerCase();
     const { files, truncated } = await fs.walk(folder.uri, '', 3000);
-    const hits = files.filter((f) => !isGitInternal(f.path) && f.path.toLowerCase().includes(q)).slice(0, 100).map((f) => f.path);
+    const hits = files.filter((f) => !isGitInternal(f.path) && (re ? re.test(re.base ? f.path.split('/').pop() : f.path) : f.path.toLowerCase().includes(lq))).slice(0, 100).map((f) => f.path);
     return hits.length ? hits.join('\n') + (truncated ? '\n(project is large; list may be incomplete)' : '') : 'No file matches "' + args.query + '".';
   }
 
@@ -97,25 +129,35 @@ export async function runRead(name, args, folder) {
     let re;
     try { re = new RegExp(String(args.pattern), args.ignore_case === false ? '' : 'i'); }
     catch (e) { re = new RegExp(String(args.pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); }
+    const globs = String(args.glob || '').split(',').map((g) => g.trim()).filter(Boolean).map(globRe);
+    const ctx = Math.max(0, Math.min(5, parseInt(args.context, 10) || 0));
+    const maxRes = Math.max(1, Math.min(200, parseInt(args.max_results, 10) || 60));
     const { files } = await fs.walk(folder.uri, base, 3000);
     const prot = await protectionOn();
     const results = [];
-    let scanned = 0;
+    let scanned = 0; let skippedFiles = 0;
     const started = Date.now();
     for (const f of files) {
-      if (results.length >= 60 || scanned >= 150 || Date.now() - started > 8000) break;
+      if (results.length >= maxRes) break;
+      if (scanned >= 500 || Date.now() - started > 10000) { skippedFiles++; continue; }
       if (isGitInternal(f.path) || BINARY_EXT.test(f.path) || f.size > 200000 || (prot && isSecretPath(f.path))) continue;
+      if (globs.length && !globs.some((g) => g.test(g.base ? f.path.split('/').pop() : f.path))) continue;
       scanned++;
       try {
         const r = await fs.readText(folder.uri, f.path, 200000);
         if (r.binary) continue;
         const lines = r.text.split('\n');
-        for (let i = 0; i < lines.length && results.length < 60; i++) {
-          if (re.test(lines[i])) results.push(f.path + ':' + (i + 1) + ': ' + lines[i].trim().slice(0, 200));
+        for (let i = 0; i < lines.length && results.length < maxRes; i++) {
+          if (!re.test(lines[i])) continue;
+          if (!ctx) { results.push(f.path + ':' + (i + 1) + ': ' + lines[i].trim().slice(0, 200)); continue; }
+          const blk = [];
+          for (let j = Math.max(0, i - ctx); j <= Math.min(lines.length - 1, i + ctx); j++) blk.push(f.path + ':' + (j + 1) + (j === i ? ': ' : '- ') + lines[j].slice(0, 200));
+          results.push(blk.join('\n') + '\n--');
         }
       } catch (e) { /* skip unreadable files */ }
     }
-    return results.length ? results.join('\n') : 'No matches (searched ' + scanned + ' files).';
+    const note = (skippedFiles ? '\n(Stopped early: ' + skippedFiles + ' more files were not searched. Narrow it with path or glob.)' : '') + (results.length >= maxRes ? '\n(Showing the first ' + maxRes + ' matches. Narrow it with path or glob, or raise max_results.)' : '');
+    return results.length ? clip(results.join('\n')) + note : 'No matches (searched ' + scanned + ' files).' + note;
   }
 
   if (name === 'read_file') {
@@ -195,18 +237,49 @@ export function lineDiff(a, b) {
 
 export async function planWrite(name, args, folder) {
   args = args || {};
+  if (name === 'move_file' || name === 'copy_file') {
+    const from = cleanRel(args.from); const to = cleanRel(args.to);
+    if (!from || !to) throw new Error('from and to are required');
+    for (const p of [from, to]) {
+      if (isGitInternal(p)) throw new Error('The .git folder is managed by Git; use the git tools instead.');
+      if (isSecretPath(p) && await protectionOn()) throw new Error('"' + p + '" is a protected secret file, so I cannot move or copy it.');
+    }
+    if (from === to) throw new Error('The source and the destination are the same.');
+    const a = await fs.stat(folder.uri, from);
+    if (!a || !a.exists) throw new Error('Not found: ' + from);
+    if (a.isDir) throw new Error(from + ' is a folder. Use run_command with ' + (name === 'move_file' ? 'mv' : 'cp -r') + ' for folders.');
+    if (a.size > 20971520) throw new Error('This file is larger than 20 MB. Use run_command (' + (name === 'move_file' ? 'mv' : 'cp') + ') for it.');
+    const b = await fs.stat(folder.uri, to);
+    if (b && b.exists) throw new Error(to + ' already exists. Choose another name, or delete it first.');
+    return { path: to, from, op: name, before: null, after: null, diff: { lines: [{ t: 'ctx', text: from + '  \u2192  ' + to }], added: 0, removed: 0, more: false }, added: 0, removed: 0 };
+  }
+  if (name === 'make_folder') {
+    const rel = cleanRel(args.path);
+    if (!rel) throw new Error('path is required');
+    if (isGitInternal(rel)) throw new Error('The .git folder is managed by Git; use the git tools instead.');
+    if (isScratchUri(folder.uri)) throw new Error('The scratch area has no empty folders. A folder appears when you create a file inside it, for example write_file with path "' + rel + '/file.txt".');
+    const st = await fs.stat(folder.uri, rel);
+    if (st && st.exists) throw new Error(rel + (st.isDir ? ' already exists.' : ' is a file.'));
+    return { path: rel, op: name, before: null, after: null, diff: { lines: [{ t: 'ctx', text: rel + '/' }], added: 0, removed: 0, more: false }, added: 0, removed: 0 };
+  }
   const rel = cleanRel(args.path);
   if (!rel) throw new Error('path is required');
   if (rel === '.git' || rel.startsWith('.git/')) throw new Error('The .git folder is managed by Git; use the git tools instead.');
-  if (BINARY_EXT.test(rel)) throw new Error('Binary files cannot be changed here.');
+  if (BINARY_EXT.test(rel) && name !== 'delete_file') throw new Error('Binary files cannot be edited or written here. To move, copy or rename one, use run_command (mv, cp).');
   if (isSecretPath(rel) && await protectionOn()) throw new Error('"' + rel + '" is a protected secret file, so I cannot change or delete it (that would show its contents). To add a missing variable use request_env_var. ' + PROTECTED_MSG);
 
   let before = null;
   const st = await fs.stat(folder.uri, rel);
+  if (name === 'delete_file' && BINARY_EXT.test(rel)) { // deleting needs no text copy; Undo cannot bring a binary file back
+    if (!st || !st.exists) throw new Error('Not found: ' + rel);
+    if (st.isDir) throw new Error(rel + ' is a folder. Use run_command with rm -r to remove a folder.');
+    return { path: rel, op: 'delete', binary: true, before: null, after: null, diff: { lines: [{ t: 'warn', text: 'Binary file. Undo cannot bring it back.' }], added: 0, removed: 0, more: false }, added: 0, removed: 0 };
+  }
   if (st && st.exists) {
-    if (st.isDir) throw new Error(rel + ' is a folder.');
+    if (st.isDir) throw new Error(rel + ' is a folder. Use run_command with rm -r to remove a folder.');
     const r = await fs.readText(folder.uri, rel, 1048576);
-    if (r.binary) throw new Error('This is a binary file; it cannot be changed here.');
+    if ((r.binary || r.truncated) && name === 'delete_file') return { path: rel, op: 'delete', binary: true, before: null, after: null, diff: { lines: [{ t: 'warn', text: 'Binary file. Undo cannot bring it back.' }], added: 0, removed: 0, more: false }, added: 0, removed: 0 };
+    if (r.binary) throw new Error('This is a binary file; it cannot be edited here. Use run_command for moving or copying it.');
     if (r.truncated) throw new Error('This file is larger than 1 MB; too big to change safely.');
     before = r.text;
   }
@@ -229,13 +302,19 @@ export async function planWrite(name, args, folder) {
 
   if (name === 'edit_file') {
     if (before === null) throw new Error('Not found: ' + rel + '. Use write_file to create a new file.');
-    const find = fix(args.find == null ? '' : args.find);
-    const rep = fix(args.replace == null ? '' : args.replace);
-    if (!find) throw new Error('"find" must not be empty.');
-    const count = before.split(find).length - 1;
-    if (count === 0) throw new Error('The text to replace was not found in ' + rel + '. Read the file again and copy the exact text, including spaces and indentation.');
-    if (count > 1 && !args.replace_all) throw new Error('The text to replace appears ' + count + ' times in ' + rel + '. Add more surrounding lines to make it unique, or set replace_all.');
-    const after = args.replace_all ? before.split(find).join(rep) : before.replace(find, () => rep);
+    const list = Array.isArray(args.edits) && args.edits.length ? args.edits.slice(0, 40) : [{ find: args.find, replace: args.replace, replace_all: args.replace_all }];
+    let after = before;
+    list.forEach((e, k) => {
+      const tag = list.length > 1 ? 'Change ' + (k + 1) + ' of ' + list.length + ': ' : '';
+      const find = fix(e.find == null ? '' : e.find);
+      const rep = fix(e.replace == null ? '' : e.replace);
+      if (!find) throw new Error(tag + '"find" must not be empty.');
+      const count = after.split(find).length - 1;
+      if (count === 0) throw new Error(tag + 'The text to replace was not found in ' + rel + '. Read the file again and copy the exact text, including spaces and indentation.' + (k > 0 ? ' Nothing was changed.' : ''));
+      if (count > 1 && !e.replace_all) throw new Error(tag + 'The text to replace appears ' + count + ' times in ' + rel + '. Add more surrounding lines to make it unique, or set replace_all.' + (k > 0 ? ' Nothing was changed.' : ''));
+      after = e.replace_all ? after.split(find).join(rep) : after.replace(find, () => rep);
+    });
+    if (after === before) throw new Error('The change would leave ' + rel + ' exactly as it is.');
     const d = lineDiff(before, after);
     return { path: rel, op: 'edit', before, after, diff: d, added: d.added, removed: d.removed };
   }
@@ -244,6 +323,13 @@ export async function planWrite(name, args, folder) {
 }
 
 export async function applyWrite(plan, folder) {
+  if (plan.op === 'move_file' || plan.op === 'copy_file') {
+    const data = await fs.readBytes(folder.uri, plan.from);
+    await fs.writeBytes(folder.uri, plan.path, data);
+    if (plan.op === 'move_file') await fs.remove(folder.uri, plan.from);
+    return (plan.op === 'move_file' ? 'Moved ' : 'Copied ') + plan.from + ' to ' + plan.path;
+  }
+  if (plan.op === 'make_folder') { await fs.mkdir(folder.uri, plan.path); return 'Created folder ' + plan.path; }
   if (plan.op === 'delete') {
     await fs.remove(folder.uri, plan.path);
     return 'Deleted ' + plan.path;
@@ -256,6 +342,12 @@ export async function applyWrite(plan, folder) {
 }
 
 export async function undoBackup(b, folder) {
+  if (b.op === 'move_file') { // put the file back where it was
+    const data = await fs.readBytes(folder.uri, b.path);
+    await fs.writeBytes(folder.uri, b.from, data);
+    await fs.remove(folder.uri, b.path);
+    return;
+  }
   if (b.existed) await fs.writeText(folder.uri, b.path, b.content);
   else await fs.remove(folder.uri, b.path);
 }

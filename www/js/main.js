@@ -724,7 +724,7 @@ async function send(regenerate) {
   const ui = {
     onUser: (m) => { if (here()) renderMsg(m); }, onAssistant: (m) => { if (here()) renderMsg(m); }, onDelta: (m) => { if (here()) { netLine(''); renderMsg(m); } },
     onTool: (m) => { if (!here()) return; renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); else if (m.name === 'make_file' && m.status === 'done') drawScratch(); },
-    requestSecret: (info, signal) => askSecret(info, signal), watchBuild: (folder, sha, label) => { CI.watchBuild(folder, sha, label); },
+    requestSecret: (info, signal) => askSecret(info, signal), askUser: (q, opts, signal) => { Work.needs('A question is waiting for you', chat.id); return askChoice(q, opts, signal); }, watchBuild: (folder, sha, label) => { CI.watchBuild(folder, sha, label); },
     onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t, { kind: 'warn' }); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
       const first = !pendingCount(); S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
@@ -1437,7 +1437,7 @@ async function openFileView(p, body) {
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
 
-const OPS = { create: ['plus', 'Created', 'Delete'], edit: ['edit', 'Edited', 'Undo'], overwrite: ['edit', 'Replaced', 'Undo'], delete: ['trash', 'Deleted', 'Restore'] };
+const OPS = { move_file: ['edit', 'Moved', 'Undo'], create: ['plus', 'Created', 'Delete'], edit: ['edit', 'Edited', 'Undo'], overwrite: ['edit', 'Replaced', 'Undo'], delete: ['trash', 'Deleted', 'Restore'] };
 /** Everything the agent changed in this chat, with one-tap Undo or Restore. Tap a row to see what changed. */
 async function openChanges() {
   if (!S.chat) return;
@@ -2065,6 +2065,19 @@ function askSecret(info, signal) {
     $('#dlgYes').onclick = () => { if (!$('#dlgInput').value.trim()) { $('#dlgInput').focus(); return; } done(true); };
     $('#dlgNo').onclick = () => done(false);
     if (signal) signal.addEventListener('abort', () => { if (!$('#dialog').classList.contains('hidden')) done(false); }, { once: true });
+  });
+}
+/** A question from the agent with up to four answer buttons. Resolves the chosen text, or null when skipped. */
+function askChoice(question, options, signal) {
+  return new Promise((res) => {
+    $('#dlgTitle').textContent = 'Question'; $('#dlgText').innerHTML = '<div style="margin-bottom:10px">' + esc(question) + '</div><div class="askopts">' + options.map((o, i) => '<button class="btn" data-i="' + i + '">' + esc(o) + '</button>').join('') + '</div>';
+    $('#dlgYes').classList.add('hidden'); $('#dlgNo').firstElementChild.textContent = 'Skip'; $('#dialog').classList.remove('hidden');
+    const done = (v) => {
+      $('#dialog').classList.add('hidden'); $('#dlgText').textContent = ''; $('#dlgYes').classList.remove('hidden'); $('#dlgNo').firstElementChild.textContent = 'Cancel'; $('#dlgNo').onclick = null; res(v);
+    };
+    $('#dlgText').querySelectorAll('[data-i]').forEach((b) => { b.onclick = () => done(options[+b.dataset.i]); });
+    $('#dlgNo').onclick = () => done(null);
+    if (signal) signal.addEventListener('abort', () => { if (!$('#dialog').classList.contains('hidden')) done(null); }, { once: true });
   });
 }
 function askText(title, placeholder, value = '', toEnd = false) {

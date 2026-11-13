@@ -14,8 +14,13 @@ GIT_TOOLS.push(
   { name: 'git_fetch', description: 'Download the latest commits from the remote without changing files, and report how far ahead or behind the branch is.', parameters: { type: 'object', properties: {} } },
   { name: 'git_remote', description: 'Show the remote URL, or set it (action: set, with url). Setting needs approval.', parameters: { type: 'object', properties: { action: { type: 'string', enum: ['show', 'set'] }, url: { type: 'string' } }, required: ['action'] } },
 );
+GIT_TOOLS.push(
+  { name: 'git_merge', description: 'Merge another local branch into the current branch. The user approves first. If there is a conflict nothing is changed and you are told so.', parameters: { type: 'object', properties: { branch: { type: 'string' } }, required: ['branch'] } },
+  { name: 'git_discard', description: 'Throw away changes that are not committed yet, in one file (give path) or in every changed file (leave path out). This cannot be undone, so the user always has to approve it. Use it only when the user asked to drop or reset changes.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'One file; leave out to discard everything' } } } },
+  { name: 'git_undo_commit', description: 'Undo the last commit but keep all its changes in the files (like git reset --soft). The user approves first. Only for a commit that was not pushed.', parameters: { type: 'object', properties: {} } },
+);
 export const GIT_READS = new Set(['git_status', 'git_diff', 'git_log']);
-export const GIT_ACTIONS = new Set(['git_commit', 'git_push', 'git_pull', 'git_fetch', 'git_remote', 'git_branch']);
+export const GIT_ACTIONS = new Set(['git_commit', 'git_push', 'git_pull', 'git_fetch', 'git_remote', 'git_branch', 'git_merge', 'git_discard', 'git_undo_commit']);
 /** Actions that only look, so they need no approval. */
 export function gitActionIsRead(name, args) {
   return name === 'git_fetch' || (name === 'git_remote' && args.action !== 'set') || (name === 'git_branch' && (args.action || 'list') === 'list');
@@ -45,6 +50,14 @@ export async function previewGitAction(name, args, folder) {
     return [{ t: 'ctx', text: 'Message: ' + String(args.message || '').trim() }, { t: 'ctx', text: 'Branch: ' + b }]
       .concat(ch.map((c) => ({ t: c.kind === 'new' ? 'add' : c.kind === 'deleted' ? 'del' : 'ctx', text: c.kind + ': ' + c.path })));
   }
+  if (name === 'git_merge') return [{ t: 'ctx', text: 'Merge branch ' + String(args.branch || '') + ' into ' + b }];
+  if (name === 'git_undo_commit') { const l = await G.log(folder, 1); return [{ t: 'ctx', text: 'Undo the last commit on ' + b + (l[0] ? ': ' + l[0].commit.message.trim().split('\n')[0] : '') }, { t: 'ctx', text: 'Its changes stay in your files.' }]; }
+  if (name === 'git_discard') {
+    const ch = await G.status(folder); const p = String(args.path || '').trim();
+    const list = p ? ch.filter((c) => c.path === p) : ch;
+    if (!list.length) throw new Error(p ? 'No uncommitted changes in ' + p + '.' : 'Nothing to discard.');
+    return [{ t: 'del', text: 'These changes are lost for good:' }].concat(list.slice(0, 40).map((c) => ({ t: 'del', text: c.kind + ': ' + c.path })));
+  }
   if (name === 'git_remote') return [{ t: 'ctx', text: 'Set remote origin to ' + String(args.url || '') }];
   if (name === 'git_branch') return [{ t: 'ctx', text: (args.action === 'create' ? 'Create and switch to branch ' : 'Switch to branch ') + String(args.name || '') + ' (now on ' + b + ')' }];
   return [{ t: 'ctx', text: (name === 'git_push' ? 'Push branch ' : 'Pull into branch ') + b + ' (origin)' }];
@@ -60,6 +73,13 @@ export async function runGitAction(name, args, folder, signal) {
   if (name === 'git_remote') {
     if (args.action === 'set') { const u = String(args.url || '').trim(); if (!/^https?:\/\//i.test(u)) throw new Error('Use an https:// repository URL.'); await G.setRemote(folder, u); return 'Remote origin set to ' + u + '.'; }
     const info = await G.remoteInfo(folder); return info ? 'origin: ' + info.url : 'No remote is set.';
+  }
+  if (name === 'git_merge') { const n = String(args.branch || '').trim(); if (!n) throw new Error('A branch name is needed.'); await G.mergeBranch(folder, n); return 'Merged ' + n + ' into ' + (await G.currentBranch(folder)) + '.'; }
+  if (name === 'git_undo_commit') { const oid = await G.undoLastCommit(folder); return 'Undid commit ' + oid.slice(0, 7) + '. Its changes are back in your files.'; }
+  if (name === 'git_discard') {
+    const p = String(args.path || '').trim();
+    if (p) { await G.discard(folder, p); return 'Discarded the changes in ' + p + '.'; }
+    const n = await G.discardAll(folder); return 'Discarded the changes in ' + n + ' file(s).';
   }
   if (name === 'git_branch') {
     const act = args.action || 'list'; const cur = await G.currentBranch(folder);

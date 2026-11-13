@@ -7,6 +7,25 @@ for its version.
 
 ## [Unreleased]
 
+## [1.50.9]
+
+### Added
+- New file tools for the agent: move_file (move or rename), copy_file and make_folder. They need approval, and a move can be undone from Changes.
+- edit_file can make several changes to one file in a single call and a single approval.
+- search can filter files (glob), show lines around each match (context) and return more results (max_results). find_files accepts patterns such as *.js or src/**/*.css.
+- New Git tools: git_merge, git_undo_commit (keeps the changes) and git_discard (always asks, even in Auto mode).
+- ask_user: the agent can ask a short question with 2 to 4 answer buttons, or you can tap Skip.
+- The agent now knows the limits of phone shared storage (no symlinks or executable files, npm needs --no-bin-links, heavy builds belong in the Termux home folder).
+
+### Fixed
+- search no longer stops after 150 files; it now looks at up to 500 files and says when it stopped early.
+
+## [1.50.8]
+
+### Fixed
+- Deleting a binary file (for example an .apk) now works with approval. Before, the agent was refused four times and stopped. The approval card says Undo cannot restore a binary file.
+- Error messages for binary files and folders now tell the agent to use the terminal (run_command) for moving, copying or removing them, so it picks the right way the first time.
+
 ## [1.50.7]
 
 ### Changed
