@@ -7,6 +7,24 @@ for its version.
 
 ## [Unreleased]
 
+## [1.49.1]
+
+### Added
+- A long file name now shows a short form at the top of the file menu, with the start and the extension kept. Short names show nothing extra.
+- Command output can be expanded when it is long, and a long table scrolls sideways instead of breaking.
+- A command that prints a secret file (`.env`, private keys, `.netrc`) now shows a warning and always asks, because its output goes to your AI provider.
+
+### Changed
+- Command output uses a smaller font, so more fits on screen.
+- The Terminal chip keeps one fixed width when you turn the terminal on or off, with no extra empty space.
+- The model name has more room at the top. The new chat button at the top is gone; use New chat in the menu.
+- The note in the server form now says that commands run with the permissions of the user and each one asks first.
+
+### Fixed
+- Harmless commands that end with `2>/dev/null` no longer show the red "can delete data" warning.
+- Command output from a server no longer starts with the login banner of the server.
+- After you send a message, the same text no longer comes back into the message box when the keyboard was still composing the last word. Sending the same text twice within four seconds is ignored.
+
 ## [1.49.0]
 
 ### Added

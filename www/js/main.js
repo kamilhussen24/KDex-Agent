@@ -587,10 +587,10 @@ function toolCard(m) {
       ((m.plan.path === 'terminal' || m.plan.web) && m.plan.allowKeys && m.plan.allowKeys.length ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.map((k) => k.replace(/^web:/, '')).join(', ')) + ' in this chat</button>' : '');
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
     h += '</div>';
-    if (m.plan.path === 'terminal' && m.content && st !== 'pending') h += '<pre class="out">' + esc(m.content.slice(-3000)) + '</pre>';
+    if (m.plan.path === 'terminal' && m.content && st !== 'pending') { const oc = m.content.slice(-3000); h += '<pre class="out">' + esc(oc) + '</pre>' + (oc.split('\n').length > 12 ? '<div class="tf outx"><button class="linkbtn" data-tool="xout" type="button">Expand</button></div>' : ''); }
     if (m.preview && m.preview.length) h += '<div class="genimg"><img alt="Generated picture" src="data:' + m.preview[0].mime + ';base64,' + m.preview[0].data + '"></div>';
   } else if (m.status === 'error' || m.status === 'cancelled') {
-    h += '<pre class="out">' + esc((m.content || '').slice(0, 400)) + '</pre>';
+    h += '<pre class="out wrap">' + esc((m.content || '').slice(0, 400)) + '</pre>';
   }
   return h + '</div>';
 }
@@ -643,15 +643,22 @@ function noModelNotice() {
   box.appendChild(d); d.scrollIntoView();
   $('#nmGo').onclick = () => { d.remove(); showSetup(false, 'Connect a model'); };
 }
+const lastSent = { text: '', at: 0 };
+/** Some phone keyboards give back the word they were still composing right after the box is cleared. Clear it again if the same text returns. */
+function ghostGuard(sent) {
+  const input = $('#input');
+  [60, 200, 500, 1000].forEach((ms) => setTimeout(() => { if (input.value.trim() === sent) { input.value = ''; autoGrow(); } }, ms));
+}
 async function send(regenerate) {
   if (S.running) { stopRun(); return; }
   const input = $('#input'); const text = regenerate ? '' : input.value.trim();
   if (!regenerate && !text && !S.attach.length) return;
+  if (!regenerate && text && !S.attach.length && text === lastSent.text && Date.now() - lastSent.at < 4000) { input.value = ''; autoGrow(); return; }
   if (!S.models.length) { noModelNotice(); return; }
   const attach = regenerate ? [] : S.attach;
   const images = attach.filter((a) => a.img).map((a) => ({ mime: a.mime, data: a.data }));
   const files = attach.filter((a) => !a.img);
-  if (!regenerate) { input.value = ''; autoGrow(); S.attach = []; drawChips(); }
+  if (!regenerate) { input.value = ''; autoGrow(); S.attach = []; drawChips(); if (text) { lastSent.text = text; lastSent.at = Date.now(); ghostGuard(text); } }
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
   const tu = $('#turnUndo'); if (tu) tu.remove();
   delete S.chat.fresh; await persistChat(); loadChats();
@@ -1033,7 +1040,7 @@ async function openServerForm(edit) {
     '<button id="svKeyFile" type="button" class="btn sm" style="margin-top:8px"><span class="lbl">Choose key file</span></button>' +
     '<div class="field" style="margin-top:12px"><span>Passphrase, if the key has one</span><input id="svPhrase" type="password" autocomplete="off"></div></div>' +
     '<div class="field"><span>Start folder</span><input id="svRoot" type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="/var/www/site" value="' + esc(edit ? edit.root : '/') + '"></div>' +
-    '<div class="note" style="text-align:left;margin-top:0">The agent can only work inside the start folder. The password or key stays on this phone, in secure storage.</div>' +
+    '<div class="note" style="text-align:left;margin-top:0">File changes stay inside the start folder. Commands run with the permissions of this user, and each one asks first. The password or key stays on this phone, in secure storage.</div>' +
     '<div id="svOut"></div><button id="svGo" class="btn primary" style="width:100%;margin-top:8px"><span class="lbl">Test and connect</span></button>';
   const showAuth = () => { $$('#svAuth .btn', body).forEach((b) => b.classList.toggle('on', b.dataset.v === auth)); $('#svPassBox').classList.toggle('hidden', auth !== 'password'); $('#svKeyBox').classList.toggle('hidden', auth !== 'key'); };
   $$('#svAuth .btn', body).forEach((b) => b.onclick = () => { auth = b.dataset.v; showAuth(); });
@@ -1168,14 +1175,22 @@ async function drawScratch() {
   const au = $('#chipAuto'); if (au) au.classList.toggle('hidden', !(S.folder || n)); // approvals matter in Scratch too
 }
 /** Small menu next to a tapped row. items: [{ a, label, icon, danger }]. */
-function popMenu(anchor, items, pick) {
+/** Shortens a long file name in the middle, so the start and the extension both stay visible. Returns '' when the name is short. */
+function midName(n, max) {
+  n = String(n || ''); if (n.length <= max) return '';
+  const ext = (n.match(/(\.[A-Za-z0-9]{1,6}){1,2}$/) || [''])[0];
+  const tail = Math.max(10, Math.min(ext.length + 4, max - 8));
+  return n.slice(0, max - 1 - tail) + '\u2026' + n.slice(n.length - tail);
+}
+function popMenu(anchor, items, pick, title) {
   closeRowMenu();
   const sc = document.createElement('div'); sc.id = 'rowScrim'; sc.className = 'rowscrim';
   sc.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); const mm = $('#rowMenu'); if (mm) mm.remove(); setTimeout(closeRowMenu, 450); });
   sc.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); closeRowMenu(); });
   document.body.appendChild(sc);
   const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
-  m.innerHTML = items.map((i) => '<button data-a="' + i.a + '"' + (i.danger ? ' class="danger"' : '') + '>' + ICON(i.icon) + '<span>' + i.label + '</span></button>').join('');
+  const shortT = title ? midName(title, 24) : '';
+  m.innerHTML = (shortT ? '<div class="rmt" title="' + esc(title) + '">' + esc(shortT) + '</div>' : '') + items.map((i) => '<button data-a="' + i.a + '"' + (i.danger ? ' class="danger"' : '') + '>' + ICON(i.icon) + '<span>' + i.label + '</span></button>').join('');
   document.body.appendChild(m);
   const r = anchor.getBoundingClientRect(); const mh = m.offsetHeight, mw = m.offsetWidth;
   m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw - 8)) + 'px';
@@ -1219,7 +1234,7 @@ async function openScratch() {
           try { await fs.remove(scratchFolder(chat.id).uri, p); } catch (e) { toast(e.message || 'Could not delete', { kind: 'err' }); }
           await draw(); drawScratch();
         }
-      });
+      }, nm);
     });
     $('#scZip').onclick = async () => {
       try {
@@ -1286,7 +1301,7 @@ async function openFiles(path = '') {
           if (!await confirmBox('Delete "' + baseOf(rp) + '"?', 'It is removed from the server and cannot be restored from the app.', 'Delete')) return;
           try { await fs.remove(S.folder.uri, rp); } catch (e) { toast((e && e.message) || 'Could not delete the file', { kind: 'err' }); }
           openFiles(path);
-        });
+        }, baseOf(rp));
         return;
       }
       const p = r.dataset.p; const b2 = sheet(p, { back: () => openFiles(path) });
@@ -2178,7 +2193,7 @@ function wire() {
   window.addEventListener('unhandledrejection', (e) => { if (window.__stage !== 'ready') return; e.preventDefault(); oops(e); });
   window.addEventListener('error', (e) => { if (window.__stage !== 'ready' || (e.target && (e.target.src || e.target.href))) return; oops(e); });
   $('#menuBtn').onclick = openDrawer; $('#scrim').onclick = closeDrawer;
-  $('#dNew').onclick = () => newChat(null); $('#topNewBtn').onclick = () => newChat(null);
+  $('#dNew').onclick = () => newChat(null);
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
   $('#chipScratch').onclick = openScratch; $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal; $('#chipAuto').onclick = toggleAuto;
@@ -2214,6 +2229,7 @@ function wire() {
     if (uf) { const [mid, ix] = uf.dataset.ufile.split(':'); const um = await db.get('messages', Number(mid)); const f = um && um.fileData && um.fileData[Number(ix)]; if (f) await saveOut(f.name, f.text); return; }
     const t = e.target.closest('[data-tool]');
     if (t) {
+      if (t.dataset.tool === 'xout') { const pre = t.closest('.tool').querySelector('pre.out'); if (pre) { const on = pre.classList.toggle('open'); t.textContent = on ? 'Collapse' : 'Expand'; } return; }
       if (t.dataset.tool === 'prevfile') {
         const fm = await db.get('messages', Number(t.dataset.id)); if (!fm || !fm.file) return;
         openPreview(fm.file.name, bundleText(fm.fileContent), fm.fileContent); return;

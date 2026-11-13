@@ -90,10 +90,13 @@ export async function setTermuxPath(folder, value) {
   if (value) await db.put('kv', { key: 'termux-path:' + folder.id, value }); else await db.del('kv', 'termux-path:' + folder.id);
 }
 
-const DANGER = /(^|[;&|]\s*|\s)(sudo|rm\s+(-\w*[rf]\w*\s+)+|dd\s+if=|mkfs|chmod\s+-R|chown\s+-R|shutdown|reboot|pkill|killall)\b|:\(\)\s*\{|>\s*\/dev\/|curl[^|;]*\|\s*(ba)?sh|wget[^|;]*\|\s*(ba)?sh/i;
+const DANGER = /(^|[;&|]\s*|\s)(sudo|rm\s+(-\w*[rf]\w*\s+)+|dd\s+if=|mkfs|chmod\s+-R|chown\s+-R|shutdown|reboot|pkill|killall)\b|:\(\)\s*\{|>\s*\/dev\/(?!null\b)|curl[^|;]*\|\s*(ba)?sh|wget[^|;]*\|\s*(ba)?sh/i;
 
 // On a live server a few more things always ask, even in Auto mode: stopping services, deleting processes, databases, users, firewall, removing packages.
 const SERVER_RISKY = /\b(systemctl|service)\b[^\n;|&]*\b(stop|disable|mask|kill)\b|\bpm2\s+(delete|kill|flush|unstartup)\b|\b(mysql|mysqldump|mariadb|psql|pg_dump|mongo\w*|redis-cli)\b|\bdrop\s+(table|database)\b|\b(useradd|userdel|usermod|passwd|visudo|crontab\s+-r|iptables|ufw|firewall-cmd|mount|umount|fdisk|parted)\b|\b(apt|apt-get|yum|dnf|apk)\s+(remove|purge|upgrade|dist-upgrade|autoremove)\b/i;
+// Commands that print a secret file. The output goes to the AI provider, so these always ask.
+const SECRET_READ = /\b(cat|less|more|head|tail|grep|egrep|sed|awk|strings|xxd|od|base64|nl|bat)\b[^\n;|&]*(\.env(?!\.(example|sample|template)\b)(\.\w+)?(?=$|[\s"';|&)])|\.pem\b|\.p12\b|\.pfx\b|\bid_(rsa|ecdsa|ed25519|dsa)\b|\.netrc\b|\.git-credentials|\.npmrc\b|\.pgpass\b|\bshadow\b)/i;
+export function readsSecret(command) { return SECRET_READ.test(String(command || '')); }
 
 async function workdir(args, folder) {
   const base = await getTermuxPath(folder);
@@ -109,11 +112,13 @@ export async function previewTermux(args, folder) {
     const sub = cleanRel(args.cwd || '');
     const lines = [{ t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'on ' + folder.name + ', in ' + (folder.root || '/').replace(/\/+$/, '') + (sub ? '/' + sub : '') }];
     if (DANGER.test(command) || SERVER_RISKY.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data, stop a service or change the server.' });
+    if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
     return lines;
   }
   const cwd = await workdir(args, folder);
   const lines = [{ t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'in ' + cwd }];
   if (DANGER.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data or change the system.' });
+  if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
   return lines;
 }
 
@@ -233,6 +238,7 @@ export async function previewJob(args, folder) {
   const cwd = await workdir(args, folder);
   const lines = [{ t: 'ctx', text: 'background job "' + jobName(args.name) + '"' }, { t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'in ' + cwd }];
   if (DANGER.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data or change the system.' });
+  if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
   return lines;
 }
 async function sh(script, secs) { const r = await Termux.run(script, undefined, (secs || 30) * 1000); return { out: (String(r.stdout || '') + (r.stderr ? '\n' + r.stderr : '')).trim(), code: Number(r.exitCode) }; }
@@ -266,7 +272,7 @@ export async function runJob(name, args, folder) {
 }
 
 /** Commands that can destroy data, change the system or publish work. They always ask, even in Auto mode. */
-const RISKY = /(^|[;&|\n]\s*|\s)(sudo|su|rm|rmdir|dd|mkfs\S*|chmod|chown|kill|pkill|killall|shutdown|reboot|ssh|scp|sftp|mkfs)(\s|$)|\bgit\s+(push|reset|clean|rebase)\b|\b(npm|pnpm|yarn|cargo)\s+publish\b|>\s*\/dev\/|\b(curl|wget)\b[^|;]*\|\s*(ba|z)?sh\b|:\(\)\s*\{/i;
+const RISKY = /(^|[;&|\n]\s*|\s)(sudo|su|rm|rmdir|dd|mkfs\S*|chmod|chown|kill|pkill|killall|shutdown|reboot|ssh|scp|sftp|mkfs)(\s|$)|\bgit\s+(push|reset|clean|rebase)\b|\b(npm|pnpm|yarn|cargo)\s+publish\b|>\s*\/dev\/(?!null\b)|\b(curl|wget)\b[^|;]*\|\s*(ba|z)?sh\b|:\(\)\s*\{/i;
 // Commands that can send data out of the phone. A web page or file may carry hidden instructions, so these always ask,
 // even in Auto mode. Plain downloads (curl URL, wget URL, pip, npm, git) keep running without a prompt.
 const EGRESS = new RegExp([
@@ -276,7 +282,7 @@ const EGRESS = new RegExp([
   'KDEX_GIT|\\.kdex/askpass|\\.git-credentials|\\.netrc',
   '\\b(requests|httpx|aiohttp)\\.(post|put|patch|delete|request)\\b|urllib\\.request|http\\.client|\\bsocket\\.|net\\.connect|fetch\\([^)]*method',
 ].join('|'), 'i');
-export function isRiskyCommand(command, remote) { const c = String(command || ''); return DANGER.test(c) || RISKY.test(c) || EGRESS.test(c) || !!(remote && SERVER_RISKY.test(c)); }
+export function isRiskyCommand(command, remote) { const c = String(command || ''); return DANGER.test(c) || RISKY.test(c) || EGRESS.test(c) || SECRET_READ.test(c) || !!(remote && SERVER_RISKY.test(c)); }
 
 // ------------------------------------------------------------------ setup checker
 export const CHECK_TOOLS_TOOL = {

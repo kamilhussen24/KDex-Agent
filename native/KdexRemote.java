@@ -326,7 +326,9 @@ public class KdexRemote {
         String cwd = inRoot(a, a.getOrDefault("cwd", ""));
         String command = need(a, "command");
         int secs = Math.max(5, Math.min(600, intOf(a.get("timeout"), 120)));
-        String script = "cd " + sq(cwd) + " && " + command;
+        String mark = "__KDEX_" + Long.toHexString(System.nanoTime()) + "__";
+        // the login profile of some servers prints a banner first; the marker lets us cut everything before the real output
+        String script = "echo " + mark + "; cd " + sq(cwd) + " && " + command;
         // bash -l reads the user's profile (so pm2, node and nvm are found); servers without bash fall back to sh
         String wrapped = "S=\"$(echo " + Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_8)) + " | base64 -d)\"; if command -v bash >/dev/null 2>&1; then exec bash -lc \"$S\"; else exec sh -c \"$S\"; fi";
         ChannelExec ch;
@@ -345,7 +347,10 @@ public class KdexRemote {
             if (!ch.isClosed()) { errmsg = "Stopped after " + secs + " seconds. The command was still running."; ch.disconnect(); }
         } finally { if (!runId.isEmpty()) RUNNING.remove(runId); ch.disconnect(); }
         Map<String, Object> r = new HashMap<>();
-        r.put("stdout", new String(so.toByteArray(), StandardCharsets.UTF_8));
+        String outText = new String(so.toByteArray(), StandardCharsets.UTF_8);
+        int mi = outText.indexOf(mark);
+        if (mi >= 0) { int e = mi + mark.length(); if (e < outText.length() && outText.charAt(e) == '\r') e++; if (e < outText.length() && outText.charAt(e) == '\n') e++; outText = outText.substring(e); }
+        r.put("stdout", outText);
         r.put("stderr", new String(se.toByteArray(), StandardCharsets.UTF_8));
         r.put("exitCode", errmsg.isEmpty() ? ch.getExitStatus() : -1);
         r.put("errmsg", errmsg);
