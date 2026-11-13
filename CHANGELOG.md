@@ -7,6 +7,26 @@ for its version.
 
 ## [Unreleased]
 
+## [1.47.2]
+
+### Changed
+- Git sheet: the Changes, Branches, History and Remote tabs are now one rounded bar that fills the full width, matching the card below.
+- Notifications follow one rule. Quiet (the default) shows only errors, warnings and results of long tasks such as push, pull, clone, backup and update. Short confirmations (Pinned, Copied, Saving, Committed, branch changes, saved keys and the like) appear only in All. The old hide-list is gone, so a new message can no longer slip into Quiet mode by accident.
+- The "Pictures may not work" warning shows once per model instead of on every attached picture.
+- Blocked actions (task still running, terminal off, file too large, backup problems) and model notices are now warnings, so Quiet mode never hides the reason something did not happen.
+- Settings: the Notifications note now says what Quiet and All show.
+
+## [1.47.1]
+
+### Fixed
+- Pressing and holding a chat in the drawer now opens the Pin, Rename and Delete menu on a real phone. It uses Android's own long press, ignores the system cancel signal, and no longer closes when you lift your finger.
+- Changes screen: Delete, Restore and Undo buttons are now the same width.
+- Chat bar: the Auto and Ask first chip keeps its icon in the same place when you switch.
+
+### Changed
+- Git sheet: Stage all, Unstage all and Discard all are now same-size chips. The safe actions are grey and Discard all is red with a trash icon.
+- The assistant no longer mentions a website when it introduces itself.
+
 ## [1.47.0]
 
 ### Added

@@ -513,3 +513,18 @@ html[data-theme=dark]{--warn:#f0b04a;--note:#7aa7ff}
 .pv-load{padding:24px;color:#666}
 .pv-foot{padding:8px 14px calc(var(--sab) + 8px);border-top:1px solid var(--line);font-size:12px;color:var(--mut);line-height:1.4}
 .pv-note{margin-top:2px}
+
+/* v1.47.1 */
+.chgbtn{min-width:104px;justify-content:center}
+.gchips{display:flex;gap:8px;align-items:center}
+.gchip{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:0;border-radius:999px;background:var(--bg2);color:var(--mut);font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.gchip .ic{width:16px;height:16px}
+.gchip.danger{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad)}
+.gchip:active{filter:brightness(.95)}
+#chipAuto{justify-content:flex-start}
+
+/* v1.47.2 full-width segmented tabs (Git) */
+#sheetTabs.tabs{display:flex;gap:2px;margin:2px 14px 10px;padding:3px;border-radius:999px;background:var(--bg2);overflow:hidden}
+#sheetTabs .tab{flex:1 1 0;min-width:0;height:32px;padding:0 4px;border:0;border-radius:999px;background:none;color:var(--mut);font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sheetTabs .tab:first-child{flex-grow:1.3}
+#sheetTabs .tab.on{background:var(--fg);color:var(--bg)}

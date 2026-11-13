@@ -30,13 +30,13 @@ const ICON = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
 let toastT; let toastH;
 /** Picks the look of a notification from its wording: ok, warn, err or info. */
 function toastKind(t) {
-  if (/^(nothing|open a folder|pick or type|add your git|asking before|auto:|clone does not)/i.test(t)) return 'warn';
+  if (/^(nothing|open a folder|pick or type|add your git|clone does not)/i.test(t)) return 'warn';
   if (/could not|couldn't|can't|cannot|failed|went wrong|rejected|denied|not a kdex|no backup|not found|no connection|error/i.test(t)) return 'err';
   if (/^(saved|saving|copied|done|cloned|undone|restored|reported|remembered|token saved|key updated|provider saved|git removed|git identity saved|repository created|all conversations deleted|committed|pushed|pulled|fetched)/i.test(t)) return 'ok';
   return 'info';
 }
-/** Confirmations the screen already shows (a chip changes, a sheet closes). Hidden in Quiet mode. */
-const QUIET_RE = /^(saved$|provider saved|key updated|token saved|git identity saved|git removed|using .+ in this chat|folder removed from this chat|auto: risky|asking before every|git repository found|cancelled|undone|fetched|committed|discarded|branch created|switched branch|branch deleted|commit undone|remote saved|remote switched|\d+ model\(s\) added)/i;
+/** Notification levels. Quiet (the default) shows only errors, warnings and results of long tasks (opts.result). Everything else (confirmations of things the screen already shows) appears only in All. */
+const shows = (kind, opts) => !(!S.settings || S.settings.quietToasts !== false) || kind === 'err' || kind === 'warn' || !!opts.result || !!opts.action;
 /** One quiet status line above the message box: offline, waiting, provider busy. Replaces popups for these. */
 let netTimer;
 function netLine(text) {
@@ -84,8 +84,8 @@ function swipeable(el) {
 /** Notification: a short pill for one line, a card when there is a detail. Tap a card to see the full text and copy it. `opts.action = { label, fn }` adds a button. */
 function toast(t, opts = {}) {
   const el = $('#toast'); const text = String(t == null ? '' : t).trim(); if (!text) return;
-  if (!opts.kind && !opts.action && (!S.settings || S.settings.quietToasts !== false) && QUIET_RE.test(text)) return;
   const kind = opts.kind || toastKind(text);
+  if (!shows(kind, opts)) return;
   let title = text; let detail = '';
   const cut = /^(.{3,60}?)(?: \u00b7 |: )(.+)$/.exec(text);
   if (cut) { title = cut[1]; detail = cut[2]; } else if (text.length > 70) { const m = /^(.{20,70}?[.!?])\s+(.+)$/.exec(text); if (m) { title = m[1]; detail = m[2]; } }
@@ -321,23 +321,29 @@ function drawChatList() {
     : '<div class="note">' + (q ? 'No chats match' : 'No chats yet') + '</div>';
 }
 let lpBlockUntil = 0;
-/** Press and hold a chat row to open the same menu as the three dots. Moving the finger (scrolling) cancels it. */
+/** Press and hold a chat row to open the same menu as the three dots. Works with the system long-press (contextmenu), so Android cannot steal it. */
 function chatLongPress() {
   const list = $('#chatList'); let t = null, row = null, x0 = 0, y0 = 0;
   const cancel = () => { clearTimeout(t); t = null; if (row) { row.classList.remove('pressing'); row = null; } };
+  const open = (r, pt) => {
+    if ($('#rowMenu')) return; lpBlockUntil = Date.now() + 800;
+    try { if (navigator.vibrate) navigator.vibrate(12); } catch (err) { /* not supported */ }
+    openRowMenu(r, r.dataset.id, pt);
+  };
   list.addEventListener('pointerdown', (e) => {
     if (e.button > 0 || e.target.closest('[data-menu]')) return;
     const it = e.target.closest('.chat-item[data-id]'); if (!it) return;
     cancel(); row = it; x0 = e.clientX; y0 = e.clientY; it.classList.add('pressing');
-    t = setTimeout(() => {
-      const r = row; if (!r) return; const pt = { x: x0, y: y0 }; cancel(); lpBlockUntil = Date.now() + 700;
-      try { if (navigator.vibrate) navigator.vibrate(12); } catch (err) { /* not supported */ }
-      openRowMenu(r, r.dataset.id, pt);
-    }, 480);
+    t = setTimeout(() => { const r = row; if (!r) return; const pt = { x: x0, y: y0 }; cancel(); open(r, pt); }, 400);
   });
-  list.addEventListener('pointermove', (e) => { if (t && (Math.abs(e.clientX - x0) > 8 || Math.abs(e.clientY - y0) > 8)) cancel(); });
-  ['pointerup', 'pointercancel', 'pointerleave', 'scroll'].forEach((n) => list.addEventListener(n, cancel, true));
-  list.addEventListener('contextmenu', (e) => { if (e.target.closest('.chat-item')) e.preventDefault(); });
+  // Only real finger movement or a scroll cancels. A system pointercancel does not: Android sends it right when its own long press begins.
+  list.addEventListener('pointermove', (e) => { if (t && (Math.abs(e.clientX - x0) > 12 || Math.abs(e.clientY - y0) > 12)) cancel(); });
+  list.addEventListener('pointerup', cancel, true); list.addEventListener('scroll', cancel, true);
+  list.addEventListener('touchmove', (e) => { const f = e.touches[0]; if (t && f && (Math.abs(f.clientX - x0) > 12 || Math.abs(f.clientY - y0) > 12)) cancel(); }, { passive: true });
+  list.addEventListener('contextmenu', (e) => {
+    const it = e.target.closest('.chat-item[data-id]'); if (!it) return;
+    e.preventDefault(); const pt = { x: e.clientX || x0, y: e.clientY || y0 }; cancel(); open(it, pt);
+  });
 }
 function closeRowMenu() { const m = $('#rowMenu'); if (m) m.remove(); const c = $('#rowScrim'); if (c) c.remove(); }
 /** Small menu next to a chat row: Pin, Rename, Delete. */
@@ -348,7 +354,7 @@ function openRowMenu(btn, id, pt) {
   const sc = document.createElement('div'); sc.id = 'rowScrim'; sc.className = 'rowscrim';
   // Close on click (not pointerdown): the scrim must still be under the finger when the
   // synthesized click arrives, otherwise that click lands on the chat row underneath.
-  const away = (e) => { e.preventDefault(); e.stopPropagation(); closeRowMenu(); };
+  const away = (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() < lpBlockUntil) return; closeRowMenu(); };
   sc.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); });
   sc.addEventListener('click', away); sc.addEventListener('contextmenu', away);
   document.body.appendChild(sc);
@@ -422,7 +428,7 @@ async function saveOut(name, text) {
       const f = await fs.pickFolder();
       await fs.writeText(f.uri, name, text);
       if (!S.folders.some((x) => x.uri === f.uri)) await fs.releaseFolder(f.uri).catch(() => {}); // a one-off save should not keep access to that folder
-      toast('Saved ' + name + ' in ' + (f.name || 'the folder'));
+      toast('Saved ' + name + ' in ' + (f.name || 'the folder'), { result: true });
     } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast('Could not save the file: ' + ((e && e.message) || 'unknown error')); }
     return;
   }
@@ -632,7 +638,7 @@ async function send(regenerate) {
     onUser: (m) => renderMsg(m), onAssistant: (m) => renderMsg(m), onDelta: (m) => { netLine(''); renderMsg(m); },
     onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); },
     requestSecret: (info, signal) => askSecret(info, signal), watchBuild: (folder, sha, label) => { CI.watchBuild(folder, sha, label); },
-    onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t); }, onMemory: (n) => toast('Remembered: ' + n[0]),
+    onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t, { kind: 'warn' }); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
       const first = !pendingCount(); S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
       if (first) Work.needs('Waiting for your approval', S.chat && S.chat.id);
@@ -646,7 +652,7 @@ async function send(regenerate) {
     D.log('run', 'Agent run \u00b7 ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
   } catch (e) {
     netLine(''); D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120), S.chat && S.chat.id);
-    toast(e.message || 'Something went wrong');
+    toast(e.message || 'Something went wrong', { kind: 'err' });
     const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
     m.id = await db.put('messages', m); renderMsg(m);
   }
@@ -654,7 +660,7 @@ async function send(regenerate) {
 }
 /** Puts a ready-made request in the chat and sends it (used by Fix buttons). */
 async function quickSend(text) {
-  if (S.running) { toast('Wait for the current task to finish'); return; }
+  if (S.running) { toast('Wait for the current task to finish', { kind: 'warn' }); return; }
   if (!S.models.length) { noModelNotice(); return; }
   const input = $('#input'); input.value = text; autoGrow(); await send();
 }
@@ -710,17 +716,17 @@ async function addFiles(list) {
   for (const f of Array.from(list)) {
     try {
       if (WEIRD_MIME.test(f.type)) { const im = await prepareImage(f); S.attach.push({ img: true, name: f.name, mime: im.mime, data: im.data }); imageNote = true; }
-      else if (isOffice(f.name)) { if (f.size > 8 * 1048576) toast(f.name + ' is too large (max 8 MB).'); else { let t = await officeText(f); let note = ''; if (t.length > 400 * 1024) { t = t.slice(0, 400 * 1024); note = '\n[Text cut: the file is long]'; } S.attach.push({ name: f.name, text: t + note }); } }
-      else if (f.size > 400 * 1024) toast(f.name + ' is too large (max 400 KB). Put it in a project folder instead.');
-      else { const t = await f.text(); if (t.includes('\u0000')) toast(f.name + ' looks like a binary file.'); else S.attach.push({ name: f.name, text: t }); }
-    } catch (e) { toast(e.message); }
+      else if (isOffice(f.name)) { if (f.size > 8 * 1048576) toast(f.name + ' is too large (max 8 MB).', { kind: 'warn' }); else { let t = await officeText(f); let note = ''; if (t.length > 400 * 1024) { t = t.slice(0, 400 * 1024); note = '\n[Text cut: the file is long]'; } S.attach.push({ name: f.name, text: t + note }); } }
+      else if (f.size > 400 * 1024) toast(f.name + ' is too large (max 400 KB). Put it in a project folder instead.', { kind: 'warn' });
+      else { const t = await f.text(); if (t.includes('\u0000')) toast(f.name + ' looks like a binary file.', { kind: 'warn' }); else S.attach.push({ name: f.name, text: t }); }
+    } catch (e) { toast(e.message, { kind: 'err' }); }
   }
   drawChips();
   if (imageNote) warnNoVision();
 }
 function warnNoVision() {
   const m = S.models.find((x) => x.id === currentModelId());
-  if (m && !likelySeesImages(m.apiModel)) toast("Pictures may not work. This model may not read pictures; if the reply ignores it, switch to a vision model (for example Claude, GPT-4o or Gemini).", { kind: 'warn' });
+  if (m && !likelySeesImages(m.apiModel) && !(S.visionWarned = S.visionWarned || new Set()).has(m.id) && S.visionWarned.add(m.id)) toast("Pictures may not work. This model may not read pictures; if the reply ignores it, switch to a vision model (for example Claude, GPT-4o or Gemini).", { kind: 'warn' });
 }
 function autoGrow() { const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; }
 
@@ -839,7 +845,7 @@ async function autoUpdateCheck() {
   if (last && Date.now() - last.at < 24 * 3600 * 1000) return;
   const r = await checkUpdate(APP_VERSION); if (!r.ok) return;
   await kvSet('updLast', { at: Date.now(), r });
-  if (r.newer && (await kvGet('updToldFor', '')) !== r.latest) { await kvSet('updToldFor', r.latest); toast('Update ' + r.latest + ' is available. See Settings > About.'); }
+  if (r.newer && (await kvGet('updToldFor', '')) !== r.latest) { await kvSet('updToldFor', r.latest); toast('Update ' + r.latest + ' is available. See Settings > About.', { result: true }); }
 }
 function openLicenses() {
   const body = sheet('Licenses', { back: () => openSettings() });
@@ -917,7 +923,7 @@ async function openProjects() {
         let f = S.folders.find((x) => x.uri === r.uri);
         if (!f) { f = { id: uid(), name: r.name || 'Folder', uri: r.uri }; S.folders.push(f); await A.saveFolders(S.folders); }
         await applyFolder(f);
-      } catch (e) { if (!/cancel/i.test(e.message || '')) toast(e.message || 'Could not open the folder'); }
+      } catch (e) { if (!/cancel/i.test(e.message || '')) toast(e.message || 'Could not open the folder', { kind: 'err' }); }
     };
     const filt = () => { const q = fq.trim().toLowerCase(); $$('[data-f]', body).forEach((r) => { const f = S.folders.find((x) => x.id === r.dataset.f); r.style.display = !q || (f && f.name.toLowerCase().includes(q)) ? '' : 'none'; }); };
     if ($('#fQ')) { $('#fQ').oninput = (e) => { fq = e.target.value; filt(); }; filt(); }
@@ -1077,7 +1083,7 @@ async function openChanges() {
       const o = OPS[b.op] || OPS.edit;
       return '<div class="hrow' + (b.undone ? ' gone' : '') + '"><span class="hdot ' + (b.op === 'delete' ? 'del' : b.op === 'create' ? 'add' : '') + '">' + ICON(o[0]) + '</span>' +
         '<div class="grow" data-v="' + b.id + '"><div class="t">' + esc(baseOf(b.path)) + '</div><div class="s">' + (dirOf(b.path) ? esc(dirOf(b.path)) + ' \u00b7 ' : '') + (b.undone ? 'Undone' : o[1]) + ' \u00b7 ' + ago(b.at) + '</div></div>' +
-        (b.undone ? '' : '<button class="btn sm" data-u="' + b.id + '">' + ICON('undo') + '<span class="lbl">' + o[2] + '</span></button>') + '</div>';
+        (b.undone ? '' : '<button class="btn sm chgbtn" data-u="' + b.id + '">' + ICON('undo') + '<span class="lbl">' + o[2] + '</span></button>') + '</div>';
     };
     body.innerHTML = (live.length > 1 ? '<button id="undoAll" class="btn danger" style="width:100%;margin-bottom:10px">' + ICON('undo') + '<span class="lbl">Undo all ' + live.length + ' changes</span></button>' : '') +
       (all.length ? all.map(row).join('') : '<div class="note">No changes in this chat yet. Files the agent edits, creates or deletes appear here.</div>') +
@@ -1135,7 +1141,7 @@ function openSettings() {
     '<div class="field"><span>Approvals in new chats</span>' + seg('setAutoDef', [['0', 'Ask first'], ['1', 'Auto']], st.autoDefault ? '1' : '0') + '<small>Auto runs file changes, zip, commits and everyday commands without asking. Deleting data, sudo, force push, publishing and similar risky actions still ask. You can switch any chat with the chip above the messages. Backups and Undo always work.</small></div>' +
     '<div class="field"><span>Protect secret files</span>' + seg('setProt', [['1', 'On'], ['0', 'Off']], st.protectSecrets !== false ? '1' : '0') + '<small>.env files, keys and credentials stay hidden from the agent and the chat. The agent can still run your project with them. Secret values are removed from terminal output, and new secret files are never committed automatically.</small></div>' +
     '<div class="h3">Appearance</div>' + '<div class="field">' + seg('setTheme', [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], st.theme) + '</div>' +
-    '<div class="field"><span>Notifications</span>' + seg('setQuiet', [['1', 'Quiet'], ['0', 'All']], st.quietToasts !== false ? '1' : '0') + '<small>Quiet shows only errors, warnings and the results of long tasks.</small></div>' +
+    '<div class="field"><span>Notifications</span>' + seg('setQuiet', [['1', 'Quiet'], ['0', 'All']], st.quietToasts !== false ? '1' : '0') + '<small>Quiet shows only errors, warnings and results of long tasks like push, pull, clone and backup. All also shows short confirmations.</small></div>' +
     '<div class="h3">Memory</div><div class="field">' + seg('setLearn', [['1', 'Learn about me'], ['0', 'Off']], st.autoLearn ? '1' : '0') + '<small>Short notes saved on this phone and shared with the model so it knows you.</small></div><div id="memList"></div>' +
     '<button id="memAdd" class="btn" style="width:100%">' + ICON('plus') + '<span class="lbl">Add a note</span></button>' +
     '<div class="h3">Data</div>' +
@@ -1204,7 +1210,7 @@ function openSettings() {
     for (const row of await db.all('chats')) if (!keep.has(row.id)) await db.del('chats', row.id);
     closeSheet(); await newChat(null); await loadChats(); toast(keep.size ? 'Conversations deleted (pinned kept)' : 'All conversations deleted');
   };
-  $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message)); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message));
+  $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message, { kind: 'err' })); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message, { kind: 'err' }));
   $('#gitId').onclick = () => openGitIdentity(openSettings);
 }
 async function drawTerm(redraw) {
@@ -1272,17 +1278,17 @@ async function drawSaved() {
   const ask = async (name, cmd) => {
     const n = await askText('Name', 'Short name, for example Run tests', name || ''); if (n === null || !n.trim()) return null;
     const c = await askText('Command', 'The shell command to run', cmd || '', true); if (c === null || !c.trim()) return null;
-    if (SECRETISH.test(c)) { toast('A saved command must not contain a key or password. Use an environment variable instead.'); return null; }
+    if (SECRETISH.test(c)) { toast('A saved command must not contain a key or password. Use an environment variable instead.', { kind: 'warn' }); return null; }
     return { name: n.trim().slice(0, 40), cmd: c.trim().slice(0, 500) };
   };
-  $('#scAdd').onclick = async () => { const v = await ask(); if (v) { if (list.length >= 30) { toast('Up to 30 saved commands'); return; } list.push(v); await save(list); } };
+  $('#scAdd').onclick = async () => { const v = await ask(); if (v) { if (list.length >= 30) { toast('Up to 30 saved commands', { kind: 'warn' }); return; } list.push(v); await save(list); } };
   $$('[data-sc]', box).forEach((b) => b.onclick = async () => {
     const i = Number(b.dataset.i); const c = list[i]; if (!c) return;
     if (b.dataset.sc === 'del') { if (await confirmBox('Delete "' + c.name + '"?', c.cmd, 'Delete')) { list.splice(i, 1); await save(list); } return; }
     if (b.dataset.sc === 'edit') { const v = await ask(c.name, c.cmd); if (v) { list[i] = v; await save(list); } return; }
-    if (!S.settings.termux) { toast('Turn the terminal on first (switch at the top)'); return; }
+    if (!S.settings.termux) { toast('Turn the terminal on first (switch at the top)', { kind: 'warn' }); return; }
     const path = await getTermuxPath(S.folder);
-    if (!path) { toast('The Termux path of this project is not set'); return; }
+    if (!path) { toast('The Termux path of this project is not set', { kind: 'warn' }); return; }
     const risky = isRiskyCommand(c.cmd);
     if (!await confirmBox('Run "' + c.name + '"?', c.cmd + '\n\nRuns in Termux in ' + path + '.' + (risky ? '\nWarning: this command can delete data, change the system or send data out.' : ''), 'Run')) return;
     const out = $('#scOut'); out.innerHTML = '<div class="busy"><span class="spin"></span>Running ' + esc(c.name) + '...</div>'; out.scrollIntoView({ block: 'nearest' });
@@ -1386,6 +1392,7 @@ function errLine(text, opts = {}) {
     else if (k === 'retry' && opts.retry) opts.retry();
   });
 }
+const LONG_GIT = new Set(['Pushing', 'Force pushing', 'Pulling', 'Merging']);
 const DONE = { Fetching: 'Fetched', Pulling: 'Pulled', Pushing: 'Pushed', 'Force pushing': 'Force pushed', Committing: 'Committed', Discarding: 'Discarded', 'Creating branch': 'Branch created', 'Switching branch': 'Switched branch', Merging: 'Merged', 'Deleting branch': 'Branch deleted', 'Undoing commit': 'Commit undone', 'Saving remote': 'Remote saved', 'Switching to HTTPS': 'Remote switched to HTTPS' };
 async function gitRun(label, fn, after, keep) {
   $$('#sheetBody .btn, #sheetBody .linkbtn, #sheetBody .icon-btn, #sheetBody .stg').forEach((b) => { b.disabled = true; });
@@ -1395,7 +1402,7 @@ async function gitRun(label, fn, after, keep) {
   try {
     await fn((p) => { const ph = phaseOf(p); busyLine(label + (ph ? ' · ' + ph : '') + (p && p.total ? ' ' + Math.round((p.loaded / p.total) * 100) + '%' : ''), p && p.total ? p.loaded / p.total : null, cancel); }, ac.signal);
     if (ac.signal.aborted) { await openGit(GS.tab); toast('Cancelled'); return; }
-    const secs = (Date.now() - t0) / 1000; toast((DONE[label] || 'Done') + (secs >= 2 ? ' · ' + secs.toFixed(1) + 's' : ''));
+    const secs = (Date.now() - t0) / 1000; toast((DONE[label] || 'Done') + (secs >= 2 ? ' · ' + secs.toFixed(1) + 's' : ''), { result: LONG_GIT.has(label) });
     if (keep && S.gitState && !S.gitState.pending) GS.reuse = typeof keep === 'function' ? keep(S.gitState.changes) : S.gitState.changes;
     if (after) await after(); else await openGit();
   } catch (e) {
@@ -1487,9 +1494,9 @@ function renderGitTab(folder, st, head, body) {
     else {
       const staged = st.changes.filter((c) => GS.sel.has(c.path)); const unstaged = st.changes.filter((c) => !GS.sel.has(c.path));
       const row = (c, on) => '<div class="gr"><button class="stg' + (on ? ' on' : '') + '" data-sel="' + esc(c.path) + '" aria-label="' + (on ? 'Unstage ' : 'Stage ') + esc(c.path) + '">' + ICON(on ? 'minus' : 'plus') + '</button><div class="grow" data-gf="' + esc(c.path) + '"><div class="t">' + esc(baseOf(c.path)) + '</div>' + (dirOf(c.path) ? '<div class="s">' + esc(dirOf(c.path)) + '</div>' : '') + '</div><span class="kind ' + c.kind + '">' + c.kind + '</span><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard ' + esc(c.path) + '" style="width:34px;height:34px">' + ICON('undo') + '</button></div>';
-      h += '<div class="gbar"><span class="h4">Staged (' + staged.length + ')</span>' + (staged.length ? '<button id="gUnstageAll" class="linkbtn">Unstage all</button>' : '') + '</div>' +
+      h += '<div class="gbar"><span class="h4">Staged (' + staged.length + ')</span>' + (staged.length ? '<button id="gUnstageAll" class="gchip" type="button">' + ICON('minus') + '<span class="lbl">Unstage all</span></button>' : '') + '</div>' +
         (staged.map((c) => row(c, true)).join('') || '<div class="note" style="text-align:left">Nothing staged. Tap + on a file to include it in the next commit.</div>') +
-        '<div class="gbar"><span class="h4">Changes (' + unstaged.length + ')</span><span>' + (unstaged.length ? '<button id="gStageAll" class="linkbtn">Stage all</button>' : '') + '<button id="gDiscardAll" class="linkbtn danger" style="margin-left:14px">Discard all</button></span></div>' +
+        '<div class="gbar"><span class="h4">Changes (' + unstaged.length + ')</span><span class="gchips">' + (unstaged.length ? '<button id="gStageAll" class="gchip" type="button">' + ICON('plus') + '<span class="lbl">Stage all</span></button>' : '') + '<button id="gDiscardAll" class="gchip danger" type="button">' + ICON('trash') + '<span class="lbl">Discard all</span></button></span></div>' +
         (unstaged.map((c) => row(c, false)).join('') || '<div class="note" style="text-align:left">Everything is staged.</div>');
       foot.classList.remove('hidden');
       foot.innerHTML = '<button id="gReview" class="btn sm' + (S.models.length ? '' : ' dim') + '" type="button">' + ICON('search') + '<span class="lbl">Review my changes</span></button><div class="gbox"><textarea id="gMessage" rows="1" placeholder="Commit message"></textarea><button id="gSuggest" class="sugpill' + (S.models.length ? '' : ' dim') + '" type="button" aria-label="Suggest a message">' + ICON('sparkles') + '<span class="lbl">Suggest</span></button></div><div id="gHint" class="ghint"></div><div class="row"><button id="gCommit" class="btn primary" style="flex:1"><span class="lbl"></span></button></div>';
@@ -1711,7 +1718,7 @@ async function openGitStart(folder, mode) {
       try {
         if ($('#nIgn').checked) { try { await fs.stat(folder.uri, '.gitignore').then(async (s) => { if (!s || !s.exists) await fs.writeText(folder.uri, '.gitignore', 'node_modules/\n.env\n.env.*\n*.log\n.DS_Store\n__pycache__/\n*.pyc\n'); }); } catch (e) { /* optional */ } }
         const r = await G.publishNew(folder, { provider, host: $('#nHost').value.trim(), name: $('#nName').value, isPrivate: segVal('nVis') === 'private', description: $('#nDesc').value.trim(), token: $('#nTok').value.trim(), message: 'Initial commit' }, (t) => busyLine(t + '...'));
-        toast('Repository created'); GS.keepSel = false; drawCtx(); await openGit('remote'); const el = $('#gMsg'); if (el) el.innerHTML = '<div class="ok">Uploaded to ' + esc(r.webUrl || r.cloneUrl) + '</div>';
+        toast('Repository created', { result: true }); GS.keepSel = false; drawCtx(); await openGit('remote'); const el = $('#gMsg'); if (el) el.innerHTML = '<div class="ok">Uploaded to ' + esc(r.webUrl || r.cloneUrl) + '</div>';
       } catch (e) { fail(e); }
     };
     if ($('#lGo')) $('#lGo').onclick = async () => { try { await G.init(folder); toast('Repository created'); GS.keepSel = false; drawCtx(); openGit('changes'); } catch (e) { fail(e); } };
@@ -1772,7 +1779,7 @@ async function runClone(parent, v, say) {
   const f = await G.cloneInto(parent, v.url, { token: v.token, name: v.name, depth: v.full ? 0 : 1, id: uid(), onProgress: (p) => say('Cloning ' + pct(p)) });
   S.folders.push(f); await A.saveFolders(S.folders);
   GS.keepSel = false; closeSheet(); await applyFolder(f);
-  if (S.folder && S.folder.id === f.id) { toast('Cloned into ' + f.name); openGit('changes'); }
+  if (S.folder && S.folder.id === f.id) { toast('Cloned into ' + f.name, { result: true }); openGit('changes'); }
 }
 /** Projects > Clone: ask for the repository, then for the folder it should go into. */
 async function cloneFlow() {
@@ -1819,9 +1826,9 @@ async function exportBackup() {
   data.messages = stripPictures(data.messages);
   const name = 'kdex-agent-backup-' + dayKey() + '.json';
   const text = JSON.stringify(data);
-  if (text.length > 60 * 1048576) { toast('This backup would be larger than 60 MB, too big to restore. Delete some old chats first.'); return; }
+  if (text.length > 60 * 1048576) { toast('This backup would be larger than 60 MB, too big to restore. Delete some old chats first.', { kind: 'warn' }); return; }
   await fs.writeText(r.uri, name, text);
-  toast('Saved ' + name + ' (' + fmtBytes(text.length) + ') in ' + (r.name || 'the folder'));
+  toast('Saved ' + name + ' (' + fmtBytes(text.length) + ') in ' + (r.name || 'the folder'), { result: true });
 }
 /** A backup file is only used when every part has the shape the app expects. Returns an error text or ''. */
 function backupProblem(d) {
@@ -1842,9 +1849,9 @@ async function importBackup() {
   const f = files[0];
   if (!await confirmBox('Restore backup?', 'Restore ' + f.name + '? Chats, notes and settings in the file replace the current ones. API keys are never in a backup; add them again if needed.', 'Restore')) return;
   let data;
-  try { const t = await fs.readText(r.uri, f.path, 64 * 1024 * 1024); if (t.truncated) { toast('The backup file is too large to restore (over 64 MB).'); return; } data = JSON.parse(t.text); }
+  try { const t = await fs.readText(r.uri, f.path, 64 * 1024 * 1024); if (t.truncated) { toast('The backup file is too large to restore (over 64 MB).', { kind: 'warn' }); return; } data = JSON.parse(t.text); }
   catch (e) { toast('Could not read the backup file: ' + String((e && e.message) || e).slice(0, 80)); return; }
-  const bad = backupProblem(data); if (bad) { toast(bad); return; }
+  const bad = backupProblem(data); if (bad) { toast(bad, { kind: 'warn' }); return; }
   // Keep a copy of what is on the phone now; if anything fails halfway, put it back.
   const before = {}; for (const st of BACKUP_STORES) before[st] = await db.all(st);
   try {
@@ -1860,7 +1867,7 @@ async function importBackup() {
     try { await fs.list(fo.uri, ''); } catch (e) { lost.push(fo.name || fo.path || 'a folder'); }
   }
   if (lost.length) await choiceBox('Add folders again', 'Restored. Android no longer lets this install open ' + lost.length + ' folder' + (lost.length > 1 ? 's' : '') + ': ' + lost.slice(0, 6).join(', ') + (lost.length > 6 ? ' ...' : '') + '. Tap the folder button, then Add folder, and pick each one again. Your chats are kept.', ['OK'], { noCancel: true });
-  toast('Restored. Restarting...'); setTimeout(() => location.reload(), 700);
+  toast('Restored. Restarting...', { result: true }); setTimeout(() => location.reload(), 700);
 }
 
 // ------------------------------------------------------------ wiring
