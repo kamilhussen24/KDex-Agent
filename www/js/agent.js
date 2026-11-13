@@ -6,6 +6,7 @@ import { stream, complete } from './providers.js';
 import { TOOLS, WRITE_TOOLS, BINARY_EXT, runRead, planWrite, applyWrite, undoBackup } from './tools.js';
 import { estimateTokens, uid, dayKey } from './util.js';
 import { isRepo, resetGitCache } from './git.js';
+import { scratchFolder } from './scratch.js';
 import * as G from './git.js';
 import { protectionOn, isSecretPath, scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
 import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand, CHECK_TOOLS_TOOL, checkTools } from './termux.js';
@@ -25,7 +26,7 @@ export const BUDGETS = { economy: 3000, balanced: 9000, full: 60000 };
 // ------------------------------------------------------------------ settings & models
 const FILE_TOOL = {
   name: 'make_file',
-  description: 'Create a file for the user to download from the chat (used when no project folder is open). Give a plain file name such as notes.md or app.py and the complete text content. Text formats only.',
+  description: 'Create a file for the user to download from the chat (used when no project folder is open; the file is also kept in Scratch). Give a plain file name such as notes.md or app.py and the complete text content. Text formats only.',
   parameters: { type: 'object', properties: { name: { type: 'string', description: 'File name with extension, no folders' }, content: { type: 'string', description: 'Complete file content' } }, required: ['name', 'content'] },
 };
 const PLAN_TOOL = {
@@ -184,7 +185,7 @@ async function readKdex(folder) {
 
 function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, imgOn) {
   const parts = [ABOUT, 'LANGUAGE AND LENGTH: reply in the language of the user\'s latest message: an English message gets English; Bengali, or Bengali typed in English letters, gets Bengali. Never switch language on your own. Keep every reply as short as the question allows: a greeting such as "Hi" gets one short line in the same language, without emoji, without a feature list and without describing the app. Longer answers only when the task needs them; this saves the user money.'];
-  if (folder) {
+  if (folder && !folder.scratch) {
     parts.push(
       'PROJECT: you are working inside the folder "' + folder.name + '". Tools: list_dir, find_files, search, read_file, create/edit/delete files. All paths are relative to this folder; you cannot reach anything outside it.\n' +
       'Rules: look before you change (list_dir, find_files or search, then read_file). Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
@@ -207,12 +208,12 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, i
       'If git tools are provided, this folder is a Git repository: use git_status/git_diff to review work, and git_commit/git_push/git_pull only when the user asks (each needs their approval, and git_push always asks, even in Auto mode). git_branch, git_fetch and git_remote are also available. When a git step fails, read the message: it says whether the token is missing, rejected or lacks write permission, whether a file is too big or the branch is protected, or whether the network is down. Tell the user exactly that and where to fix it (Settings > Git > Identity and access tokens); do not retry blindly. For huge repositories, LFS, submodules or SSH, use git in the terminal if it is on.'
     );
   } else {
-    parts.push('NO FOLDER in this chat. You have no file or terminal tools here, but you can still do everyday work: answer, write, explain, review attached photos and text files (code, notes, CSV, JSON, Word .docx, Excel .xlsx, PowerPoint .pptx; PDF is not supported, so ask for the text or a photo of the page), and write code. When the user needs a finished file (a script, a document, a config, a small page), call make_file with its name and full content; the chat shows a Download button. Never paste a long file into the reply when make_file fits. For real project work (several files, running commands, Git), tell the user to tap the folder button above the chat and pick the project folder, then continue.');
+    parts.push('NO PROJECT FOLDER in this chat, but you have a private SCRATCH desk: temporary files kept only inside this chat in the app (not a real folder on the phone, and no terminal or Git). Tools: list_dir, find_files, search, read_file, write_file, edit_file, delete_file, zip, unzip and view_image work on Scratch with the same approvals and Undo as a project. Use it for everyday jobs: answer, write, explain, review attached photos and text files (code, notes, CSV, JSON, Word .docx, Excel .xlsx, PowerPoint .pptx; PDF is not supported, so ask for the text or a photo of the page), write a script, a document, a config or a small page, and fix or convert one file. When the user needs a finished file, call make_file with its name and full content: it is also saved in Scratch and the chat shows a Download button. To change a file you made earlier, read it from Scratch and use edit_file. Never paste a long file into the reply when a file fits. For real project work (several files, running commands, Git), tell the user to tap the folder button above the chat and pick the project folder; the Scratch chip also has "Move to a folder" to take these files along.');
   }
-  if (folder) parts.push(WORK_TOOLS_GUIDE + RELEASE_GUIDE + (termuxPath ? TERMINAL_TOOLS_GUIDE : '') + (imgOn ? IMAGE_GUIDE : ''));
+  if (folder && !folder.scratch) parts.push(WORK_TOOLS_GUIDE + RELEASE_GUIDE + (termuxPath ? TERMINAL_TOOLS_GUIDE : '') + (imgOn ? IMAGE_GUIDE : ''));
   parts.push(DAILY_GUIDE);
-  if (folder && kdex) parts.push('PROJECT INSTRUCTIONS (from KDEX.md in the project folder, written by the user; follow them for this project, unless they ask for something unsafe):\n' + kdex);
-  if (folder && pmap) parts.push('PROJECT MAP (made automatically, may be slightly out of date; use list_dir to confirm before relying on it):\n' + pmap);
+  if (folder && !folder.scratch && kdex) parts.push('PROJECT INSTRUCTIONS (from KDEX.md in the project folder, written by the user; follow them for this project, unless they ask for something unsafe):\n' + kdex);
+  if (folder && !folder.scratch && pmap) parts.push('PROJECT MAP (made automatically, may be slightly out of date; use list_dir to confirm before relying on it):\n' + pmap);
   if (custom && custom.trim()) parts.push('User instructions:\n' + custom.trim());
   if (memory.length) parts.push('What you know about the user from earlier chats (use it naturally, do not recite it):\n' + memory.map((m) => '- ' + m.text).join('\n'));
   if (summary) parts.push('Summary of the earlier part of this chat:\n' + summary);
@@ -304,7 +305,7 @@ async function summarize(chat, rt, dropped) {
 }
 
 async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
-  const termuxPathCtx = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
+  const termuxPathCtx = folder && !folder.scratch && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
   const raw = (await db.byIndex('messages', 'chatId', chat.id)).sort((a, b) => a.id - b.id)
     .filter((m) => !(m.role === 'assistant' && m.status === 'error'));
   // Folder-change events are shown to the user as dividers; the model gets them as a note on the next user message.
@@ -336,9 +337,10 @@ async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
     const i = start + k;
     return toNeutral(m, { compact: i < lastUser, keepImages: i >= keepImgFrom, model: rt.model && rt.model.id });
   });
-  const pmap = folder ? await projectMap(folder) : '';
-  const kdex = folder ? await readKdex(folder) : '';
-  const imgOn = !!(folder && settings.imageProvider && settings.imageModel);
+  const real = folder && !folder.scratch;
+  const pmap = real ? await projectMap(folder) : '';
+  const kdex = real ? await readKdex(folder) : '';
+  const imgOn = !!(real && settings.imageProvider && settings.imageModel);
   return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx, pmap, kdex, imgOn), messages: msgs };
 }
 
@@ -407,14 +409,16 @@ async function learn(text, rt, settings) {
  * ui: { onUser(msg), onAssistant(msg), onDelta(msg), onTool(msg), onNotice(text), onMemory(notes), requestApproval(toolMsg) -> Promise<'apply'|'reject'> }
  */
 export async function runTurn(ctx) {
-  const { chat, folder, signal, ui } = ctx;
+  const { chat, signal, ui } = ctx;
+  const scratch = !ctx.folder; // a chat without a folder works on its private Scratch desk
+  const folder = ctx.folder || scratchFolder(chat.id);
   const settings = await getSettings();
   const rt = await runtimeFor(ctx.modelId);
   const memory = await getMemory();
   const think = ctx.think || 'off';
 
   await repairHistory(chat.id);
-  if (folder) { forgetSecrets(folder); resetGitCache(folder); } // Termux or another tool may have changed the repository since the last turn
+  if (!scratch) { forgetSecrets(folder); resetGitCache(folder); } // Termux or another tool may have changed the repository since the last turn
 
   if (!ctx.regenerate) {
     const userMsg = { chatId: chat.id, role: 'user', text: ctx.text || '', images: ctx.images && ctx.images.length ? ctx.images : undefined, files: ctx.attachNames, fileData: ctx.attachFiles && ctx.attachFiles.length ? ctx.attachFiles.map((f) => ({ name: f.name, size: f.text.length, text: f.text })) : undefined, at: Date.now(), status: 'done' };
@@ -427,11 +431,11 @@ export async function runTurn(ctx) {
   chat.think = think;
   await db.put('chats', chat);
 
-  const hasGit = folder ? await isRepo(folder).catch(() => false) : false;
-  const termuxPath = folder && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
-  const imgOn = !!(folder && settings.imageProvider && settings.imageModel);
+  const hasGit = scratch ? false : await isRepo(folder).catch(() => false);
+  const termuxPath = !scratch && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
+  const imgOn = !!(!scratch && settings.imageProvider && settings.imageModel);
   const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
-  const tools = folder ? (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version'))) : [PLAN_TOOL, FILE_TOOL, WEB_TOOL].concat(EXTRA_ANY_TOOLS, DEVICE_TOOLS);
+  const tools = scratch ? TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL, FILE_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS) : (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version')));
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
@@ -544,6 +548,7 @@ export async function runTurn(ctx) {
           if (!body) throw new Error('The content is empty.');
           if (body.length > 400000) throw new Error('The file is too large for a download card (limit about 400 KB).');
           tm.file = { name: nm, size: body.length }; tm.fileContent = body; tm.args = nm;
+          try { await fs.writeText(folder.uri, nm, body); } catch (e) { /* the download card still works when Scratch is full */ }
           tm.content = 'The file ' + nm + ' is ready. The chat now shows a Download button for it; tell the user to tap Download (or Copy).'; tm.status = 'done';
         } else if (EXTRA_ANY_NAMES.has(call.name) || EXTRA_FOLDER_NAMES.has(call.name)) {
           if (EXTRA_FOLDER_NAMES.has(call.name) && !folder) throw new Error('This needs a project folder.');
@@ -841,6 +846,7 @@ async function pruneBackups(chatId) {
 export async function removeChat(chatId) {
   await db.delByIndex('messages', 'chatId', chatId);
   await db.delByIndex('backups', 'chatId', chatId);
+  await db.delByIndex('scratch', 'chatId', chatId);
   await db.del('chats', chatId);
 }
 

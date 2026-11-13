@@ -1,6 +1,7 @@
 // Bridge to the native Android plugin, with a browser fallback so the UI can be developed and tested
 // in a normal browser (in-memory folder, fetch for HTTP).
 import { uid } from './util.js';
+import { isScratchUri, scratchFs } from './scratch.js';
 
 const cap = typeof window !== 'undefined' ? window.Capacitor : null;
 export const isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
@@ -169,8 +170,9 @@ export const fs = {
     const m = memFolder(uri); memPut(m, 'README.md', '# ' + p + '\n'); memPut(m, 'src/app.js', 'console.log(1);\n');
     return { uri, name: p.replace(/\/+$/, '').split('/').pop() || 'Storage', path: p, full: p, items: 2, writable: true, root: false };
   },
-  async releaseFolder(uri) { if (plugin && !baseOf(uri)) await plugin.releaseFolder({ uri }); },
+  async releaseFolder(uri) { if (isScratchUri(uri)) return; if (plugin && !baseOf(uri)) await plugin.releaseFolder({ uri }); },
   async list(uri, path = '') {
+    if (isScratchUri(uri)) return scratchFs.list(uri, path);
     if (plugin) return rel(uri, (await plugin.list({ uri: treeOf(uri), path: jn(baseOf(uri), path) })).entries);
     const m = memFolder(uri);
     const base = path ? path.replace(/\/+$/, '') + '/' : '';
@@ -185,6 +187,7 @@ export const fs = {
     return Array.from(seen.values());
   },
   async walk(uri, path = '', max = 3000) {
+    if (isScratchUri(uri)) return scratchFs.walk(uri, path, max);
     if (plugin) { const w = await plugin.walk({ uri: treeOf(uri), path: jn(baseOf(uri), path), max }); return { ...w, files: rel(uri, w.files) }; }
     const m = memFolder(uri);
     const base = path ? path.replace(/\/+$/, '') + '/' : '';
@@ -193,6 +196,7 @@ export const fs = {
     return { files, truncated: false };
   },
   async stat(uri, path) {
+    if (isScratchUri(uri)) return scratchFs.stat(uri, path);
     if (plugin) return plugin.stat({ uri: treeOf(uri), path: jn(baseOf(uri), path) });
     const m = memFolder(uri);
     if (m.has(path)) return { exists: true, isDir: false, size: m.get(path).data.length, modified: m.get(path).mtime };
@@ -201,6 +205,7 @@ export const fs = {
     return { exists: path === '', isDir: path === '', size: 0, modified: 0 };
   },
   async readText(uri, path, maxBytes = 1048576) {
+    if (isScratchUri(uri)) return scratchFs.readText(uri, path, maxBytes);
     if (plugin) return plugin.readText({ uri: treeOf(uri), path: jn(baseOf(uri), path), maxBytes });
     const m = memFolder(uri);
     if (!m.has(path)) throw new Error('Not found: ' + path);
@@ -208,21 +213,25 @@ export const fs = {
     return { text: t.slice(0, maxBytes), size: e.data.length, binary: false, truncated: e.data.length > maxBytes };
   },
   async writeText(uri, path, text) {
+    if (isScratchUri(uri)) return scratchFs.writeText(uri, path, text);
     if (plugin) { await plugin.writeText({ uri: treeOf(uri), path: jn(baseOf(uri), path), text }); return; }
     memPut(memFolder(uri), path, text);
   },
   async readBytes(uri, path) {
+    if (isScratchUri(uri)) return scratchFs.readBytes(uri, path);
     if (plugin) return b64ToBytes((await plugin.readB64({ uri: treeOf(uri), path: jn(baseOf(uri), path) })).b64);
     const m = memFolder(uri);
     if (!m.has(path)) throw new Error('ENOENT: ' + path);
     return m.get(path).data;
   },
   async writeBytes(uri, path, data) {
+    if (isScratchUri(uri)) return scratchFs.writeBytes(uri, path, data);
     if (plugin) { await plugin.writeB64({ uri: treeOf(uri), path: jn(baseOf(uri), path), b64: bytesToB64(data) }); return; }
     memPut(memFolder(uri), path, data);
   },
-  async mkdir(uri, path) { if (plugin) await plugin.mkdir({ uri: treeOf(uri), path: jn(baseOf(uri), path) }); },
+  async mkdir(uri, path) { if (isScratchUri(uri)) return; if (plugin) await plugin.mkdir({ uri: treeOf(uri), path: jn(baseOf(uri), path) }); },
   async remove(uri, path) {
+    if (isScratchUri(uri)) return scratchFs.remove(uri, path);
     if (plugin) { await plugin.remove({ uri: treeOf(uri), path: jn(baseOf(uri), path) }); return; }
     const m = memFolder(uri);
     if (m.delete(path)) return;

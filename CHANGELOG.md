@@ -7,6 +7,16 @@ for its version.
 
 ## [Unreleased]
 
+## [1.48.0]
+
+### Added
+- Scratch: a chat without a folder now has a private file desk. It appears the first time a file is made (the "Scratch · N" chip next to Add folder) and is kept only inside the app, out of the file manager and away from other apps. The agent can now list, read, write, edit, delete, search, zip and unzip files there, with the same approvals and backups as a project. Files from make_file are saved there too, and the Download button still works as before. There is no Git or terminal in Scratch.
+- Scratch sheet: tap a file for View, Copy, Preview (HTML) or Delete. Move to a folder copies the files into a folder you pick and continues the chat there (you choose to clear or keep the Scratch copy; files with the same name are kept). Download all (zip) goes through the phone's share sheet like other downloads. Clear this scratch empties it; the chat stays. Each chat's Scratch is limited to 50 MB and is deleted with the chat.
+- Settings > Cleanup: shows what the app uses and what is safe to clear. Free up space removes undo backups older than 30 days, the diagnostics log and Scratch files of chats not used for 30 days. Remove pictures from chats deletes the pictures but keeps every message. Chats, keys and settings are never touched, and both buttons ask first.
+
+### Changed
+- The local database is now version 2 (adds the Scratch store). Existing chats and settings are untouched.
+
 ## [1.47.3]
 
 ### Changed

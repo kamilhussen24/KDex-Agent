@@ -18,6 +18,7 @@ import { checkUpdate, isNewer, REPO_URL } from './update.js';
 import { officeText, isOffice } from './docs.js';
 import { prepareImage } from './image.js';
 import { isHtmlName, bundleFromFolder, bundleText } from './preview.js';
+import { scratchFolder, scratchFiles, scratchCount, scratchClear, scratchUsage, SCRATCH_CAP } from './scratch.js';
 
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
@@ -25,6 +26,9 @@ const S = {
   approvals: new Map(), approvalTm: new Map(), els: new Map(), attach: [], sheetStack: [],
 };
 const ICON = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
+/** The folder the file tools work on right now: the project, or this chat's Scratch desk. */
+const curF = () => S.folder || (S.chat ? scratchFolder(S.chat.id) : null);
+const folderFor = (id) => (String(id || '').startsWith('scratch-') ? scratchFolder(String(id).slice(8)) : (S.folders.find((x) => x.id === id) || S.folder));
 
 // ------------------------------------------------------------ helpers
 let toastT; let toastH;
@@ -453,6 +457,7 @@ async function persistChat() {
 function drawCtx() {
   $('#chipFolderName').textContent = S.folder ? S.folder.name : 'Add folder';
   $$('#ctxBar .nf').forEach((b) => b.classList.toggle('hidden', !S.folder));
+  drawScratch();
   if (S.folder) { updateChangesChip(); updateGitChip(); }
   updateTermChip(); drawCi(CI.getBuild());
 }
@@ -462,6 +467,7 @@ async function updateGitChip() {
   $('#chipGitLbl').textContent = b || 'Git';
 }
 async function updateChangesChip() {
+  drawScratch();
   if (!S.chat) return;
   const b = (await db.byIndex('backups', 'chatId', S.chat.id)).filter((x) => !x.undone);
   $('#chipChangesLbl').textContent = b.length ? 'Changes (' + b.length + ')' : 'Changes';
@@ -483,7 +489,7 @@ function renderMsg(m) {
   if (!el) { el = document.createElement('div'); el.dataset.id = m.id; S.els.set(m.id, el); box.appendChild(el); }
   if (m.role === 'user') {
     el.className = 'msg user';
-    el.innerHTML = (m.images && m.images.length ? '<div class="thumbs">' + m.images.map((i) => '<img alt="" src="data:' + i.mime + ';base64,' + i.data + '">').join('') + '</div>' : '') +
+    el.innerHTML = (m.images && m.images.length ? '<div class="thumbs">' + m.images.map((i) => '<img alt="" src="data:' + i.mime + ';base64,' + i.data + '">').join('') + '</div>' : m.imagesRemoved ? '<div class="gone">' + m.imagesRemoved + ' picture' + (m.imagesRemoved > 1 ? 's' : '') + ' removed</div>' : '') +
       (m.fileData && m.fileData.length ? '<div class="ufiles">' + m.fileData.map((f, i) => '<button type="button" class="ufile" data-ufile="' + m.id + ':' + i + '" aria-label="Save ' + esc(f.name) + '">' + ICON('file') + '<span class="nm">' + esc(f.name) + '</span><span class="sz">' + esc(fmtBytes(f.size)) + '</span></button>').join('') + '</div>' : (m.files && m.files.length ? '<div class="fnames">' + m.files.map(esc).join(', ') + '</div>' : '')) + (m.text ? '<div class="bubble">' + esc(m.text) + '</div>' : '');
   } else if (m.role === 'assistant') {
     el.className = 'msg assistant';
@@ -637,7 +643,7 @@ async function send(regenerate) {
   Work.start('Working on your request'); const t0 = Date.now();
   const ui = {
     onUser: (m) => renderMsg(m), onAssistant: (m) => renderMsg(m), onDelta: (m) => { netLine(''); renderMsg(m); },
-    onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); },
+    onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); else if (m.name === 'make_file' && m.status === 'done') drawScratch(); },
     requestSecret: (info, signal) => askSecret(info, signal), watchBuild: (folder, sha, label) => { CI.watchBuild(folder, sha, label); },
     onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t, { kind: 'warn' }); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
@@ -876,7 +882,7 @@ async function applyFolder(f) {
     const ev = { chatId: c.id, role: 'event', status: 'done', at: Date.now(),
       label: f ? 'Folder: ' + f.name : 'Folder removed',
       text: f ? 'The user changed the project folder. You now work in "' + f.name + '"' + (cur ? ' (before: "' + cur.name + '")' : ' (before: no folder)') + '. File results from earlier messages may belong to another location, so read again before relying on them.'
-        : 'The user removed the project folder. You have no file or terminal tools in this chat now.' };
+        : 'The user removed the project folder. You now work on the private Scratch desk of this chat (file tools only; no terminal or Git).' };
     ev.id = await db.put('messages', ev); renderMsg(ev); scrollEnd(true);
     await persistChat(); loadChats();
   } else if ($('.empty', $('#messages'))) renderEmpty();
@@ -1015,10 +1021,108 @@ async function pvRender() {
 }
 /** Preview a project file: reads the page and the local files it uses from the folder. */
 async function previewFile(p) {
-  if (!S.folder) return;
-  const folder = S.folder; let src = '';
+  const folder = curF(); if (!folder) return; let src = '';
   try { const t = await fs.readText(folder.uri, p, 1500000); src = t.text || ''; } catch (e) { /* the loader reports it */ }
   await showPreview(p.split('/').pop(), () => bundleFromFolder(folder, p), src);
+}
+
+
+// ------------------------------------------------------------ Scratch: private files of a chat without a folder
+async function drawScratch() {
+  const b = $('#chipScratch'); if (!b) return;
+  const chat = S.chat; const n = chat && !S.folder ? await scratchCount(chat.id).catch(() => 0) : 0;
+  if (S.chat !== chat) return;
+  b.classList.toggle('hidden', !n); if (n) $('#chipScratchLbl').textContent = 'Scratch · ' + n;
+}
+/** Small menu next to a tapped row. items: [{ a, label, icon, danger }]. */
+function popMenu(anchor, items, pick) {
+  closeRowMenu();
+  const sc = document.createElement('div'); sc.id = 'rowScrim'; sc.className = 'rowscrim';
+  sc.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); const mm = $('#rowMenu'); if (mm) mm.remove(); setTimeout(closeRowMenu, 450); });
+  sc.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); closeRowMenu(); });
+  document.body.appendChild(sc);
+  const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
+  m.innerHTML = items.map((i) => '<button data-a="' + i.a + '"' + (i.danger ? ' class="danger"' : '') + '>' + ICON(i.icon) + '<span>' + i.label + '</span></button>').join('');
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect(); const mh = m.offsetHeight, mw = m.offsetWidth;
+  m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, r.bottom - 4 + mh > window.innerHeight - 8 ? r.top - mh : r.bottom - 4)) + 'px';
+  m.onclick = (e) => { const b = e.target.closest('[data-a]'); if (!b) return; closeRowMenu(); pick(b.dataset.a); };
+}
+/** Saves bytes through the phone's share sheet, like a file card does; falls back to a folder pick or a browser download. */
+async function saveBytes(name, bytes, mime) {
+  const file = new File([bytes], name, { type: mime });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  if (isNative) {
+    try {
+      const f = await fs.pickFolder();
+      await fs.writeBytes(f.uri, name, bytes);
+      if (!S.folders.some((x) => x.uri === f.uri)) await fs.releaseFolder(f.uri).catch(() => {});
+      toast('Saved ' + name + ' in ' + (f.name || 'the folder'), { result: true });
+    } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast('Could not save the file: ' + ((e && e.message) || 'unknown error'), { kind: 'err' }); }
+    return;
+  }
+  const url = URL.createObjectURL(file); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000); toast('Saving ' + name, { result: true });
+}
+async function openScratch() {
+  if (!S.chat || S.folder) return;
+  const chat = S.chat; const body = sheet('Scratch');
+  const draw = async () => {
+    const files = (await scratchFiles(chat.id)).sort((a, b) => a.path.localeCompare(b.path));
+    if (!files.length) { closeSheet(); drawScratch(); return; }
+    const total = files.reduce((n, f) => n + f.size, 0);
+    body.innerHTML = '<div class="note" style="text-align:left">Temporary files for this chat. Only you and this app can see them. ' + fmtBytes(total) + ' of ' + fmtBytes(SCRATCH_CAP) + ' used.</div>' +
+      files.map((f) => '<div class="row-item" data-p="' + esc(f.path) + '"><div class="grow"><div class="t">' + esc(f.path) + '</div></div><div class="s">' + fmtBytes(f.size) + '</div></div>').join('') +
+      '<div class="sc-acts"><button id="scMove" class="btn" type="button"><span class="lbl">Move to a folder</span></button><button id="scZip" class="btn" type="button"><span class="lbl">Download all (zip)</span></button><button id="scClear" class="btn danger" type="button"><span class="lbl">Clear this scratch</span></button></div>';
+    $$('[data-p]', body).forEach((row) => row.onclick = () => {
+      const p = row.dataset.p; const nm = p.split('/').pop();
+      popMenu(row, [{ a: 'view', label: 'View', icon: 'file' }, { a: 'copy', label: 'Copy', icon: 'copy' }].concat(isHtmlName(nm) ? [{ a: 'prev', label: 'Preview', icon: 'eye' }] : [], [{ a: 'del', label: 'Delete', icon: 'trash', danger: true }]), async (a) => {
+        if (a === 'view') { const b2 = sheet(p, { back: openScratch }); openFileView(p, b2); }
+        else if (a === 'prev') previewFile(p);
+        else if (a === 'copy') { try { const t = await fs.readText(scratchFolder(chat.id).uri, p, 1048576); toast(t.binary ? 'This file is not text' : (await copyText(t.text)) ? 'Copied ' + nm : 'Could not copy', { kind: t.binary ? 'warn' : undefined }); } catch (e) { toast(e.message || 'Could not copy', { kind: 'err' }); } }
+        else if (a === 'del') {
+          if (!await confirmBox('Delete ' + nm + '?', 'The file is removed from Scratch. This cannot be undone.', 'Delete')) return;
+          try { await fs.remove(scratchFolder(chat.id).uri, p); } catch (e) { toast(e.message || 'Could not delete', { kind: 'err' }); }
+          await draw(); drawScratch();
+        }
+      });
+    });
+    $('#scZip').onclick = async () => {
+      try {
+        if (!window.fflate) throw new Error('The zip engine did not load.');
+        const z = {}; (await scratchFiles(chat.id)).forEach((f) => { z[f.path] = f.data; });
+        await saveBytes('kdex-scratch.zip', window.fflate.zipSync(z), 'application/zip');
+      } catch (e) { toast(e.message || 'Could not make the zip', { kind: 'err' }); }
+    };
+    $('#scClear').onclick = async () => {
+      if (!await confirmBox('Clear this scratch?', files.length + ' file' + (files.length === 1 ? '' : 's') + ' will be deleted. The chat and its messages stay.', 'Clear')) return;
+      await scratchClear(chat.id); closeSheet(); drawScratch(); toast('Scratch cleared', { result: true });
+    };
+    $('#scMove').onclick = () => scratchMove(chat);
+  };
+  await draw();
+}
+/** Copies the Scratch files into a folder the user picks, then continues the chat in that folder. */
+async function scratchMove(chat) {
+  let r; try { r = await fs.pickFolder(); } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast(e.message || 'Could not open the folder', { kind: 'err' }); return; }
+  if (!r || !r.uri) return;
+  const files = await scratchFiles(chat.id); if (!files.length) return;
+  const name = r.name || 'the folder';
+  const choice = await choiceBox('Move ' + files.length + ' file' + (files.length === 1 ? '' : 's') + '?', 'They are copied into "' + name + '", and this chat then works in that folder. Files with the same name are kept, the new copy gets "-scratch" in its name.', ['Move and clear Scratch', 'Move and keep Scratch']);
+  if (choice < 0) return;
+  try {
+    for (const f of files) {
+      let dest = f.path; const st = await fs.stat(r.uri, dest).catch(() => null);
+      if (st && st.exists) dest = dest.replace(/(\.[^./]+)?$/, (m) => '-scratch' + (m || ''));
+      await fs.writeBytes(r.uri, dest, f.data);
+    }
+  } catch (e) { toast('Could not copy: ' + (e.message || 'unknown error'), { kind: 'err' }); return; }
+  let fo = S.folders.find((x) => x.uri === r.uri);
+  if (!fo) { fo = { id: uid(), name: r.name || 'Folder', uri: r.uri }; S.folders.push(fo); await A.saveFolders(S.folders); }
+  if (choice === 0) await scratchClear(chat.id);
+  await applyFolder(fo); drawScratch();
+  toast('Moved ' + files.length + ' file' + (files.length === 1 ? '' : 's') + ' to ' + name, { result: true });
 }
 
 async function openFiles(path = '') {
@@ -1043,9 +1147,9 @@ async function openFileView(p, body) {
   const notText = (size) => { body.innerHTML = '<div class="nofile">' + ICON('file') + '<div class="t">' + esc(baseOf(p)) + '</div><div class="s">' + (size ? fmtBytes(size) + ' \u00b7 ' : '') + 'Not a text or code file</div><div class="s">It cannot be shown here. Open it with another app on your phone.</div></div>'; };
   try {
     if (/\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i.test(p)) {
-      let sz = 0; try { sz = ((await fs.stat(S.folder.uri, p)) || {}).size || 0; } catch (e) { /* ignore */ }
+      let sz = 0; try { sz = ((await fs.stat(curF().uri, p)) || {}).size || 0; } catch (e) { /* ignore */ }
       if (sz > 0 && sz <= 8 * 1048576) {
-        const bytes = await fs.readBytes(S.folder.uri, p);
+        const bytes = await fs.readBytes(curF().uri, p);
         const ext = p.split('.').pop().toLowerCase(); const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' }[ext];
         const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
         body.innerHTML = '<div class="imgview"><img alt="' + esc(baseOf(p)) + '" src="' + url + '"><div class="s"><span id="imgDim"></span>' + fmtBytes(sz) + '</div></div>';
@@ -1054,8 +1158,8 @@ async function openFileView(p, body) {
         return;
       }
     }
-    if (BINARY_EXT.test(p)) { let sz = 0; try { sz = ((await fs.stat(S.folder.uri, p)) || {}).size || 0; } catch (e) { /* ignore */ } notText(sz); return; }
-    const t = await fs.readText(S.folder.uri, p, 200000);
+    if (BINARY_EXT.test(p)) { let sz = 0; try { sz = ((await fs.stat(curF().uri, p)) || {}).size || 0; } catch (e) { /* ignore */ } notText(sz); return; }
+    const t = await fs.readText(curF().uri, p, 200000);
     const head = String(t.text || '').slice(0, 4000);
     if (t.binary || head.indexOf('\u0000') >= 0 || ((head.match(/\uFFFD/g) || []).length > 3)) { notText(t.size); return; }
     const hide = isSecretPath(p) && await protectionOn();
@@ -1104,17 +1208,58 @@ async function openChangeDiff(id) {
   const body = sheet(bk.path, { back: openChanges });
   body.innerHTML = '<div class="busy"><span class="spin"></span>Loading...</div>';
   try {
-    const f = S.folders.find((x) => x.id === bk.folderId) || S.folder;
+    const f = folderFor(bk.folderId);
     if (isSecretPath(bk.path) && await protectionOn()) { body.innerHTML = '<div class="note" style="text-align:left">Protected file. Its contents are hidden here and from the agent.</div>'; return; }
     let now = ''; try { const r = await fs.readText(f.uri, bk.path, 1048576); now = r.binary ? '' : r.text; } catch (e) { now = ''; }
     body.innerHTML = diffHtml(bk.existed ? bk.content : '', bk.op === 'delete' ? '' : now);
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
 }
 async function undoOne(id) {
-  try { const bk = await db.get('backups', id); const bf = (bk && S.folders.find((x) => x.id === bk.folderId)) || S.folder; if (!bf) throw new Error('The folder of this change is no longer available.'); await A.undoChange(id, bf); toast('Undone'); } catch (e) { toast(e.message || 'Could not undo'); }
+  try { const bk = await db.get('backups', id); const bf = bk && folderFor(bk.folderId); if (!bf) throw new Error('The folder of this change is no longer available.'); await A.undoChange(id, bf); toast('Undone'); } catch (e) { toast(e.message || 'Could not undo'); }
   updateChangesChip();
   const msgs = await db.byIndex('messages', 'chatId', S.chat.id);
   msgs.filter((m) => m.backupId === id).forEach((m) => { m.status = 'undone'; m.content += ' (undone by the user)'; db.put('messages', m); renderMsg(m); });
+}
+
+
+// ------------------------------------------------------------ Settings > Cleanup
+const KEEP_MS = 30 * 86400000;
+/** What takes space on the phone, and what the safe clean-up would free. */
+async function storageStats() {
+  const now = Date.now(); const chatIds = new Set((await db.all('chats')).map((c) => c.id));
+  let backups = 0, oldBackups = []; let pics = 0, picN = 0;
+  for (const b of await db.all('backups')) { const n = String(b.content || '').length; backups += n; if (now - (b.at || 0) > KEEP_MS) oldBackups.push({ id: b.id, n }); }
+  for (const m of await db.all('messages')) for (const i of (m.images || [])) { pics += Math.round(String(i.data || '').length * 0.75); picN++; }
+  let sc = 0; const oldScratch = [];
+  for (const u of await scratchUsage()) { sc += u.bytes; if (!chatIds.has(u.chatId) || now - u.newest > KEEP_MS) oldScratch.push(u); }
+  const log = JSON.stringify(await D.entries()).length;
+  const oldB = oldBackups.reduce((n, x) => n + x.n, 0), oldS = oldScratch.reduce((n, x) => n + x.bytes, 0);
+  return { used: backups + pics + sc + log, free: oldB + oldS + log, backups, oldBackups, oldB, pics, picN, sc, oldScratch, oldS, log };
+}
+function cleanupInit() {
+  const fill = async () => {
+    const st = await storageStats(); if (!$('#clUsed')) return st;
+    $('#clUsed').textContent = fmtBytes(st.used); $('#clFree').textContent = fmtBytes(st.free); return st;
+  };
+  fill().catch(() => {});
+  $('#clFreeBtn').onclick = async () => {
+    const st = await storageStats();
+    if (!st.free) { toast('Nothing to clear', { result: true }); return; }
+    const lines = []; if (st.oldBackups.length) lines.push('undo backups older than 30 days (' + fmtBytes(st.oldB) + ')'); if (st.log > 2) lines.push('the diagnostics log (' + fmtBytes(st.log) + ')'); if (st.oldScratch.length) lines.push('Scratch files of chats not used for 30 days (' + fmtBytes(st.oldS) + ')');
+    if (!await confirmBox('Free up ' + fmtBytes(st.free) + '?', 'This deletes ' + lines.join(', ') + '. Changes older than 30 days can no longer be undone. Chats, keys and settings are not touched.', 'Free up')) return;
+    for (const b of st.oldBackups) await db.del('backups', b.id);
+    await D.clear();
+    for (const u of st.oldScratch) await scratchClear(u.chatId);
+    drawScratch(); await fill(); toast('Freed ' + fmtBytes(st.free), { result: true });
+  };
+  $('#clPics').onclick = async () => {
+    const st = await storageStats();
+    if (!st.picN) { toast('No pictures in your chats', { result: true }); return; }
+    if (!await confirmBox('Remove ' + st.picN + ' picture' + (st.picN === 1 ? '' : 's') + '?', 'Frees ' + fmtBytes(st.pics) + '. The text of every message stays, but the pictures are gone for good and the agent can no longer see them.', 'Remove')) return;
+    for (const m of await db.all('messages')) if (m.images && m.images.length) { m.imagesRemoved = (m.imagesRemoved || 0) + m.images.length; delete m.images; await db.put('messages', m); }
+    if (S.chat) { const id = S.chat.id; S.els.clear(); await openChat(id); openSettings(); }
+    toast('Removed ' + st.picN + ' picture' + (st.picN === 1 ? '' : 's'), { result: true });
+  };
 }
 
 // ------------------------------------------------------------ settings
@@ -1154,6 +1299,7 @@ function openSettings() {
     '<div class="h3">Terminal (Termux)</div><div class="field">' + seg('setTerm', [['0', 'Off'], ['1', 'On']], st.termux ? '1' : '0') + '<small>Lets the agent run shell commands in Termux after you approve each one. Advanced.</small></div><div id="termBox"></div>' +
     '<div class="h3">Fast file access</div><div id="afBox"></div>' +
     '<div class="h3">Git</div><button id="gitId" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Identity and access tokens</span></button>' +
+    '<div class="h3">Cleanup</div><div class="kv"><span>Used by KDex Agent</span><span id="clUsed">...</span></div><div class="kv"><span>Can be cleared</span><span id="clFree">...</span></div><div class="note" style="text-align:left">Old backups, the log and unused scratch files. Chats and keys stay.</div><button id="clFreeBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Free up space</span></button><button id="clPics" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Remove pictures from chats</span></button>' +
     '<div class="h3">Help</div><button id="diagBtn" class="btn" style="width:100%;margin-bottom:8px"><span class="lbl">Diagnostics log</span></button>' +
     '<div class="h3">About</div><div class="kv"><span>Version</span><span>' + APP_VERSION + '</span></div><div class="kv"><span>Storage</span><span>On this phone only</span></div><div class="kv"><span>Developer</span><span>Kamil Hussen (KDex)</span></div><div class="kv"><span>Source code</span><span><a class="link" href="' + REPO_URL + '" target="_blank" rel="noopener">GitHub</a></span></div><div class="kv"><span>Updates</span><span id="updState">Not checked</span></div>' +
     '<div id="updBox" style="margin-top:10px"></div><button id="licBtn" class="btn" style="width:100%;margin-top:8px"><span class="lbl">Licenses</span></button>';
@@ -1209,10 +1355,12 @@ function openSettings() {
     for (const row of await db.all('messages')) if (!keep.has(row.chatId)) await db.del('messages', row.id);
     for (const row of await db.all('backups')) if (!keep.has(row.chatId)) await db.del('backups', row.id);
     for (const row of await db.all('chats')) if (!keep.has(row.id)) await db.del('chats', row.id);
+    for (const u of await scratchUsage()) if (!keep.has(u.chatId)) await scratchClear(u.chatId);
     closeSheet(); await newChat(null); await loadChats(); toast(keep.size ? 'Conversations deleted (pinned kept)' : 'All conversations deleted');
   };
   $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message, { kind: 'err' })); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message, { kind: 'err' }));
   $('#gitId').onclick = () => openGitIdentity(openSettings);
+  cleanupInit();
 }
 async function drawTerm(redraw) {
   {
@@ -1881,7 +2029,7 @@ function wire() {
   $('#dNew').onclick = () => newChat(null); $('#topNewBtn').onclick = () => newChat(null);
   $('#dProjects').onclick = () => { closeDrawer(); openProjects(); }; $('#topFolderBtn').onclick = openProjects; $('#chipFolder').onclick = openProjects;
   $('#dSettings').onclick = () => { closeDrawer(); openSettings(); };
-  $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal; $('#chipAuto').onclick = toggleAuto;
+  $('#chipScratch').onclick = openScratch; $('#chipFiles').onclick = () => openFiles(''); $('#chipGit').onclick = () => openGit(); $('#chipChanges').onclick = openChanges; $('#chipTerm').onclick = openTerminal; $('#chipAuto').onclick = toggleAuto;
   $('#sheetClose').onclick = closeSheet; sheetDrag(); touchSwipes();
   $('#chatSearch').oninput = drawChatList;
   chatLongPress();

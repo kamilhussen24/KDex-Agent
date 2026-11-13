@@ -1,6 +1,6 @@
 // Tiny IndexedDB wrapper. Everything is stored on the phone.
 const NAME = 'kdex-agent';
-const VERSION = 1;
+const VERSION = 2;
 let dbp = null;
 
 function open() {
@@ -9,14 +9,13 @@ function open() {
     const req = indexedDB.open(NAME, VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      db.createObjectStore('kv', { keyPath: 'key' });
-      db.createObjectStore('chats', { keyPath: 'id' });
-      const msgs = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true });
-      msgs.createIndex('chatId', 'chatId');
-      const backups = db.createObjectStore('backups', { keyPath: 'id', autoIncrement: true });
-      backups.createIndex('chatId', 'chatId');
-      const usage = db.createObjectStore('usage', { keyPath: 'id', autoIncrement: true });
-      usage.createIndex('day', 'day');
+      const has = (n) => db.objectStoreNames.contains(n);
+      if (!has('kv')) db.createObjectStore('kv', { keyPath: 'key' });
+      if (!has('chats')) db.createObjectStore('chats', { keyPath: 'id' });
+      if (!has('messages')) { const msgs = db.createObjectStore('messages', { keyPath: 'id', autoIncrement: true }); msgs.createIndex('chatId', 'chatId'); }
+      if (!has('backups')) { const backups = db.createObjectStore('backups', { keyPath: 'id', autoIncrement: true }); backups.createIndex('chatId', 'chatId'); }
+      if (!has('usage')) { const usage = db.createObjectStore('usage', { keyPath: 'id', autoIncrement: true }); usage.createIndex('day', 'day'); }
+      if (!has('scratch')) { const sc = db.createObjectStore('scratch', { keyPath: 'k' }); sc.createIndex('chatId', 'chatId'); } // temporary files of chats without a folder
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
