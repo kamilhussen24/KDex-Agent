@@ -18,6 +18,7 @@ import { checkUpdate, isNewer, REPO_URL } from './update.js';
 import { officeText, isOffice } from './docs.js';
 import { prepareImage } from './image.js';
 import { isHtmlName, bundleFromFolder, bundleText } from './preview.js';
+import { testServer, saveSecret, dropSecret, getSecret, remoteFolderOf, rememberServer, closeServer, remoteRead, remoteWrite, BIG_FILE } from './remote.js';
 import { scratchFolder, scratchFiles, scratchCount, scratchClear, scratchUsage, SCRATCH_CAP } from './scratch.js';
 
 const S = {
@@ -29,6 +30,8 @@ const ICON = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
 /** The folder the file tools work on right now: the project, or this chat's Scratch desk. */
 const curF = () => S.folder || (S.chat ? scratchFolder(S.chat.id) : null);
 const folderFor = (id) => (String(id || '').startsWith('scratch-') ? scratchFolder(String(id).slice(8)) : (S.folders.find((x) => x.id === id) || S.folder));
+const dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
+const baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
 
 // ------------------------------------------------------------ helpers
 let toastT; let toastH;
@@ -171,7 +174,7 @@ async function boot() {
   S.settings = await A.getSettings(); applyTheme(); CI.onBuild((w) => drawCi(w));
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
   window.__stage = 'settings-ok';
-  S.providers = await A.getProviders(); S.models = await A.getModels(); S.folders = await A.getFolders();
+  S.providers = await A.getProviders(); S.models = await A.getModels(); S.folders = await A.getFolders(); S.folders.forEach(rememberServer);
   window.__stage = 'wiring'; wire();
   if (!S.models.length && !(await kvGet('setupSkipped', false))) { showSetup(true); document.documentElement.classList.add('ready'); window.__stage = 'ready'; return; }
   await enter(); document.documentElement.classList.add('ready'); window.__stage = 'ready';
@@ -400,7 +403,7 @@ function openRowMenu(btn, id, pt) {
 }
 async function newChat(folder) {
   if (S.running) stopRun();
-  S.chat = { id: uid(), title: '', model: currentModelId(), think: S.settings.defaultThink || 'off', auto: !!S.settings.autoDefault, folderId: folder ? folder.id : null, updated: Date.now() };
+  S.chat = { id: uid(), title: '', model: currentModelId(), think: S.settings.defaultThink || 'off', auto: !!S.settings.autoDefault && !(folder && folder.remote), folderId: folder ? folder.id : null, updated: Date.now() };
   S.folder = folder || null; S.think = S.chat.think; S.chat.fresh = true;
   S.els.clear(); S.approvals.clear();
   fillModels(S.chat.model); drawCtx(); drawThink(); $('#messages').innerHTML = ''; renderEmpty(); updateApproveBar(); closeDrawer(); drawRing();
@@ -466,9 +469,12 @@ async function persistChat() {
 // ------------------------------------------------------------ context bar (folder chip)
 function drawCtx() {
   $('#chipFolderName').textContent = S.folder ? S.folder.name : 'Add folder';
+  const rm = !!(S.folder && S.folder.remote); // a server: no Git panel and no Termux terminal
   $$('#ctxBar .nf').forEach((b) => b.classList.toggle('hidden', !S.folder));
+  if (rm) { $('#chipGit').classList.add('hidden'); $('#chipTerm').classList.add('hidden'); }
+  const fu = $('#chipFolder use'); if (fu) fu.setAttribute('href', rm ? '#i-server' : '#i-folder');
   drawScratch();
-  if (S.folder) { updateChangesChip(); updateGitChip(); }
+  if (S.folder) { updateChangesChip(); if (!rm) updateGitChip(); }
   updateTermChip(); drawCi(CI.getBuild());
 }
 async function updateGitChip() {
@@ -876,6 +882,7 @@ function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheetFoot').cla
 async function touchFolder(f) { if (!f) return; const x = S.folders.find((y) => y.id === f.id); if (x) { x.used = Date.now(); f.used = x.used; await A.saveFolders(S.folders); } }
 async function applyFolder(f) {
   const c = S.chat; if (!c) return;
+  rememberServer(f);
   touchFolder(f);
   const cur = S.folder;
   if ((cur && f && cur.id === f.id) || (!cur && !f)) { closeSheet(); return; }
@@ -897,8 +904,9 @@ async function applyFolder(f) {
     await persistChat(); loadChats();
   } else if ($('.empty', $('#messages'))) renderEmpty();
   drawCtx(); updateApproveBar(); closeSheet();
+  if (f && f.remote && c.auto) { c.auto = false; await db.put('chats', c); updateTermChip(); toast('Auto is off for servers. Turn it on in this chat if you want.', { kind: 'warn' }); }
   toast(f ? 'Using ' + f.name + ' in this chat' : 'Folder removed from this chat');
-  if (f) detectRepo(f);
+  if (f && !f.remote) detectRepo(f);
   if (f && !cur) { const n = await scratchCount(c.id).catch(() => 0); if (n) await offerScratchMove(c, f, n); }
 }
 /** Look at an existing repository (for example one made in Termux). Reads only; nothing is changed or deleted. */
@@ -919,20 +927,21 @@ async function openProjects() {
   const paths = {};
   let fq = '';
   const byRecent = () => S.folders.map((f, i) => [f, i]).sort((a, b) => ((b[0].used || 0) - (a[0].used || 0)) || (a[1] - b[1])).map((x) => x[0]);
-  const loadPaths = async () => { for (const f of S.folders) paths[f.id] = await getTermuxPath(f).catch(() => null); };
+  const loadPaths = async () => { for (const f of S.folders) paths[f.id] = f.remote ? f.user + '@' + f.host + ' \u00b7 ' + f.root : await getTermuxPath(f).catch(() => null); };
   await loadPaths();
   const draw = () => {
     body.innerHTML = '<button id="pOpen" class="btn primary" style="width:100%;margin-bottom:8px">' + ICON('folder') + '<span class="lbl">Open a folder...</span></button>' +
       '<button id="pPath" class="btn" style="width:100%;margin-bottom:8px">' + ICON('edit') + '<span class="lbl">Open by path...</span></button>' +
       '<button id="pClone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('branch') + '<span class="lbl">Clone a repository...</span></button>' +
+      '<button id="pServer" class="btn" style="width:100%;margin-bottom:8px">' + ICON('server') + '<span class="lbl">Connect a server...</span></button>' +
       (S.folder ? '<button id="pDetach" class="btn" style="width:100%;margin-bottom:8px">' + ICON('x') + '<span class="lbl">Remove folder from this chat</span></button>' : '') +
       '<button id="pNone" class="btn" style="width:100%;margin-bottom:8px">' + ICON('plus') + '<span class="lbl">New chat without a folder</span></button>' +
       '<div class="safe">' + ICON('lock') + '<span>I can only touch the folder you pick. A backup is saved before every change.</span></div>' +
       (S.folders.length ? '<div class="h3">Your folders</div>' : '') +
       (S.folders.length >= 6 ? '<label class="fsearch">' + ICON('search') + '<input id="fQ" placeholder="Search folders" autocomplete="off" value="' + esc(fq) + '"></label>' : '') +
-      byRecent().map((f) => '<div class="row-item frow" data-f="' + f.id + '">' + ICON('folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">' + (S.folder && S.folder.id === f.id ? 'Used in this chat' : f.used ? 'Opened ' + ago(f.used) : 'Tap to use in this chat') + '</div></div>' +
-        '<button class="icon-btn rbtn" data-nf="' + f.id + '" aria-label="New chat in this folder">' + ICON('plus') + '</button><button class="icon-btn rbtn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button>' +
-        '<div class="fp"><span class="fpath">' + esc(paths[f.id] || 'Path unknown').replace(/\//g, '/<wbr>') + '</span>' + (paths[f.id] ? '<button class="icon-btn rbtn" data-cp="' + f.id + '" aria-label="Copy path of ' + esc(f.name) + '">' + ICON('copy') + '</button>' : '') + '</div></div>').join('') +
+      byRecent().map((f) => '<div class="row-item frow" data-f="' + f.id + '">' + ICON(f.remote ? 'server' : 'folder') + '<div class="grow"><div class="t">' + esc(f.name) + '</div><div class="s">' + (S.folder && S.folder.id === f.id ? 'Used in this chat' : f.used ? 'Opened ' + ago(f.used) : 'Tap to use in this chat') + '</div></div>' +
+        '<button class="icon-btn rbtn" data-nf="' + f.id + '" aria-label="New chat in this folder">' + ICON('plus') + '</button>' + (f.remote ? '<button class="icon-btn rbtn" data-es="' + f.id + '" aria-label="Edit server">' + ICON('edit') + '</button>' : '') + '<button class="icon-btn rbtn" data-rmf="' + f.id + '" aria-label="Remove">' + ICON('trash') + '</button>' +
+        '<div class="fp"><span class="fpath">' + esc(paths[f.id] || 'Path unknown').replace(/\//g, '/<wbr>') + '</span>' + (paths[f.id] && !f.remote ? '<button class="icon-btn rbtn" data-cp="' + f.id + '" aria-label="Copy path of ' + esc(f.name) + '">' + ICON('copy') + '</button>' : '') + '</div></div>').join('') +
       '<div class="note" style="margin-top:12px">Android does not allow picking the whole storage or the Download folder. Choose a subfolder, for example one you create for a project.</div>';
     $('#pOpen').onclick = async () => {
       await offerAllFiles().catch(() => {});
@@ -947,18 +956,20 @@ async function openProjects() {
     if ($('#fQ')) { $('#fQ').oninput = (e) => { fq = e.target.value; filt(); }; filt(); }
     $('#pPath').onclick = openByPath;
     $('#pClone').onclick = cloneFlow;
+    $('#pServer').onclick = () => openServerForm();
+    $$('[data-es]', body).forEach((b) => b.onclick = () => openServerForm(S.folders.find((x) => x.id === b.dataset.es)));
     if ($('#pDetach')) $('#pDetach').onclick = () => applyFolder(null);
     $('#pNone').onclick = () => { closeSheet(); newChat(null); };
     $$('[data-f]', body).forEach((r) => r.onclick = async (e) => {
-      if (e.target.closest('[data-rmf]') || e.target.closest('[data-nf]') || e.target.closest('[data-cp]')) return;
+      if (e.target.closest('[data-rmf]') || e.target.closest('[data-nf]') || e.target.closest('[data-cp]') || e.target.closest('[data-es]')) return;
       await applyFolder(S.folders.find((x) => x.id === r.dataset.f));
     });
     $$('[data-cp]', body).forEach((b) => b.onclick = async () => { flashCopied(b, await copyText(paths[b.dataset.cp])); });
     $$('[data-nf]', body).forEach((b) => b.onclick = async () => { const f = S.folders.find((x) => x.id === b.dataset.nf); touchFolder(f); closeSheet(); await newChat(f); await persistChat(); loadChats(); });
     $$('[data-rmf]', body).forEach((b) => b.onclick = async () => {
       const f = S.folders.find((x) => x.id === b.dataset.rmf);
-      if (!await confirmBox('Remove folder?', 'This only removes "' + f.name + '" from the list and releases access. Your files are not deleted.', 'Remove')) return;
-      try { await fs.releaseFolder(f.uri); } catch (e) { /* ignore */ }
+      if (!await confirmBox(f.remote ? 'Remove server?' : 'Remove folder?', f.remote ? 'This removes "' + f.name + '" and its saved password or key from this phone. Nothing on the server changes.' : 'This only removes "' + f.name + '" from the list and releases access. Your files are not deleted.', 'Remove')) return;
+      try { if (f.remote) { await closeServer(f.id); await dropSecret(f.id); } else await fs.releaseFolder(f.uri); } catch (e) { /* ignore */ }
       S.folders = S.folders.filter((x) => x.id !== f.id); await A.saveFolders(S.folders);
       if (S.folder && S.folder.id === f.id) { S.folder = null; if (S.chat) S.chat.folderId = null; drawCtx(); }
       draw();
@@ -1003,6 +1014,116 @@ async function openByPath() {
   };
   $('#opGo').onclick = go; inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
   setTimeout(() => inp.focus(), 150);
+}
+
+// ------------------------------------------------------------ servers (SSH and SFTP)
+/** Add or edit a server: test the connection first, save only when it works, then use it in this chat. */
+async function openServerForm(edit) {
+  const body = sheet(edit ? 'Edit server' : 'Connect a server', { back: openProjects });
+  const old = edit ? await getSecret(edit.id) : {};
+  let auth = edit ? edit.auth : 'password';
+  const v = (q) => ($(q).value || '').trim();
+  body.innerHTML =
+    '<div class="field"><span>Name</span><input id="svName" placeholder="My VPS" autocomplete="off" value="' + esc(edit ? edit.name : '') + '"></div>' +
+    '<div class="field"><span>Host and port</span><div style="display:flex;gap:8px"><input id="svHost" style="flex:1" type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="vps.example.com" value="' + esc(edit ? edit.host : '') + '"><input id="svPort" style="width:84px" inputmode="numeric" autocomplete="off" value="' + esc(edit ? edit.port : 22) + '"></div></div>' +
+    '<div class="field"><span>User</span><input id="svUser" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="deploy" value="' + esc(edit ? edit.user : '') + '"></div>' +
+    '<div class="field"><span>Sign in with</span><div class="seg" id="svAuth"><button type="button" class="btn sm" data-v="password"><span class="lbl">Password</span></button><button type="button" class="btn sm" data-v="key"><span class="lbl">Key</span></button></div></div>' +
+    '<div class="field" id="svPassBox"><span>Password</span><input id="svPass" type="password" autocomplete="off" placeholder="' + (edit && old.password ? 'Saved. Leave empty to keep it.' : '') + '"></div>' +
+    '<div class="field" id="svKeyBox"><span>Private key (RSA or ECDSA)</span><textarea id="svKey" class="keybox" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="' + (edit && old.key ? 'Saved. Leave empty to keep it.' : '-----BEGIN OPENSSH PRIVATE KEY-----') + '"></textarea>' +
+    '<button id="svKeyFile" type="button" class="btn sm" style="margin-top:8px"><span class="lbl">Choose key file</span></button>' +
+    '<div class="field" style="margin-top:12px"><span>Passphrase, if the key has one</span><input id="svPhrase" type="password" autocomplete="off"></div></div>' +
+    '<div class="field"><span>Start folder</span><input id="svRoot" type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="/var/www/site" value="' + esc(edit ? edit.root : '/') + '"></div>' +
+    '<div class="note" style="text-align:left;margin-top:0">The agent can only work inside the start folder. The password or key stays on this phone, in secure storage.</div>' +
+    '<div id="svOut"></div><button id="svGo" class="btn primary" style="width:100%;margin-top:8px"><span class="lbl">Test and connect</span></button>';
+  const showAuth = () => { $$('#svAuth .btn', body).forEach((b) => b.classList.toggle('on', b.dataset.v === auth)); $('#svPassBox').classList.toggle('hidden', auth !== 'password'); $('#svKeyBox').classList.toggle('hidden', auth !== 'key'); };
+  $$('#svAuth .btn', body).forEach((b) => b.onclick = () => { auth = b.dataset.v; showAuth(); });
+  showAuth();
+  $('#svKeyFile').onclick = () => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.style.display = 'none'; document.body.appendChild(inp);
+    inp.onchange = async () => { const f = inp.files && inp.files[0]; inp.remove(); if (!f) return; if (f.size > 20000) { toast('That file is too large to be a key.', { kind: 'warn' }); return; } $('#svKey').value = await f.text(); };
+    inp.addEventListener('cancel', () => inp.remove()); inp.click();
+  };
+  const out = $('#svOut'); const go = $('#svGo');
+  const say = (kind, text) => { out.innerHTML = text ? '<div class="opmsg ' + kind + '">' + esc(text) + '</div>' : ''; };
+  let result = null; let profile = null; let secret = null;
+  const useIt = async () => {
+    const id = profile.id;
+    await saveSecret(id, secret);
+    await closeServer(id);
+    const keep = edit ? S.folders.find((x) => x.id === id) : null;
+    const f = { ...remoteFolderOf(profile), used: Date.now() };
+    if (keep && keep.used) f.used = Date.now();
+    S.folders = S.folders.filter((x) => x.id !== id).concat([f]); await A.saveFolders(S.folders);
+    rememberServer(f);
+    if (S.folder && S.folder.id === id) S.folder = f;
+    D.log('info', 'Server saved');
+    await applyFolder(f);
+  };
+  go.onclick = async () => {
+    if (result) { go.disabled = true; try { await useIt(); } catch (e) { go.disabled = false; say('err', (e && e.message) || 'Could not save the server.'); } return; }
+    const host = v('#svHost'); const user = v('#svUser'); let root = v('#svRoot') || '/'; const port = parseInt(v('#svPort'), 10) || 22;
+    if (!host) { say('err', 'Enter the host, for example vps.example.com.'); return; }
+    if (!user) { say('err', 'Enter the user name.'); return; }
+    if (port < 1 || port > 65535) { say('err', 'The port must be between 1 and 65535.'); return; }
+    if (!root.startsWith('/')) root = '/' + root;
+    secret = auth === 'password' ? { password: $('#svPass').value || old.password || '' } : { key: $('#svKey').value.trim() || old.key || '', passphrase: $('#svPhrase').value || (!$('#svKey').value.trim() ? old.passphrase : '') || '' };
+    if (auth === 'password' && !secret.password) { say('err', 'Enter the password.'); return; }
+    if (auth === 'key' && !secret.key) { say('err', 'Paste the private key or choose the key file.'); return; }
+    profile = { id: edit ? edit.id : 'srv-' + uid(), name: v('#svName') || host, host, port, user, auth, root };
+    go.disabled = true; say('', 'Connecting...');
+    try {
+      const r = await testServer(profile, secret);
+      if (!r.rootFound || !r.rootIsDir) { say('err', 'Signed in, but the folder ' + root + ' was not found on the server. Check the start folder.'); go.disabled = false; return; }
+      profile.root = r.root || root; profile.fingerprint = r.fingerprint;
+      result = r;
+      out.innerHTML = '<div class="sv-rows">' + ['Reached ' + host, 'Signed in as ' + user, 'Folder ' + profile.root + ' found'].map((t) => '<div class="sv-row">' + ICON('check') + '<span>' + esc(t) + '</span></div>').join('') + '</div><div class="sv-fp">Server key ' + esc(String(r.fingerprint || '').slice(0, 47)) + '</div>';
+      go.firstElementChild.textContent = 'Use in this chat'; go.disabled = false; go.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      $$('input,textarea,#svAuth .btn,#svKeyFile', body).forEach((x) => { x.addEventListener('input', () => { result = null; go.firstElementChild.textContent = 'Test and connect'; }); });
+    } catch (e) { say('err', (e && e.message) || 'Could not connect.'); go.disabled = false; }
+  };
+}
+
+/** A progress card for an upload or download. Returns { set(done, total), signal }. */
+function xferCard(body, name) {
+  const ac = new AbortController();
+  body.innerHTML = '<div class="xfer"><div class="t" style="font-size:14px;overflow-wrap:anywhere">' + esc(name) + '</div><div class="bar"><div id="xBar"></div></div><div class="row2"><span id="xTxt">Starting...</span><button id="xCancel" class="btn sm" type="button"><span class="lbl">Cancel</span></button></div></div>';
+  $('#xCancel').onclick = () => { ac.abort(); $('#xCancel').disabled = true; };
+  return { signal: ac.signal, set: (d, t) => { const b = $('#xBar'); if (b) b.style.width = (t ? Math.min(100, Math.round(d * 100 / t)) : 0) + '%'; const x = $('#xTxt'); if (x) x.textContent = fmtBytes(d) + ' of ' + fmtBytes(t); } };
+}
+const XFER_MAX = 300 * 1048576;
+async function downloadFromServer(p, back) {
+  const fo = S.folder; const name = baseOf(p);
+  const st = await fs.stat(fo.uri, p).catch(() => null); const size = (st && st.size) || 0;
+  if (size > XFER_MAX) { toast(name + ' is too large to download here (limit ' + fmtBytes(XFER_MAX) + '). Zip a part of it on the server first.', { kind: 'warn' }); return; }
+  if (size > BIG_FILE && !await confirmBox('Download ' + fmtBytes(size) + '?', 'This can take a while and uses your mobile data.', 'Download')) return;
+  const x = xferCard(sheet(name, { back }), name);
+  try {
+    const bytes = await remoteRead(fo.uri, p, { signal: x.signal, onProgress: x.set });
+    await saveBytes(name, bytes, 'application/octet-stream');
+  } catch (e) { if (x.signal.aborted) toast('Download cancelled'); else toast((e && e.message) || 'Download failed', { kind: 'err' }); }
+  back();
+}
+function uploadToServer(dir) {
+  const fo = S.folder; const back = () => openFiles(dir);
+  const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.style.display = 'none'; document.body.appendChild(inp);
+  inp.addEventListener('cancel', () => inp.remove());
+  inp.onchange = async () => {
+    const list = Array.from(inp.files || []); inp.remove(); if (!list.length) return;
+    const done = [];
+    for (const f of list) {
+      const dest = (dir ? dir + '/' : '') + f.name;
+      if (f.size > XFER_MAX) { toast(f.name + ' is too large to upload from here (limit ' + fmtBytes(XFER_MAX) + ').', { kind: 'warn' }); continue; }
+      if (f.size > BIG_FILE && !await confirmBox('Upload ' + fmtBytes(f.size) + '?', 'This can take a while and uses your mobile data.', 'Upload')) continue;
+      const st = await fs.stat(fo.uri, dest).catch(() => null);
+      if (st && st.exists && !await confirmBox('Replace "' + f.name + '"?', 'A file with this name is already on the server. The old one is replaced and cannot be restored from the app.', 'Replace')) continue;
+      const x = xferCard(sheet('Upload', { back }), f.name);
+      try { await remoteWrite(fo.uri, dest, new Uint8Array(await f.arrayBuffer()), { signal: x.signal, onProgress: x.set }); done.push(f.name); }
+      catch (e) { if (x.signal.aborted) { toast('Upload cancelled'); break; } toast((e && e.message) || 'Upload failed', { kind: 'err' }); break; }
+    }
+    if (done.length) toast('Uploaded ' + (done.length === 1 ? done[0] : done.length + ' files'));
+    back();
+  };
+  inp.click();
 }
 
 // ------------------------------------------------------------ HTML preview
@@ -1152,10 +1273,22 @@ async function openFiles(path = '') {
   body.innerHTML = '<div class="note">Loading...</div>';
   try {
     const es = (await fs.list(S.folder.uri, path)).sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name));
-    body.innerHTML = es.length ? es.map((e) => '<div class="row-item" data-p="' + esc(e.path) + '" data-d="' + (e.isDir ? 1 : 0) + '">' + ICON(e.isDir ? 'folder' : 'file') + '<div class="grow"><div class="t">' + esc(e.name) + '</div>' + (e.isDir ? '' : '<div class="s">' + fmtBytes(e.size) + '</div>') + '</div>' + (!e.isDir && isHtmlName(e.name) ? '<button class="icon-btn" data-pv="' + esc(e.path) + '" aria-label="Preview ' + esc(e.name) + '">' + ICON('eye') + '</button>' : '') + '</div>').join('') : '<div class="note">This folder is empty</div>';
+    body.innerHTML = (S.folder.remote ? '<button id="rfUp" class="btn" style="width:100%;margin-bottom:8px">' + ICON('upload') + '<span class="lbl">Upload a file...</span></button>' : '') + (es.length ? es.map((e) => '<div class="row-item" data-p="' + esc(e.path) + '" data-d="' + (e.isDir ? 1 : 0) + '">' + ICON(e.isDir ? 'folder' : 'file') + '<div class="grow"><div class="t">' + esc(e.name) + '</div>' + (e.isDir ? '' : '<div class="s">' + fmtBytes(e.size) + '</div>') + '</div>' + (!e.isDir && isHtmlName(e.name) ? '<button class="icon-btn" data-pv="' + esc(e.path) + '" aria-label="Preview ' + esc(e.name) + '">' + ICON('eye') + '</button>' : '') + '</div>').join('') : '<div class="note">This folder is empty</div>');
+    if ($('#rfUp')) $('#rfUp').onclick = () => uploadToServer(path);
     $$('[data-p]', body).forEach((r) => r.onclick = async (ev) => {
       const pv = ev.target.closest('[data-pv]'); if (pv) { ev.stopPropagation(); previewFile(pv.dataset.pv); return; }
       if (r.dataset.d === '1') return openFiles(r.dataset.p);
+      if (S.folder.remote) {
+        const rp = r.dataset.p;
+        popMenu(r, [{ a: 'view', label: 'View', icon: 'file' }, { a: 'dl', label: 'Download', icon: 'down' }, { a: 'del', label: 'Delete', icon: 'trash', danger: true }], async (a) => {
+          if (a === 'view') { const b3 = sheet(rp, { back: () => openFiles(path) }); openFileView(rp, b3); return; }
+          if (a === 'dl') { downloadFromServer(rp, () => openFiles(path)); return; }
+          if (!await confirmBox('Delete "' + baseOf(rp) + '"?', 'It is removed from the server and cannot be restored from the app.', 'Delete')) return;
+          try { await fs.remove(S.folder.uri, rp); } catch (e) { toast((e && e.message) || 'Could not delete the file', { kind: 'err' }); }
+          openFiles(path);
+        });
+        return;
+      }
       const p = r.dataset.p; const b2 = sheet(p, { back: () => openFiles(path) });
       openFileView(p, b2);
     });
@@ -1524,8 +1657,6 @@ async function exportChat() {
 // ------------------------------------------------------------ git UI
 const pct = (p) => (p && p.phase ? p.phase + (p.total ? ' ' + Math.round((p.loaded / p.total) * 100) + '%' : '') : '');
 const GS = { tab: 'changes', sel: new Set(), known: new Set(), keepSel: false, hist: 10, reuse: null };
-const dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
-const baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
 
 const PHASES = { 'Analyzing workdir': 'Checking files', 'Updating workdir': 'Updating files', 'Counting objects': 'Counting objects', 'Compressing objects': 'Packing', 'Receiving objects': 'Downloading', 'Writing objects': 'Uploading', 'Resolving deltas': 'Finishing', 'Enumerating objects': 'Counting objects', 'Total': 'Finishing' };
 const phaseOf = (p) => (p && p.phase ? (PHASES[p.phase] || p.phase) : '');

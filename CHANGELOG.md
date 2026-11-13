@@ -7,6 +7,22 @@ for its version.
 
 ## [Unreleased]
 
+## [1.49.0]
+
+### Added
+- **Connect a server** (SSH/SFTP). Add a server from the Projects sheet, test the connection, and use it like a folder.
+- Browse, view, upload, download and delete files on the server, with progress and Cancel for large files.
+- The agent can read and edit files on the server and run commands there. Every command asks first, and risky ones (stopping services, deleting databases, changing users or the firewall) get a warning.
+- Password or private key sign-in. Passwords and keys are stored encrypted on the phone. The server's key is checked on every connection.
+- Edit or remove a server from the Projects sheet.
+
+### Changed
+- Auto is off for servers, and the Git and Terminal chips are hidden there. The agent can still run commands on the server.
+
+### Notes
+- Ed25519 keys are not supported yet. Use a password, or an RSA or ECDSA key.
+- FTP and FTPS are planned for a later release.
+
 ## [1.48.1]
 
 ### Added

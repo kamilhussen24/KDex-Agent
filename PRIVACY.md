@@ -17,6 +17,7 @@ KDex Agent is an Android app that can work inside a folder you choose. It has no
 - **Git host:** when you clone, pull, fetch or push, requests go to the Git host you enter (for example GitHub or GitLab), with your token.
 - **Update check:** the app asks GitHub's public releases page (api.github.com) for the latest version, about once a day and when you tap "Check for updates". This is an ordinary web request, so GitHub can see your IP address. No chats, files or keys are sent.
 - **Termux (optional):** if you turn the terminal on, commands you approve run in the Termux app on your phone. For a Git command in Termux, your saved token is lent to that one command only and is not stored in Termux.
+- **Servers (optional):** if you connect a server, the app talks to it directly over SSH/SFTP from your phone. Its password or private key is stored encrypted on the phone and is never sent anywhere else. Files the agent reads from the server are sent to your AI provider like any other file.
 
 ## Folder access
 The app reads or changes files only inside the folder you pick, and only when you ask. Every change needs your approval unless you turn on automatic apply, and a backup is saved before each change. Git push always asks. Files such as `.env` and keys are hidden from the AI and the chat. You can remove a folder at any time in Projects.

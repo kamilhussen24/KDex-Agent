@@ -958,6 +958,35 @@ public class KdexNativePlugin extends Plugin {
         });
     }
 
+    /** Servers over SSH (files and commands). Runs in KdexRemote by reflection; if JSch is not in the build the app reports that servers are unavailable. */
+    @PluginMethod
+    public void remoteRun(PluginCall call) {
+        pool.execute(() -> {
+            try {
+                String op = call.getString("op", "");
+                Map<String, String> args = new java.util.HashMap<>();
+                JSObject a = call.getObject("args");
+                if (a != null) {
+                    Iterator<String> keys = a.keys();
+                    while (keys.hasNext()) { String k = keys.next(); args.put(k, a.isNull(k) ? "" : String.valueOf(a.get(k))); }
+                }
+                Class<?> k = Class.forName("com.kdex.agent.KdexRemote");
+                java.lang.reflect.Method m = k.getMethod("run", String.class, Map.class);
+                Object r = m.invoke(null, op, args);
+                Object j = toJson(r);
+                call.resolve(j instanceof JSObject ? (JSObject) j : new JSObject());
+            } catch (ClassNotFoundException | LinkageError e) {
+                call.reject("remote-unavailable: this build has no server support");
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                Throwable c = e.getCause() != null ? e.getCause() : e;
+                if (c instanceof LinkageError) call.reject("remote-unavailable: " + c);
+                else call.reject(String.valueOf(c.getMessage()));
+            } catch (Throwable e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        });
+    }
+
     @PluginMethod
     public void gitCancel(PluginCall call) {
         try {

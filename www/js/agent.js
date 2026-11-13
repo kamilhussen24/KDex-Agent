@@ -9,7 +9,7 @@ import { isRepo, resetGitCache } from './git.js';
 import { scratchFolder } from './scratch.js';
 import * as G from './git.js';
 import { protectionOn, isSecretPath, scrub, forgetSecrets, VALID_ENV_NAME, envFileName, envStatus, writeEnvVar, isPlainSetting } from './secrets.js';
-import { TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand, CHECK_TOOLS_TOOL, checkTools } from './termux.js';
+import { SERVER_TOOLS, TERMUX_TOOLS, TERMUX_ACTIONS, TERMUX_READS, previewTermux, runTermux, getTermuxPath, previewJob, runJob, allowKeys, isAllowed, isRiskyCommand, CHECK_TOOLS_TOOL, checkTools } from './termux.js';
 import { ARCHIVE_TOOLS, ARCHIVE_ACTIONS, previewArchive, runArchive } from './archive.js';
 import { VIEW_TOOL, loadFolderImage } from './image.js';
 import { WEB_TOOL, checkUrl, fetchPage } from './web.js';
@@ -184,8 +184,20 @@ async function readKdex(folder) {
 }
 
 function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, imgOn) {
+  const local = !!(folder && !folder.scratch && !folder.remote); // a real folder on the phone
   const parts = [ABOUT, 'LANGUAGE AND LENGTH: reply in the language of the user\'s latest message: an English message gets English; Bengali, or Bengali typed in English letters, gets Bengali. Never switch language on your own. Keep every reply as short as the question allows: a greeting such as "Hi" gets one short line in the same language, without emoji, without a feature list and without describing the app. Longer answers only when the task needs them; this saves the user money.'];
-  if (folder && !folder.scratch) {
+  if (folder && folder.remote) {
+    parts.push(
+      'SERVER: you work on the remote server "' + folder.name + '" (' + folder.host + ', user ' + folder.user + ') over SSH, in the server folder ' + (folder.root || '/') + '. Tools: list_dir, find_files, search, read_file, write_file, edit_file, delete_file work on that folder; all paths are relative to it and you cannot reach anything outside it. ' +
+      'run_command runs a bash command ON THE SERVER (not on the phone), starting in that folder. The user approves every file change and every command. ' +
+      'This is a LIVE server, so be careful: change only what was asked, read a file before you change it, keep edits small, and never delete or overwrite without a clear request. A change to a site files is live at once. ' +
+      'Commands must finish on their own (no prompts, editors or programs that never exit; add -y flags). After a command you receive stdout, stderr and the exit code: exit code 0 is success, anything else is a failure, so read the output and tell the user the real result in plain words. ' +
+      'After you change a site or restart a service, check it: run a quick command (pm2 status, a log tail, curl -sI) or use web_fetch on the site address if the user gave one. If something fails, fix the cause and retry at most twice before explaining. ' +
+      'Git is not built in here: if the user asks, run git commands on the server with run_command. Large installs, upgrades and anything that stops a service or removes data need a clear request. ' +
+      'SECRET FILES: .env files, keys and credentials are protected: you cannot read or change them and their contents never appear in the chat. Never ask the user to paste a password or key into the chat. The user can send a file to the server or download one with the Files chip, so for zips and other non-text files tell them to use Files > Upload. ' +
+      'PLAN FIRST: if the task changes more than two files, or needs several commands, or the request is vague, first reply with a short plan (3 to 6 lines) and wait for the user to say go. For a small, clear fix, just do it. When finished, summarize what you changed and what you checked.'
+    );
+  } else if (folder && !folder.scratch) {
     parts.push(
       'PROJECT: you are working inside the folder "' + folder.name + '". Tools: list_dir, find_files, search, read_file, create/edit/delete files. All paths are relative to this folder; you cannot reach anything outside it.\n' +
       'Rules: look before you change (list_dir, find_files or search, then read_file). Prefer edit_file with a small unique "find" over rewriting a whole file. ' +
@@ -210,10 +222,10 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, i
   } else {
     parts.push('NO PROJECT FOLDER in this chat, but you have a private SCRATCH desk: temporary files kept only inside this chat in the app (not a real folder on the phone, and no terminal or Git). Tools: list_dir, find_files, search, read_file, write_file, edit_file, delete_file, zip, unzip and view_image work on Scratch with the same approvals and Undo as a project. Use it for everyday jobs: answer, write, explain, review attached photos and text files (code, notes, CSV, JSON, Word .docx, Excel .xlsx, PowerPoint .pptx; PDF is not supported, so ask for the text or a photo of the page), write a script, a document, a config or a small page, and fix or convert one file. When the user needs a finished file, call make_file with its name and full content: it is also saved in Scratch and the chat shows a Download button. To change a file you made earlier, read it from Scratch and use edit_file. Never paste a long file into the reply when a file fits. For real project work (several files, running commands, Git), tell the user to tap the folder button above the chat and pick the project folder; the Scratch chip also has "Move to a folder" to take these files along.');
   }
-  if (folder && !folder.scratch) parts.push(WORK_TOOLS_GUIDE + RELEASE_GUIDE + (termuxPath ? TERMINAL_TOOLS_GUIDE : '') + (imgOn ? IMAGE_GUIDE : ''));
+  if (local) parts.push(WORK_TOOLS_GUIDE + RELEASE_GUIDE + (termuxPath ? TERMINAL_TOOLS_GUIDE : '') + (imgOn ? IMAGE_GUIDE : ''));
   parts.push(DAILY_GUIDE);
-  if (folder && !folder.scratch && kdex) parts.push('PROJECT INSTRUCTIONS (from KDEX.md in the project folder, written by the user; follow them for this project, unless they ask for something unsafe):\n' + kdex);
-  if (folder && !folder.scratch && pmap) parts.push('PROJECT MAP (made automatically, may be slightly out of date; use list_dir to confirm before relying on it):\n' + pmap);
+  if (local && kdex) parts.push('PROJECT INSTRUCTIONS (from KDEX.md in the project folder, written by the user; follow them for this project, unless they ask for something unsafe):\n' + kdex);
+  if (local && pmap) parts.push('PROJECT MAP (made automatically, may be slightly out of date; use list_dir to confirm before relying on it):\n' + pmap);
   if (custom && custom.trim()) parts.push('User instructions:\n' + custom.trim());
   if (memory.length) parts.push('What you know about the user from earlier chats (use it naturally, do not recite it):\n' + memory.map((m) => '- ' + m.text).join('\n'));
   if (summary) parts.push('Summary of the earlier part of this chat:\n' + summary);
@@ -305,7 +317,7 @@ async function summarize(chat, rt, dropped) {
 }
 
 async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
-  const termuxPathCtx = folder && !folder.scratch && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
+  const termuxPathCtx = folder && !folder.scratch && !folder.remote && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
   const raw = (await db.byIndex('messages', 'chatId', chat.id)).sort((a, b) => a.id - b.id)
     .filter((m) => !(m.role === 'assistant' && m.status === 'error'));
   // Folder-change events are shown to the user as dividers; the model gets them as a note on the next user message.
@@ -337,7 +349,7 @@ async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
     const i = start + k;
     return toNeutral(m, { compact: i < lastUser, keepImages: i >= keepImgFrom, model: rt.model && rt.model.id });
   });
-  const real = folder && !folder.scratch;
+  const real = folder && !folder.scratch && !folder.remote;
   const pmap = real ? await projectMap(folder) : '';
   const kdex = real ? await readKdex(folder) : '';
   const imgOn = !!(real && settings.imageProvider && settings.imageModel);
@@ -431,11 +443,12 @@ export async function runTurn(ctx) {
   chat.think = think;
   await db.put('chats', chat);
 
-  const hasGit = scratch ? false : await isRepo(folder).catch(() => false);
-  const termuxPath = !scratch && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
-  const imgOn = !!(!scratch && settings.imageProvider && settings.imageModel);
+  const remote = !!folder.remote; // a server over SSH: files and commands there; no Git panel, Termux or pictures
+  const hasGit = scratch || remote ? false : await isRepo(folder).catch(() => false);
+  const termuxPath = !scratch && !remote && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
+  const imgOn = !!(!scratch && !remote && settings.imageProvider && settings.imageModel);
   const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
-  const tools = scratch ? TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL, FILE_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS) : (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version')));
+  const tools = scratch ? TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, VIEW_TOOL, WEB_TOOL, FILE_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS) : remote ? TOOLS.concat([PLAN_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS, SERVER_TOOLS) : (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version')));
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
@@ -683,9 +696,9 @@ export async function runTurn(ctx) {
           const isJob = call.name === 'start_job';
           const lines = isJob ? await previewJob(call.args || {}, folder) : await previewTermux(call.args || {}, folder);
           const keys = allowKeys((call.args || {}).command);
-          const risky = isRiskyCommand((call.args || {}).command);
+          const risky = isRiskyCommand((call.args || {}).command, !!folder.remote);
           const auto = (chat.auto && !risky) || (!risky && isAllowed((call.args || {}).command, chat.allow));
-          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : 'runs in Termux', added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky };
+          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : (folder.remote ? 'runs on the server' : 'runs in Termux'), added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky };
           let decision = 'apply';
           if (!auto) {
             tm.status = 'pending';
@@ -757,7 +770,7 @@ export async function runTurn(ctx) {
           const plan = await planWrite(call.name, call.args, folder);
           tm.plan = { path: plan.path, op: plan.op, added: plan.added, removed: plan.removed, diff: plan.diff.lines, more: plan.diff.more };
           let decision = 'apply';
-          if (!(settings.autoApply || chat.auto)) {
+          if (!((settings.autoApply && !folder.remote) || chat.auto)) { // a live server never auto-applies because of the global setting
             tm.status = 'pending';
             await db.put('messages', tm);
             ui.onTool(tm);

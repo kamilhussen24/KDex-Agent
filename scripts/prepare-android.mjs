@@ -26,6 +26,9 @@ fs.copyFileSync(path.join(root, 'native/KdexWorkService.java'), path.join(javaDi
 // Fast native Git (JGit). Set KDEX_JGIT=0 to build without it; the app then uses its JavaScript Git.
 const useJgit = process.env.KDEX_JGIT !== '0';
 if (useJgit) fs.copyFileSync(path.join(root, 'native/KdexGit.java'), path.join(javaDir, 'KdexGit.java'));
+// Servers over SSH (files and commands), built on JSch. Set KDEX_REMOTE=0 to build without it.
+const useRemote = process.env.KDEX_REMOTE !== '0';
+if (useRemote) fs.copyFileSync(path.join(root, 'native/KdexRemote.java'), path.join(javaDir, 'KdexRemote.java'));
 write(path.join(javaDir, 'MainActivity.java'),
 `package com.kdex.agent;
 
@@ -125,16 +128,19 @@ if (process.env.KDEX_KEYSTORE) {
   }
   if (!g.includes('signingConfig signingConfigs.release')) { console.error('Could not patch release signing into app/build.gradle'); process.exit(1); }
 }
+if (useRemote && !g.includes('com.github.mwiede')) {
+  g = g.replace(/dependencies\s*\{/, "dependencies {\n    implementation 'com.github.mwiede:jsch:0.2.16'");
+}
 if (useJgit && !g.includes('org.eclipse.jgit')) {
   g = g.replace(/dependencies\s*\{/, "dependencies {\n    implementation 'org.eclipse.jgit:org.eclipse.jgit:5.13.3.202401111512-r'");
   g = g.replace(/android\s*\{/, "android {\n    packaging {\n        resources {\n            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/LICENSE.txt', 'META-INF/NOTICE', 'META-INF/NOTICE.txt', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'plugin.properties', 'about.html']\n        }\n    }");
 }
 write(gf, g);
 // JGit needs java.nio.file and java.time: Android 8.0 (API 26) or newer
-if (useJgit) {
+if (useJgit || useRemote) {
   const vf = path.join(android, 'variables.gradle');
   if (fs.existsSync(vf)) write(vf, read(vf).replace(/minSdkVersion\s*=\s*\d+/, 'minSdkVersion = 26'));
 }
 
-console.log(`JGit ${useJgit ? 'on' : 'off'}`);
+console.log(`JGit ${useJgit ? 'on' : 'off'}, servers ${useRemote ? 'on' : 'off'}`);
 console.log(`Prepared Android project: version ${versionName} (${versionCode}), ${splashCount} splash files, signing ${process.env.KDEX_KEYSTORE ? 'on' : 'off'}`);

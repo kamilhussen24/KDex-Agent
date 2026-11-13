@@ -3,6 +3,7 @@ import { Termux } from './native.js';
 import { db, kvGet } from './db.js';
 import { getToken, getGitSettings, remoteInfo, resetGitCache, listTokenHosts } from './git.js';
 import { cleanRel } from './util.js';
+import { remoteExec } from './remote.js';
 
 export const TERMUX_TOOLS = [
   {
@@ -47,6 +48,20 @@ export const TERMUX_TOOLS = [
     parameters: { type: 'object', properties: {} },
   },
 ];
+/** The one command tool of a chat that works on a server. Same name as the Termux one, so approvals, "Always allow" and the risk check work the same way. */
+export const SERVER_TOOLS = [{
+  name: 'run_command',
+  description: 'Run a shell command ON THE SERVER over SSH (not on the phone), starting in the server folder of this chat. Use it to restart services (pm2 restart), read logs, unzip an upload, check disk space, run git on the server, curl the site and similar. The user approves every command first. Commands must finish by themselves: no prompts, no editors, no programs that never exit; add -y flags. Returns stdout, stderr and the exit code.',
+  parameters: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', description: 'The shell command (bash)' },
+      cwd: { type: 'string', description: 'Optional sub-folder of the server folder to run in; default is the server folder itself' },
+      timeout_seconds: { type: 'number', description: 'Optional, 5 to 600, default 120' },
+    },
+    required: ['command'],
+  },
+}];
 export const TERMUX_ACTIONS = new Set(['run_command', 'start_job']); // need approval
 export const TERMUX_READS = new Set(['check_job', 'stop_job', 'list_jobs']); // only touch jobs the app started
 
@@ -77,6 +92,9 @@ export async function setTermuxPath(folder, value) {
 
 const DANGER = /(^|[;&|]\s*|\s)(sudo|rm\s+(-\w*[rf]\w*\s+)+|dd\s+if=|mkfs|chmod\s+-R|chown\s+-R|shutdown|reboot|pkill|killall)\b|:\(\)\s*\{|>\s*\/dev\/|curl[^|;]*\|\s*(ba)?sh|wget[^|;]*\|\s*(ba)?sh/i;
 
+// On a live server a few more things always ask, even in Auto mode: stopping services, deleting processes, databases, users, firewall, removing packages.
+const SERVER_RISKY = /\b(systemctl|service)\b[^\n;|&]*\b(stop|disable|mask|kill)\b|\bpm2\s+(delete|kill|flush|unstartup)\b|\b(mysql|mysqldump|mariadb|psql|pg_dump|mongo\w*|redis-cli)\b|\bdrop\s+(table|database)\b|\b(useradd|userdel|usermod|passwd|visudo|crontab\s+-r|iptables|ufw|firewall-cmd|mount|umount|fdisk|parted)\b|\b(apt|apt-get|yum|dnf|apk)\s+(remove|purge|upgrade|dist-upgrade|autoremove)\b/i;
+
 async function workdir(args, folder) {
   const base = await getTermuxPath(folder);
   if (!base) throw new Error('The Termux path of this folder is unknown. Set it in Settings > Terminal.');
@@ -87,6 +105,12 @@ async function workdir(args, folder) {
 export async function previewTermux(args, folder) {
   const command = String(args.command || '').trim();
   if (!command) throw new Error('command is required');
+  if (folder && folder.remote) {
+    const sub = cleanRel(args.cwd || '');
+    const lines = [{ t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'on ' + folder.name + ', in ' + (folder.root || '/').replace(/\/+$/, '') + (sub ? '/' + sub : '') }];
+    if (DANGER.test(command) || SERVER_RISKY.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data, stop a service or change the server.' });
+    return lines;
+  }
   const cwd = await workdir(args, folder);
   const lines = [{ t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'in ' + cwd }];
   if (DANGER.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data or change the system.' });
@@ -127,7 +151,19 @@ function killTagged(tag) {
   return Termux.run(script, undefined, 15000).catch(() => {});
 }
 
+/** Runs a command on a server and words the result the same way as a Termux command. */
+async function runServer(args, folder, signal) {
+  const command = String(args.command || '').trim();
+  const secs = Math.max(5, Math.min(600, parseInt(args.timeout_seconds, 10) || 120));
+  const r = await remoteExec(folder.uri, command, cleanRel(args.cwd || ''), secs, signal);
+  const out = clip(r.stdout, 12000); const err = clip(r.stderr, 4000);
+  const ok = Number(r.exitCode) === 0;
+  return (out ? out.replace(/\s+$/, '') + '\n' : '') + (err ? '[stderr]\n' + err.replace(/\s+$/, '') + '\n' : '') + (!out && !err ? '[no output]\n' : '') +
+    '[exit code ' + r.exitCode + (r.errmsg ? '; ' + r.errmsg : '') + '] ' + (ok ? 'Command succeeded.' : 'Command FAILED. Read the output above before answering.');
+}
+
 export async function runTermux(args, folder, signal) {
+  if (folder && folder.remote) return runServer(args, folder, signal);
   const original = String(args.command || '').trim();
   const cwd = await workdir(args, folder);
   const secs = Math.max(5, Math.min(600, parseInt(args.timeout_seconds, 10) || 120));
@@ -240,7 +276,7 @@ const EGRESS = new RegExp([
   'KDEX_GIT|\\.kdex/askpass|\\.git-credentials|\\.netrc',
   '\\b(requests|httpx|aiohttp)\\.(post|put|patch|delete|request)\\b|urllib\\.request|http\\.client|\\bsocket\\.|net\\.connect|fetch\\([^)]*method',
 ].join('|'), 'i');
-export function isRiskyCommand(command) { const c = String(command || ''); return DANGER.test(c) || RISKY.test(c) || EGRESS.test(c); }
+export function isRiskyCommand(command, remote) { const c = String(command || ''); return DANGER.test(c) || RISKY.test(c) || EGRESS.test(c) || !!(remote && SERVER_RISKY.test(c)); }
 
 // ------------------------------------------------------------------ setup checker
 export const CHECK_TOOLS_TOOL = {
