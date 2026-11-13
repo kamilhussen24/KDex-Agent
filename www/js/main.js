@@ -961,7 +961,7 @@ function touchSwipes() {
 }
 // Update checks: when the app starts or comes back after a while (6 hours), when Settings > About is opened (1 hour),
 // and on demand. A failed check waits 15 minutes before the next quiet try, and an unchanged answer (304) costs no rate limit.
-const UPD_AUTO_MS = 6 * 3600 * 1000; const UPD_OPEN_MS = 3600 * 1000; const UPD_RETRY_MS = 15 * 60 * 1000;
+const UPD_AUTO_MS = 6 * 3600 * 1000; const UPD_OPEN_MS = 5 * 60 * 1000; const UPD_RETRY_MS = 15 * 60 * 1000;
 let updBusy = null;
 /** One check at a time. Returns { r } with the fresh answer, or { skipped } when the saved answer is recent enough. */
 function refreshUpdate(maxAgeMs, force) {

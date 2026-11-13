@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.51.3]
+
+### Fixed
+- Settings > About now checks for a new version when the last check is over 5 minutes old (was 1 hour), so a fresh release shows up without a long wait.
+
 ## [1.51.2]
 
 ### Added
