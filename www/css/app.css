@@ -400,7 +400,6 @@ html[data-theme=dark] .ab.pull{color:#fbbf6a}
 /* v1.29.0 */
 .card.repo .kv.long{flex-direction:column;gap:3px;align-items:stretch}
 .card.repo .kv.long span:last-child{text-align:left;word-break:normal;overflow-wrap:anywhere;-webkit-user-select:text;user-select:text}
-#chipAuto{min-width:9.8em}
 #chipTerm{min-width:12.2em}
 
 /* v1.30.0 */
@@ -521,10 +520,8 @@ html[data-theme=dark]{--warn:#f0b04a;--note:#7aa7ff}
 .gchip .ic{width:16px;height:16px}
 .gchip.danger{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad)}
 .gchip:active{filter:brightness(.95)}
-#chipAuto{justify-content:flex-start}
 
-/* v1.47.2 full-width segmented tabs (Git) */
-#sheetTabs.tabs{display:flex;gap:2px;margin:2px 14px 10px;padding:3px;border-radius:999px;background:var(--bg2);overflow:hidden}
-#sheetTabs .tab{flex:1 1 0;min-width:0;height:32px;padding:0 4px;border:0;border-radius:999px;background:none;color:var(--mut);font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* v1.47.2 full-width Git tabs: four equal outline pills */
+#sheetTabs.tabs{display:flex;gap:6px;margin:2px 14px 10px;padding:0;background:none;overflow:hidden}
+#sheetTabs .tab{flex:1 1 0;min-width:0;height:36px;padding:0 4px;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
 #sheetTabs .tab:first-child{flex-grow:1.3}
-#sheetTabs .tab.on{background:var(--fg);color:var(--bg)}

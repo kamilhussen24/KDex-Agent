@@ -7,6 +7,15 @@ for its version.
 
 ## [Unreleased]
 
+## [1.47.3]
+
+### Changed
+- Chat bar: the approval chip now always reads "Auto". Off is a plain outline with a shield; on is a red tint with a shield and a check. The chip never changes size, so nothing shifts when you switch. Tapping it explains the new state (shown in Quiet mode too).
+- Git sheet: the Changes, Branches, History and Remote tabs are four equal outline pills across the full width, the same style as the other buttons in the app. Long labels such as "Changes (12)" still fit.
+
+### Fixed
+- The Pin, Rename and Delete menu now closes on the first touch outside it, also after opening it with a long press. The touch no longer reaches the chat underneath.
+
 ## [1.47.2]
 
 ### Changed

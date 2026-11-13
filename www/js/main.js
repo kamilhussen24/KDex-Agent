@@ -355,7 +355,8 @@ function openRowMenu(btn, id, pt) {
   // Close on click (not pointerdown): the scrim must still be under the finger when the
   // synthesized click arrives, otherwise that click lands on the chat row underneath.
   const away = (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() < lpBlockUntil) return; closeRowMenu(); };
-  sc.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); });
+  // Close the moment the finger touches (Android can swallow the first click after a long press). The layer stays a moment so that tap cannot reach the chat under it.
+  sc.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (Date.now() < lpBlockUntil) return; const mm = $('#rowMenu'); if (mm) mm.remove(); setTimeout(closeRowMenu, 450); });
   sc.addEventListener('click', away); sc.addEventListener('contextmenu', away);
   document.body.appendChild(sc);
   const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
@@ -1301,13 +1302,13 @@ async function drawSaved() {
 }
 function updateTermChip() {
   const l = $('#chipTermLbl'); if (l) l.textContent = S.settings.termux ? 'Terminal on' : 'Terminal';
-  const a = $('#chipAuto'); if (a) { const on = !!(S.chat && S.chat.auto); a.classList.toggle('on', on); $('#chipAutoLbl').textContent = on ? 'Auto' : 'Ask first'; a.title = on ? 'Auto: safe actions run without asking' : 'Ask before every action'; }
+  const a = $('#chipAuto'); if (a) { const on = !!(S.chat && S.chat.auto); a.classList.toggle('on', on); a.setAttribute('aria-pressed', on ? 'true' : 'false'); const u = a.querySelector('use'); if (u) u.setAttribute('href', on ? '#i-shield-check' : '#i-shield'); a.title = on ? 'Auto on: safe actions run without asking' : 'Auto off: asking before every action'; }
 }
 async function toggleAuto() {
   if (!S.chat) return;
   S.chat.auto = !S.chat.auto; await db.put('chats', S.chat); updateTermChip();
-  if (S.chat.auto) { toast('Auto: risky actions still ask'); for (const [id, tm] of [...S.approvalTm.entries()]) { if (!(tm.plan && tm.plan.risky) && S.approvals.has(id)) decide(id, 'apply'); } }
-  else toast('Asking before every action');
+  if (S.chat.auto) { toast('Auto on: safe actions run without asking. Risky ones still ask.', { result: true }); for (const [id, tm] of [...S.approvalTm.entries()]) { if (!(tm.plan && tm.plan.risky) && S.approvals.has(id)) decide(id, 'apply'); } }
+  else toast('Auto off: asking before every action', { result: true });
 }
 let saveChain = Promise.resolve();
 /** Applies the change at once (so the UI never lags a tap behind), then writes it to storage in order. */
