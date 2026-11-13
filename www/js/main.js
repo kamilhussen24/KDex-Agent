@@ -361,6 +361,10 @@ function chatLongPress() {
     e.preventDefault(); const pt = { x: e.clientX || x0, y: e.clientY || y0 }; cancel(); open(it, pt);
   });
 }
+/** Text size of command output (the A- and A+ buttons); kept between visits. */
+function outFs() { let v = 11; try { v = Number(localStorage.getItem('kdex.outfs')) || 11; } catch (e) { /* storage blocked */ } return Math.max(8, Math.min(16, v)); }
+function setOutFs(n) { n = Math.max(8, Math.min(16, n)); document.documentElement.style.setProperty('--outfs', n + 'px'); document.querySelectorAll('.fnum').forEach((b) => { b.textContent = n; b.classList.toggle('chg', n !== 11); }); try { localStorage.setItem('kdex.outfs', String(n)); } catch (e) { /* storage blocked */ } }
+setOutFs(outFs());
 function closeRowMenu() {
   const m = $('#rowMenu'); if (m) m.remove(); const c = $('#rowScrim'); if (c) c.remove();
   document.querySelectorAll('.menu-on').forEach((x) => x.classList.remove('menu-on'));
@@ -594,7 +598,7 @@ function toolCard(m) {
       ((m.plan.path === 'terminal' || m.plan.web) && m.plan.allowKeys && m.plan.allowKeys.length ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.map((k) => k.replace(/^web:/, '')).join(', ')) + ' in this chat</button>' : '');
     else if (st === 'applied' && m.backupId) h += '<button class="btn sm" data-tool="undo" data-b="' + m.backupId + '">' + ICON('undo') + '<span class="lbl">Undo</span></button>';
     h += '</div>';
-    if (m.plan.path === 'terminal' && m.content && st !== 'pending') { const oc = m.content.slice(-3000); h += '<pre class="out">' + esc(oc) + '</pre>' + (oc.split('\n').length > 12 ? '<div class="tf outx"><button class="linkbtn" data-tool="xout" type="button">Expand</button></div>' : ''); }
+    if (m.plan.path === 'terminal' && m.content && st !== 'pending') { const oc = m.content.slice(-3000); h += '<pre class="out">' + esc(oc) + '</pre>' + (oc.split('\n').length > 12 ? '<div class="tf outx"><span class="fsz hidden"><button class="fbtn" data-tool="fs-" type="button" aria-label="Smaller text">A\u2212</button><button class="fnum' + (outFs() !== 11 ? ' chg' : '') + '" data-tool="fs0" type="button" aria-label="Reset text size">' + outFs() + '</button><button class="fbtn" data-tool="fs+" type="button" aria-label="Larger text">A+</button></span><span style="flex:1"></span><button class="linkbtn" data-tool="xout" type="button">Expand</button></div>' : ''); }
     if (m.preview && m.preview.length) h += '<div class="genimg"><img alt="Generated picture" src="data:' + m.preview[0].mime + ';base64,' + m.preview[0].data + '"></div>';
   } else if (m.status === 'error' || m.status === 'cancelled') {
     h += '<pre class="out wrap">' + esc((m.content || '').slice(0, 400)) + '</pre>';
@@ -2237,7 +2241,8 @@ function wire() {
     if (uf) { const [mid, ix] = uf.dataset.ufile.split(':'); const um = await db.get('messages', Number(mid)); const f = um && um.fileData && um.fileData[Number(ix)]; if (f) await saveOut(f.name, f.text); return; }
     const t = e.target.closest('[data-tool]');
     if (t) {
-      if (t.dataset.tool === 'xout') { const pre = t.closest('.tool').querySelector('pre.out'); if (pre) { const on = pre.classList.toggle('open'); t.textContent = on ? 'Collapse' : 'Expand'; } return; }
+      if (t.dataset.tool === 'xout') { const tl = t.closest('.tool'); const pre = tl.querySelector('pre.out'); if (pre) { const on = pre.classList.toggle('open'); t.textContent = on ? 'Collapse' : 'Expand'; const fz = tl.querySelector('.fsz'); if (fz) fz.classList.toggle('hidden', !on); } return; }
+      if (t.dataset.tool === 'fs-' || t.dataset.tool === 'fs+' || t.dataset.tool === 'fs0') { setOutFs(t.dataset.tool === 'fs0' ? 11 : outFs() + (t.dataset.tool === 'fs+' ? 1 : -1)); return; }
       if (t.dataset.tool === 'prevfile') {
         const fm = await db.get('messages', Number(t.dataset.id)); if (!fm || !fm.file) return;
         openPreview(fm.file.name, bundleText(fm.fileContent), fm.fileContent); return;

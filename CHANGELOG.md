@@ -7,6 +7,16 @@ for its version.
 
 ## [Unreleased]
 
+## [1.49.4]
+
+### Added
+- The text size of expanded command output now shows between `A−` and `A+`. Tap the number to go back to the normal size (11). It is outlined when the size is changed.
+
+## [1.49.3]
+
+### Added
+- Expanded command output has `A−` and `A+` buttons that make the text smaller or larger (8 to 16 px). The size is kept between visits and applies to every output box.
+
 ## [1.49.2]
 
 ### Added
