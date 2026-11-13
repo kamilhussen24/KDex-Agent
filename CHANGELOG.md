@@ -7,6 +7,22 @@ for its version.
 
 ## [Unreleased]
 
+## [1.49.9]
+
+### Fixed
+- Hiding secrets in command output no longer masks harmless words. Text such as "author", "passport", "password-validator" or "bypass" in package.json-style output was replaced by `***`; only real secret names and values are hidden now.
+
+## [1.49.8]
+
+### Changed
+- Command cards that wait because they go outside the start folder no longer show "Always allow ... in this chat" either, since that command asks again anyway.
+
+## [1.49.7]
+
+### Changed
+- The three choices of "Commands outside the start folder" are now Servers, Always and Off, so they fit on one line and have the same size.
+- Command cards marked "risky" no longer show "Always allow ... in this chat". A risky command always asks, so the button did nothing.
+
 ## [1.49.6]
 
 ### Security

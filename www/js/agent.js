@@ -701,7 +701,7 @@ export async function runTurn(ctx) {
           const outside = lines.some((l) => l.t === 'warn');
           const ask = risky || (outside && (oa === 'all' || (oa !== 'off' && !!folder.remote))); // outside the start folder: ask even in Auto
           const auto = (chat.auto && !ask) || (!ask && isAllowed((call.args || {}).command, chat.allow));
-          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : (folder.remote ? 'runs on the server' : 'runs in Termux'), added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky, outside };
+          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : (folder.remote ? 'runs on the server' : 'runs in Termux'), added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky, outside, ask };
           let decision = 'apply';
           if (!auto) {
             tm.status = 'pending';

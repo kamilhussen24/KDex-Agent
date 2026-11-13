@@ -70,8 +70,8 @@ export function redactPatterns(text) {
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|$)/g, '[private key hidden]')
     .replace(/\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g, '***')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{20,}=*/g, 'Bearer ***')
-    .replace(/\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|PRIVATE|CREDENTIALS?|AUTH)[A-Z0-9_]*)(\s*[=:]\s*)(["']?)([^\s"']{6,})\3/g, '$1$2$3***$3')
-    .replace(/"([\w.-]*(?:key|secret|token|passw(?:or)?d|pass|pwd|credential|auth)[\w.-]*)"(\s*:\s*)"([^"]{6,})"/gi, '"$1"$2"***"');
+    .replace(/\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|PRIVATE|CREDENTIALS?|AUTH(?!OR))[A-Z0-9_]*)(\s*[=:]\s*)(["']?)([^\s"']{6,})\3/g, '$1$2$3***$3')
+    .replace(/"([\w.-]*(?:key|secret|token|passw(?:or)?d|pwd|credentials?|authorization)|pass)"(\s*:\s*)"([^"]{6,})"/gi, '"$1"$2"***"');
 }
 export const PROTECTED_MSG = 'This file is protected. Its contents are hidden from me and from the chat on purpose. Programs you run in the terminal can still use it. Do not ask the user to paste secret values. If a variable is missing, call request_env_var: the user types the value in a private box and you never see it.';
 
