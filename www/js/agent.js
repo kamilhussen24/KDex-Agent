@@ -52,7 +52,8 @@ async function runChecks(ck, paths, folder, signal) {
   const ok = !!m && Number(m[1]) === 0;
   const body = String(out).replace(/\[exit code[\s\S]*$/, '').trim();
   const text = (await scrub(body, folder).catch(() => body)).slice(-1500);
-  return { ok, cmd, files: hit, text };
+  const shown = cmd.includes('{files}') ? cmd.replace(/\{files\}/g, hit.slice(0, 20).join(' ')) : cmd; // what the card and the agent see: the real file names
+  return { ok, cmd: shown, files: hit, text };
 }
 const PLAN_TOOL = {
   name: 'update_plan',

@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.51.1]
+
+### Fixed
+- The check card after an edit now shows the real file names (for example python3 -m py_compile test_check.py) instead of the {files} placeholder, and the agent sees the same line.
+
 ## [1.51.0]
 
 ### Added

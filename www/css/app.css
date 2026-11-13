@@ -580,3 +580,4 @@ html[data-theme=dark] .exithint{box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .tool .tf.chk.good .ic{color:var(--ok)}
 .ckform{display:flex;flex-direction:column;gap:4px}
 #planDone .grow{white-space:nowrap;flex:none}#planDone{flex-wrap:nowrap}#planDone .btn{margin-left:auto}#planDone .btn+.btn{margin-left:0}
+.tool .tf.chk .lbl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
