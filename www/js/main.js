@@ -24,7 +24,7 @@ import { toolLabel, opLabel } from './toollabels.js';
 
 const S = {
   settings: null, providers: [], models: [], folders: [], chats: [],
-  chat: null, folder: null, think: 'off', running: false, abort: null,
+  chat: null, folder: null, think: 'off', running: false, abort: null, runChat: null,
   approvals: new Map(), approvalTm: new Map(), els: new Map(), attach: [], sheetStack: [],
 };
 const ICON = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
@@ -409,16 +409,16 @@ function openRowMenu(btn, id, pt) {
       row.title = v.slice(0, 80); await db.put('chats', row); if (S.chat && S.chat.id === id) S.chat.title = row.title; await loadChats();
     } else {
       if (!await confirmBox('Delete chat?', 'This chat and its backups are removed from the phone.', 'Delete')) return;
+      if (S.running && S.runChat && S.runChat.id === id) { stopRun(); await waitIdle(); }
       await A.removeChat(id); await loadChats(); if (S.chat && S.chat.id === id) await newChat(null);
     }
   };
 }
 async function newChat(folder) {
-  if (S.running) stopRun();
   S.chat = { id: uid(), title: '', model: currentModelId(), think: S.settings.defaultThink || 'off', auto: !!S.settings.autoDefault && !(folder && folder.remote), folderId: folder ? folder.id : null, updated: Date.now() };
   S.folder = folder || null; S.think = S.chat.think; S.chat.fresh = true;
-  S.els.clear(); S.approvals.clear();
-  fillModels(S.chat.model); drawCtx(); drawThink(); $('#messages').innerHTML = ''; renderEmpty(); updateApproveBar(); closeDrawer(); drawRing();
+  S.els.clear(); if (!S.running) S.approvals.clear();
+  fillModels(S.chat.model); drawCtx(); drawThink(); $('#messages').innerHTML = ''; renderEmpty(); setRunning(S.running); updateApproveBar(); closeDrawer(); drawRing();
 }
 /** Content shared from another app, or a notification tap: open the right chat and drop the shared text/files into the composer. */
 async function handleLaunch(l) {
@@ -436,18 +436,18 @@ async function handleLaunch(l) {
 }
 window.__kdexLaunch = handleLaunch;
 async function openChat(id) {
-  if (S.running) stopRun();
-  const c = await db.get('chats', id); if (!c) return newChat();
+  const live = S.running && S.runChat && S.runChat.id === id; // the task of this chat is still running: use its live chat object
+  const c = live ? S.runChat : await db.get('chats', id); if (!c) return newChat();
   S.chat = c; S.folder = S.folders.find((f) => f.id === c.folderId) || null; S.think = c.think || 'off'; touchFolder(S.folder);
   await db.put('kv', { key: 'lastChat', value: id });
   fillModels(c.model); drawCtx(); drawThink();
-  S.els.clear(); S.approvals.clear();
-  await A.repairHistory(id);
+  S.els.clear(); if (!S.running) S.approvals.clear();
+  if (!live) await A.repairHistory(id);
   const msgs = (await db.byIndex('messages', 'chatId', id)).sort((a, b) => a.id - b.id);
   const box = $('#messages'); box.innerHTML = '';
   if (!msgs.length) renderEmpty();
   msgs.forEach((m) => renderMsg(m));
-  scrollEnd(true); closeDrawer(); drawChatList(); updateApproveBar(); drawRing();
+  scrollEnd(true); closeDrawer(); drawChatList(); setRunning(S.running); updateApproveBar(); drawRing();
 }
 /** Hand a text file to the user: share sheet when available; on the phone otherwise save it into a folder they pick; in a browser a normal download. */
 async function saveOut(name, text) {
@@ -609,10 +609,28 @@ function toolCard(m) {
 
 // ------------------------------------------------------------ approvals
 function pendingCount() { return S.approvals.size; }
+/** True when the running task belongs to the chat on screen. */
+function runHere() { return !!(S.running && S.runChat && S.chat && S.chat.id === S.runChat.id); }
 function updateApproveBar() {
-  const n = pendingCount(); const bar = $('#approveBar');
+  const n = !S.running || runHere() ? pendingCount() : 0; const bar = $('#approveBar');
+  drawRunStrip();
   if (!n) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden'); $('#approveText').textContent = n + ' waiting for your approval';
+}
+/** One line under the top bar while a task runs in another chat: where it is, and a way back. */
+function drawRunStrip() {
+  const el = $('#runStrip'); if (!el) return;
+  if (!S.running || !S.runChat || runHere()) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const title = S.runChat.title || 'New chat';
+  const wait = pendingCount() > 0;
+  el.innerHTML = (wait ? '' : '<span class="spin"></span>') + '<span class="rs-t">' + (wait ? 'Waiting for your approval in ' : 'Working in ') + '\u201c' + esc(title) + '\u201d</span><button type="button" class="linkbtn" data-a="view"><span class="lbl">View</span></button>';
+  el.classList.remove('hidden');
+  $('[data-a=view]', el).onclick = () => openChat(S.runChat.id);
+}
+/** Resolves once the running task has ended (used before deleting its chat or starting another). */
+async function waitIdle(ms = 8000) {
+  const t0 = Date.now();
+  while (S.running && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 50));
 }
 function decide(id, v) {
   const r = S.approvals.get(Number(id)); if (!r) return;
@@ -640,9 +658,27 @@ async function showRing() {
   if (v === 1) newChat(S.folder);
 }
 function setRunning(v) {
-  S.running = v; const b = $('#sendBtn');
-  b.classList.toggle('stop', v); b.innerHTML = ICON(v ? 'stop' : 'up'); b.setAttribute('aria-label', v ? 'Stop' : 'Send');
+  S.running = v; if (!v) S.runChat = null;
+  const b = $('#sendBtn'); const stop = runHere();
+  b.classList.toggle('stop', stop); b.innerHTML = ICON(stop ? 'stop' : 'up'); b.setAttribute('aria-label', stop ? 'Stop' : 'Send');
+  drawRunStrip();
 }
+/** Back on the main screen. It never stops a task: while one runs it asks first, otherwise it needs a second press to leave. */
+let backAt = 0; let backAsking = false;
+async function onBackRoot() {
+  if (backAsking) return;
+  if (S.running) {
+    backAsking = true;
+    const v = await choiceBox('A task is running', 'Leaving now may stop it.', ['Stay', 'Leave'], { noCancel: true });
+    backAsking = false;
+    if (v === 1) App.exitApp();
+    return;
+  }
+  if (Date.now() - backAt < 2000) { App.exitApp(); return; }
+  backAt = Date.now();
+  const h = $('#exitHint'); if (h) { h.classList.add('show'); clearTimeout(h._t); h._t = setTimeout(() => h.classList.remove('show'), 2000); }
+}
+window.__kdexBack = onBackRoot;
 function stopRun() {
   if (S.abort) S.abort.abort();
   [...S.approvals.keys()].forEach((id) => decide(id, 'reject'));
@@ -662,7 +698,13 @@ function ghostGuard(sent) {
   [60, 200, 500, 1000].forEach((ms) => setTimeout(() => { if (input.value.trim() === sent) { input.value = ''; autoGrow(); } }, ms));
 }
 async function send(regenerate) {
-  if (S.running) { stopRun(); return; }
+  if (S.running && runHere()) { stopRun(); return; }
+  if (S.running) { // a task runs in another chat: one task at a time, so ask what to do
+    if (!regenerate && !$('#input').value.trim() && !S.attach.length) return;
+    const v = await choiceBox('Another task is running', 'Finish or stop \u201c' + (S.runChat && S.runChat.title || 'New chat') + '\u201d before starting a new one here.', ['Wait', 'Stop it'], { noCancel: true });
+    if (v !== 1) return;
+    stopRun(); await waitIdle(); if (S.running) return;
+  }
   const input = $('#input'); const text = regenerate ? '' : input.value.trim();
   if (!regenerate && !text && !S.attach.length) return;
   if (!regenerate && text && !S.attach.length && text === lastSent.text && Date.now() - lastSent.at < 4000) { input.value = ''; autoGrow(); return; }
@@ -674,31 +716,36 @@ async function send(regenerate) {
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
   const tu = $('#turnUndo'); if (tu) tu.remove();
   delete S.chat.fresh; await persistChat(); loadChats();
-  S.abort = new AbortController(); setRunning(true);
+  const chat = S.chat; const folder = S.folder; const think = S.think;
+  const here = () => !!(S.chat && S.chat.id === chat.id); // false while the user looks at another chat: the task keeps running, the screen is not touched
+  S.abort = new AbortController(); S.runChat = chat; setRunning(true);
   Work.start('Working on your request'); const t0 = Date.now();
   const ui = {
-    onUser: (m) => renderMsg(m), onAssistant: (m) => renderMsg(m), onDelta: (m) => { netLine(''); renderMsg(m); },
-    onTool: (m) => { renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); else if (m.name === 'make_file' && m.status === 'done') drawScratch(); },
+    onUser: (m) => { if (here()) renderMsg(m); }, onAssistant: (m) => { if (here()) renderMsg(m); }, onDelta: (m) => { if (here()) { netLine(''); renderMsg(m); } },
+    onTool: (m) => { if (!here()) return; renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); else if (m.name === 'make_file' && m.status === 'done') drawScratch(); },
     requestSecret: (info, signal) => askSecret(info, signal), watchBuild: (folder, sha, label) => { CI.watchBuild(folder, sha, label); },
     onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t, { kind: 'warn' }); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
       const first = !pendingCount(); S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
-      if (first) Work.needs('Waiting for your approval', S.chat && S.chat.id);
+      if (first) Work.needs('Waiting for your approval', chat.id);
       signal.addEventListener('abort', () => decide(tm.id, 'reject'), { once: true });
     }),
   };
   try {
-    await A.runTurn({ chat: S.chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder: S.folder, modelId: currentModelId(), think: S.think, signal: S.abort.signal, ui, regenerate: !!regenerate });
+    await A.runTurn({ chat, text, images, attachFiles: files, attachNames: attach.map((a) => a.name), folder, modelId: currentModelId(), think, signal: S.abort.signal, ui, regenerate: !!regenerate });
     netLine('');
-    if (!S.abort || !S.abort.signal.aborted) Work.done(true, 'Your request is done.', S.chat && S.chat.id);
+    if (!S.abort || !S.abort.signal.aborted) Work.done(true, 'Your request is done.', chat.id);
     D.log('run', 'Agent run \u00b7 ' + Math.round((Date.now() - t0) / 100) / 10 + 's');
   } catch (e) {
-    netLine(''); D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120), S.chat && S.chat.id);
+    netLine(''); D.log('error', 'Agent run failed: ' + (e.message || e)); Work.done(false, String(e.message || 'Something went wrong').slice(0, 120), chat.id);
     toast(e.message || 'Something went wrong', { kind: 'err' });
-    const m = { chatId: S.chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
-    m.id = await db.put('messages', m); renderMsg(m);
+    const m = { chatId: chat.id, role: 'assistant', text: '[Error: ' + (e.message || 'failed') + ']', status: 'error', calls: [], at: Date.now() };
+    m.id = await db.put('messages', m); if (here()) renderMsg(m);
   }
-  Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); updateChangesChip(); loadChats(); drawRing(); showTurnUndo(t0);
+  const wasAway = !here(); const stopped = !!(S.abort && S.abort.signal.aborted);
+  Work.stop(); setRunning(false); S.abort = null; updateApproveBar(); loadChats();
+  if (wasAway) { if (!stopped) toast('Task finished in \u201c' + (chat.title || 'New chat') + '\u201d', { result: true, action: { label: 'View', fn: () => openChat(chat.id) } }); return; }
+  updateChangesChip(); drawRing(); showTurnUndo(t0);
 }
 /** Puts a ready-made request in the chat and sends it (used by Fix buttons). */
 async function quickSend(text) {
@@ -939,7 +986,7 @@ async function applyFolder(f) {
     if (r === 1) { closeSheet(); await newChat(f); await persistChat(); loadChats(); return; }
     if (r !== 0) return;
   }
-  if (S.running) stopRun();
+  if (S.running && S.runChat && S.runChat.id === c.id) { stopRun(); await waitIdle(); }
   S.folder = f; c.folderId = f ? f.id : null;
   c.allow = []; // "Always allow" belongs to the old folder
   if (had) {
@@ -1557,7 +1604,7 @@ function openSettings() {
   $('#diagBtn').onclick = openDiagnostics; $('#usageBtn').onclick = openUsage; $('#expBtn').onclick = exportChat;
   $('#delAll').onclick = async () => {
     if (!await confirmBox('Delete all conversations?', 'Every chat except pinned ones, with its messages and change backups, is removed from this phone. Your folders, files, settings, memory notes and keys are not touched. This cannot be undone.', 'Delete all')) return;
-    if (S.running) stopRun();
+    if (S.running) { stopRun(); await waitIdle(); }
     const keep = new Set((await db.all('chats')).filter((c) => c.pinned).map((c) => c.id));
     for (const row of await db.all('messages')) if (!keep.has(row.chatId)) await db.del('messages', row.id);
     for (const row of await db.all('backups')) if (!keep.has(row.chatId)) await db.del('backups', row.id);
@@ -2317,8 +2364,7 @@ function wire() {
     if (!$('#setup').classList.contains('hidden') && $('#sCancel')) { $('#sCancel').click(); return; }
     if (!$('#sheet').classList.contains('hidden')) { const b = $('#sheetBack'); if (!b.classList.contains('hidden')) b.click(); else closeSheet(); return; }
     if ($('#drawer').classList.contains('open')) { closeDrawer(); return; }
-    if (S.running) { stopRun(); return; }
-    App.exitApp();
+    onBackRoot();
   })).catch(() => {});
 }
 

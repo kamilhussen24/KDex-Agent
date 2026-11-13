@@ -7,6 +7,14 @@ for its version.
 
 ## [Unreleased]
 
+## [1.50.5]
+
+### Changed
+- A running task is no longer stopped when you open another chat, start a new chat or look something up in an old one. It keeps going in its own chat. While you are in another chat, a line under the top bar says "Working in <chat>" (or "Waiting for your approval in <chat>") with a View button, and a short message appears when the task finishes there. Coming back shows everything that happened meanwhile.
+- One task still runs at a time. Sending a message in another chat while a task runs asks: Wait, or Stop it.
+- The phone's Back button no longer stops a task. While a task runs it asks "A task is running. Leaving now may stop it." (Stay or Leave). With nothing running, the first press shows "Press Back again to exit" and the second press leaves. Only the Stop button stops a task.
+- Deleting a chat or changing its folder stops only that chat's own task.
+
 ## [1.50.4]
 
 ### Changed

@@ -551,3 +551,12 @@ html[data-theme=dark]{--warn:#f0b04a;--note:#7aa7ff}
 .scst .linkbtn .ic{width:15px;height:15px}
 .scst .linkbtn[aria-expanded=true] .ic{transform:rotate(180deg)}
 .scpre{margin:8px 0 0;padding:10px;border-radius:10px;background:var(--code);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto}
+
+/* A task runs in another chat: one line under the top bar, with a way back. */
+.runstrip{display:flex;align-items:center;gap:8px;margin:0 14px 6px;padding:7px 8px 7px 12px;border-radius:12px;background:var(--bg2);color:var(--fg);font-size:13px;line-height:1.3}
+.runstrip .spin{margin:0;flex:none}
+.runstrip .rs-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.runstrip .linkbtn{flex:none}
+/* First Back press on the main screen: a short hint above the message box. */
+.exithint{position:fixed;left:50%;bottom:calc(var(--sab, 0px) + 112px);z-index:60;transform:translate(-50%,8px);opacity:0;pointer-events:none;padding:8px 14px;border-radius:12px;background:var(--fg);color:var(--bg);font-size:13px;transition:opacity .18s,transform .18s}
+.exithint.show{opacity:1;transform:translate(-50%,0)}

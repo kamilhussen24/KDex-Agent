@@ -93,6 +93,7 @@ setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too lo
       <button id="topFolderBtn" class="icon-btn" type="button" aria-label="Projects"><svg class="ic"><use href="#i-folder"/></svg></button>
     </header>
 
+    <div id="runStrip" class="runstrip hidden" role="status"></div>
     <div id="ctxBar" class="ctxbar">
       <button id="chipFolder" class="chip" type="button"><svg class="ic"><use href="#i-folder"/></svg><span id="chipFolderName" class="lbl">Add folder</span></button>
       <button id="chipScratch" class="chip hidden" type="button"><svg class="ic"><use href="#i-file"/></svg><span id="chipScratchLbl" class="lbl">Scratch</span></button>
@@ -107,6 +108,7 @@ setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too lo
     <div id="approveBar" class="approve-bar hidden"><span id="approveText" class="lbl"></span><button id="approveAll" class="btn primary sm" type="button"><span class="lbl">Allow all</span></button></div>
 
     <div id="netLine" class="netline hidden" role="status"></div>
+    <div id="exitHint" class="exithint" role="status">Press Back again to exit</div>
     <div id="thinkMenu" class="menu hidden" role="menu">
       <div class="hd">Thinking (this chat)</div>
       <button type="button" class="it" data-think="off"><b>Off</b><small>Fastest and cheapest</small></button>
