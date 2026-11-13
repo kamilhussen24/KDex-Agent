@@ -361,7 +361,13 @@ function chatLongPress() {
     e.preventDefault(); const pt = { x: e.clientX || x0, y: e.clientY || y0 }; cancel(); open(it, pt);
   });
 }
-function closeRowMenu() { const m = $('#rowMenu'); if (m) m.remove(); const c = $('#rowScrim'); if (c) c.remove(); }
+function closeRowMenu() {
+  const m = $('#rowMenu'); if (m) m.remove(); const c = $('#rowScrim'); if (c) c.remove();
+  document.querySelectorAll('.menu-on').forEach((x) => x.classList.remove('menu-on'));
+  document.querySelectorAll('.dimming').forEach((x) => x.classList.remove('dimming'));
+}
+/** Dims the other rows while a menu is open; the pressed row stays distinct. */
+function markMenuRow(row, list) { if (!row || !list) return; row.classList.add('menu-on'); list.classList.add('dimming'); }
 /** Small menu next to a chat row: Pin, Rename, Delete. */
 function openRowMenu(btn, id, pt) {
   closeRowMenu(); if (!pt) lpBlockUntil = 0;
@@ -379,6 +385,7 @@ function openRowMenu(btn, id, pt) {
   const m = document.createElement('div'); m.id = 'rowMenu'; m.className = 'rowmenu';
   m.innerHTML = '<button data-a="pin">' + ICON('pin') + '<span>' + (c.pinned ? 'Unpin' : 'Pin') + '</span></button><button data-a="rename">' + ICON('edit') + '<span>Rename</span></button><button data-a="del" class="danger">' + ICON('trash') + '<span>Delete</span></button>';
   document.body.appendChild(m);
+  markMenuRow(btn.closest('.chat-item'), $('#chatList'));
   const r = btn.getBoundingClientRect(); const mh = m.offsetHeight, mw = m.offsetWidth;
   if (pt) { // opened by a long press: appear next to the finger
     m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, pt.x - mw / 2)) + 'px';
@@ -579,9 +586,9 @@ function toolCard(m) {
   const st = m.status || 'running';
   let h = '<div class="tool"><div class="th">' + ICON(TOOL_ICON[m.name] || 'file') + '<span class="nm">' + esc(m.name) + '</span><span class="pa">' + esc(m.args || '') + '</span><span class="st ' + st + '">' + esc(st === 'running' ? 'working' : st) + '</span></div>';
   if (m.plan) {
-    h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : '  ') + (l.text || '')) + '</span>').join('') +
+    h += '<div class="diff">' + (m.plan.diff || []).map((l) => '<span class="dl ' + (l.t === 'add' ? 'a' : l.t === 'del' ? 'd' : l.t === 'warn' ? 'w' : 'c') + '">' + esc((l.t === 'add' ? '+ ' : l.t === 'del' ? '- ' : l.t === 'warn' ? '! ' : '  ') + (l.text || '')) + '</span>').join('') +
       (m.plan.more ? '<span class="dl c">... ' + m.plan.more + ' more lines</span>' : '') + '</div>';
-    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal' || m.plan.path === 'device' || m.plan.path === 'image' || m.plan.path === 'release' || m.plan.path === 'version') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
+    h += '<div class="tf"><span class="lbl" style="flex:1">' + esc(m.plan.op) + (m.plan.auto ? ' · allowed' : '') + (m.plan.risky && st === 'pending' ? ' · risky' : '') + (m.plan.outside && st === 'pending' ? ' · outside folder' : '') + ((m.plan.web || m.plan.path === 'git' || m.plan.path === 'zip' || m.plan.path === 'unzip' || m.plan.path === 'terminal' || m.plan.path === 'device' || m.plan.path === 'image' || m.plan.path === 'release' || m.plan.path === 'version') ? '' : ' · +' + m.plan.added + ' −' + m.plan.removed) + '</span>';
     if (st === 'pending' && m.plan.warn) h += '</div><div class="tf warnrow"><button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Cancel</span></button><span style="flex:1"></span><button class="btn sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">Push anyway</span></button><button class="btn primary sm" data-tool="fix" data-id="' + m.id + '"><span class="lbl">Fix it</span></button>';
     else if (st === 'pending') h += '<button class="btn sm" data-tool="reject" data-id="' + m.id + '"><span class="lbl">Reject</span></button><button class="btn primary sm" data-tool="apply" data-id="' + m.id + '"><span class="lbl">' + (m.plan.path === 'terminal' ? 'Run' : m.plan.web ? 'Read' : m.plan.path === 'image' ? 'Create' : m.plan.path === 'device' ? 'Allow' : m.plan.path === 'release' ? 'Release' : 'Apply') + '</span></button>' +
       ((m.plan.path === 'terminal' || m.plan.web) && m.plan.allowKeys && m.plan.allowKeys.length ? '</div><div class="tf"><button class="linkbtn" data-tool="always" data-id="' + m.id + '">Always allow ' + esc(m.plan.allowKeys.map((k) => k.replace(/^web:/, '')).join(', ')) + ' in this chat</button>' : '');
@@ -1192,6 +1199,7 @@ function popMenu(anchor, items, pick, title) {
   const shortT = title ? midName(title, 24) : '';
   m.innerHTML = (shortT ? '<div class="rmt" title="' + esc(title) + '">' + esc(shortT) + '</div>' : '') + items.map((i) => '<button data-a="' + i.a + '"' + (i.danger ? ' class="danger"' : '') + '>' + ICON(i.icon) + '<span>' + i.label + '</span></button>').join('');
   document.body.appendChild(m);
+  markMenuRow(anchor.closest('.row-item'), anchor.closest('.row-item') && anchor.closest('.row-item').parentElement);
   const r = anchor.getBoundingClientRect(); const mh = m.offsetHeight, mw = m.offsetWidth;
   m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw - 8)) + 'px';
   m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, r.bottom - 4 + mh > window.innerHeight - 8 ? r.top - mh : r.bottom - 4)) + 'px';

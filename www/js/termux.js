@@ -105,6 +105,26 @@ async function workdir(args, folder) {
   return sub ? base.replace(/\/+$/, '') + '/' + sub : base;
 }
 
+/** Absolute or home paths in a command that lie outside the start folder (informational only). */
+export function outsidePaths(command, root) {
+  const base = String(root || '').replace(/\/+$/, '');
+  const out = [];
+  for (let tok of String(command || '').split(/[\s"'|;&<>()`=]+/)) {
+    if (!tok) continue;
+    if (tok === '~' || tok.startsWith('~/')) { out.push(tok); continue; }
+    if (/(^|\/)\.\.(\/|$)/.test(tok) && /^[\w.\/~-]+$/.test(tok)) { out.push(tok); continue; }
+    if (!/^\/[\w.@%+\/-]*$/.test(tok) || tok === '/' || tok.startsWith('//')) continue;
+    if (/^\/(tmp|dev\/(null|stdout|stderr|stdin|fd))(\/|$)/.test(tok)) continue;
+    if (base && (tok === base || tok.startsWith(base + '/'))) continue;
+    out.push(tok);
+  }
+  return [...new Set(out)];
+}
+function outsideLine(command, root) {
+  const o = outsidePaths(command, root); if (!o.length) return null;
+  return { t: 'warn', text: 'Outside the start folder: ' + o.slice(0, 2).join(', ') + (o.length > 2 ? ' +' + (o.length - 2) : '') };
+}
+
 export async function previewTermux(args, folder) {
   const command = String(args.command || '').trim();
   if (!command) throw new Error('command is required');
@@ -113,12 +133,14 @@ export async function previewTermux(args, folder) {
     const lines = [{ t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'on ' + folder.name + ', in ' + (folder.root || '/').replace(/\/+$/, '') + (sub ? '/' + sub : '') }];
     if (DANGER.test(command) || SERVER_RISKY.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data, stop a service or change the server.' });
     if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
+    const ow = outsideLine(command, folder.root); if (ow) lines.push(ow);
     return lines;
   }
   const cwd = await workdir(args, folder);
   const lines = [{ t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'in ' + cwd }];
   if (DANGER.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data or change the system.' });
   if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
+  const ow = outsideLine(command, await getTermuxPath(folder)); if (ow) lines.push(ow);
   return lines;
 }
 
@@ -239,6 +261,7 @@ export async function previewJob(args, folder) {
   const lines = [{ t: 'ctx', text: 'background job "' + jobName(args.name) + '"' }, { t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'in ' + cwd }];
   if (DANGER.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data or change the system.' });
   if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
+  const ow = outsideLine(command, await getTermuxPath(folder)); if (ow) lines.push(ow);
   return lines;
 }
 async function sh(script, secs) { const r = await Termux.run(script, undefined, (secs || 30) * 1000); return { out: (String(r.stdout || '') + (r.stderr ? '\n' + r.stderr : '')).trim(), code: Number(r.exitCode) }; }

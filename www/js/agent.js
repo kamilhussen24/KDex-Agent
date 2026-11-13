@@ -698,7 +698,7 @@ export async function runTurn(ctx) {
           const keys = allowKeys((call.args || {}).command);
           const risky = isRiskyCommand((call.args || {}).command, !!folder.remote);
           const auto = (chat.auto && !risky) || (!risky && isAllowed((call.args || {}).command, chat.allow));
-          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : (folder.remote ? 'runs on the server' : 'runs in Termux'), added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky };
+          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : (folder.remote ? 'runs on the server' : 'runs in Termux'), added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky, outside: lines.some((l) => l.t === 'warn') };
           let decision = 'apply';
           if (!auto) {
             tm.status = 'pending';

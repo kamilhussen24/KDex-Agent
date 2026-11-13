@@ -7,6 +7,15 @@ for its version.
 
 ## [Unreleased]
 
+## [1.49.2]
+
+### Added
+- Command approval cards show a yellow "Outside the start folder" line, and "outside folder" in the footer, when a command touches a path outside the start folder (servers and Termux). It is only a note: it does not make the command risky.
+- When a menu opens on a chat, a server file or a scratch file, the other rows fade and the pressed row stays clear.
+
+### Changed
+- The model selector now fills the whole space between the menu button and the folder button.
+
 ## [1.49.1]
 
 ### Added
