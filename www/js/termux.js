@@ -94,8 +94,27 @@ const DANGER = /(^|[;&|]\s*|\s)(sudo|rm\s+(-\w*[rf]\w*\s+)+|dd\s+if=|mkfs|chmod\
 
 // On a live server a few more things always ask, even in Auto mode: stopping services, deleting processes, databases, users, firewall, removing packages.
 const SERVER_RISKY = /\b(systemctl|service)\b[^\n;|&]*\b(stop|disable|mask|kill)\b|\bpm2\s+(delete|kill|flush|unstartup)\b|\b(mysql|mysqldump|mariadb|psql|pg_dump|mongo\w*|redis-cli)\b|\bdrop\s+(table|database)\b|\b(useradd|userdel|usermod|passwd|visudo|crontab\s+-r|iptables|ufw|firewall-cmd|mount|umount|fdisk|parted)\b|\b(apt|apt-get|yum|dnf|apk)\s+(remove|purge|upgrade|dist-upgrade|autoremove)\b/i;
-// Commands that print a secret file. The output goes to the AI provider, so these always ask.
-const SECRET_READ = /\b(cat|less|more|head|tail|grep|egrep|sed|awk|strings|xxd|od|base64|nl|bat)\b[^\n;|&]*(\.env(?!\.(example|sample|template)\b)(\.\w+)?(?=$|[\s"';|&)])|\.pem\b|\.p12\b|\.pfx\b|\bid_(rsa|ecdsa|ed25519|dsa)\b|\.netrc\b|\.git-credentials|\.npmrc\b|\.pgpass\b|\bshadow\b)/i;
+// Commands that can print secrets. The output goes to the AI provider, so these always ask. Any mention of a secret file
+// counts, whatever the program is (cat, rev, cut, source, python -c ...), and so do commands that dump the environment.
+const SECRET_PARTS = [
+  '(?:^|[\\s/"\'=:<>(])\\.env(?!\\.(?:example|sample|template|dist|defaults)\\b)(?:\\.[\\w-]+)?(?=$|[\\s"\';|&)<>:,])',
+  '\\.(?:pem|p12|pfx|jks|keystore|asc|gpg|key)(?=$|[\\s"\';|&)<>:,])',
+  '\\b(?:id|[\\w-]+)_(?:rsa|ecdsa|ed25519|dsa)\\b',
+  '\\.(?:netrc|git-credentials|npmrc|pypirc|pgpass|htpasswd)\\b',
+  '(?:^|[\\s/"\'=:])\\.(?:ssh|aws|kube|gnupg)(?:/|\\s|$|["\'])',
+  '\\.docker/config|\\.config/(?:gh|gcloud)\\b',
+  '\\b(?:bash|zsh|sh|fish)_history\\b|\\.(?:python|mysql|psql)_history',
+  '/etc/g?shadow\\b|/proc/[^\\s]*/environ',
+  'service[-_]?account[\\w.-]*\\.json|google-services\\.json|\\.tfvars\\b',
+  '(?:^|[\\s/"\'])(?:secrets?\\.(?:env|ya?ml|json|toml|ini)|credentials(?:\\.\\w+)?)(?=$|[\\s"\';|&)])',
+  '\\bprintenv\\b|(?:^|[;&|\\n(]\\s*|\\s)(?:env|set|export\\s+-p|declare\\s+-x)(?=\\s*(?:$|[;&|)]))',
+  '\\bpm2\\s+(?:env|show|describe|info|jlist|prettylist)\\b',
+  '\\bdocker\\s+(?:inspect|compose\\s+config)\\b|\\bdocker-compose\\s+config\\b|\\bdocker\\s+exec\\b[^\\n;|&]*\\b(?:env|printenv)\\b',
+  '\\bsystemctl\\s+(?:show|cat|show-environment)\\b',
+  '(?:^|[;&|\\n]\\s*)history\\b',
+  '\\bkubectl\\s+(?:get\\s+secrets?|describe\\s+secrets?|config\\s+view)\\b',
+];
+const SECRET_READ = new RegExp(SECRET_PARTS.join('|'), 'i');
 export function readsSecret(command) { return SECRET_READ.test(String(command || '')); }
 
 async function workdir(args, folder) {
@@ -138,14 +157,14 @@ export async function previewTermux(args, folder) {
     const sub = cleanRel(args.cwd || '');
     const lines = [{ t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'on ' + folder.name + ', in ' + (folder.root || '/').replace(/\/+$/, '') + (sub ? '/' + sub : '') }];
     if (DANGER.test(command) || SERVER_RISKY.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data, stop a service or change the server.' });
-    if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
+    if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command may print secrets. Its output is sent to your AI provider.' });
     const ow = outsideLine(command, folder.root); if (ow) lines.push(ow);
     return lines;
   }
   const cwd = await workdir(args, folder);
   const lines = [{ t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'in ' + cwd }];
   if (DANGER.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data or change the system.' });
-  if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
+  if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command may print secrets. Its output is sent to your AI provider.' });
   const ow = outsideLine(command, await getTermuxPath(folder)); if (ow) lines.push(ow);
   return lines;
 }
@@ -266,7 +285,7 @@ export async function previewJob(args, folder) {
   const cwd = await workdir(args, folder);
   const lines = [{ t: 'ctx', text: 'background job "' + jobName(args.name) + '"' }, { t: 'ctx', text: '$ ' + command }, { t: 'ctx', text: 'in ' + cwd }];
   if (DANGER.test(command)) lines.push({ t: 'del', text: 'Warning: this command can delete data or change the system.' });
-  if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command prints a secret file. Its output is sent to your AI provider.' });
+  if (SECRET_READ.test(command)) lines.push({ t: 'del', text: 'Warning: this command may print secrets. Its output is sent to your AI provider.' });
   const ow = outsideLine(command, await getTermuxPath(folder)); if (ow) lines.push(ow);
   return lines;
 }

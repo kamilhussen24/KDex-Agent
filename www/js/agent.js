@@ -38,7 +38,7 @@ const PLAN_TOOL = {
     required: ['steps'],
   },
 };
-export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true, quietToasts: true, imageProvider: '', imageModel: '' };
+export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true, outsideAsk: 'server', quietToasts: true, imageProvider: '', imageModel: '' };
 
 export async function getSettings() {
   return { ...defaults, ...(await kvGet('settings', {})) };
@@ -697,8 +697,11 @@ export async function runTurn(ctx) {
           const lines = isJob ? await previewJob(call.args || {}, folder) : await previewTermux(call.args || {}, folder);
           const keys = allowKeys((call.args || {}).command);
           const risky = isRiskyCommand((call.args || {}).command, !!folder.remote);
-          const auto = (chat.auto && !risky) || (!risky && isAllowed((call.args || {}).command, chat.allow));
-          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : (folder.remote ? 'runs on the server' : 'runs in Termux'), added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky, outside: lines.some((l) => l.t === 'warn') };
+          const oa = (await getSettings()).outsideAsk;
+          const outside = lines.some((l) => l.t === 'warn');
+          const ask = risky || (outside && (oa === 'all' || (oa !== 'off' && !!folder.remote))); // outside the start folder: ask even in Auto
+          const auto = (chat.auto && !ask) || (!ask && isAllowed((call.args || {}).command, chat.allow));
+          tm.plan = { path: 'terminal', op: isJob ? 'starts in the background' : (folder.remote ? 'runs on the server' : 'runs in Termux'), added: 0, removed: 0, diff: lines, more: 0, allowKeys: keys, auto, risky, outside };
           let decision = 'apply';
           if (!auto) {
             tm.status = 'pending';

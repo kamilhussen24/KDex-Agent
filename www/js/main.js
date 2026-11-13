@@ -1466,6 +1466,7 @@ function openSettings() {
     '<label class="field"><span>Image model</span><input id="setImgModel" value="' + esc(st.imageModel || '') + '" placeholder="gpt-image-1" autocapitalize="off" autocomplete="off"><small>Lets the agent create pictures such as thumbnails and backgrounds with your own key. It always asks first, because each picture uses credits. Examples: gpt-image-1 or dall-e-3 (OpenAI), imagen-3.0-generate-002 (Gemini). Anthropic models cannot make pictures.</small></label>' +
     '<div class="h3">Files</div>' +
     '<div class="field"><span>Approvals in new chats</span>' + seg('setAutoDef', [['0', 'Ask first'], ['1', 'Auto']], st.autoDefault ? '1' : '0') + '<small>Auto runs file changes, zip, commits and everyday commands without asking. Deleting data, sudo, force push, publishing and similar risky actions still ask. You can switch any chat with the chip above the messages. Backups and Undo always work.</small></div>' +
+    '<div class="field"><span>Commands outside the start folder</span>' + seg('setOut', [['server', 'Ask on servers'], ['all', 'Ask always'], ['off', 'Off']], st.outsideAsk || 'server') + '<small>A command that touches a path outside the start folder is marked in yellow. With Ask, it waits for your approval even in Auto mode. Everyday commands inside the folder are not affected.</small></div>' +
     '<div class="field"><span>Protect secret files</span>' + seg('setProt', [['1', 'On'], ['0', 'Off']], st.protectSecrets !== false ? '1' : '0') + '<small>.env files, keys and credentials stay hidden from the agent and the chat. The agent can still run your project with them. Secret values are removed from terminal output, and new secret files are never committed automatically.</small></div>' +
     '<div class="h3">Appearance</div>' + '<div class="field">' + seg('setTheme', [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], st.theme) + '</div>' +
     '<div class="field"><span>Notifications</span>' + seg('setQuiet', [['1', 'Quiet'], ['0', 'All']], st.quietToasts !== false ? '1' : '0') + '<small>Quiet shows only errors, warnings and results of long tasks like push, pull, clone and backup. All also shows short confirmations.</small></div>' +
@@ -1487,7 +1488,7 @@ function openSettings() {
   drawUpdate(body); $('#licBtn', body).onclick = openLicenses;
   const bindSeg = (id, fn) => $$('#' + id + ' .btn', body).forEach((b) => b.onclick = () => { $$('#' + id + ' .btn', body).forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v); });
   bindSeg('setMode', (v) => { save({ mode: v }).then(() => drawRing()); }); bindSeg('setThink', (v) => save({ defaultThink: v }));
-  bindSeg('setProt', (v) => save({ protectSecrets: v === '1' })); bindSeg('setAutoDef', (v) => save({ autoDefault: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
+  bindSeg('setProt', (v) => save({ protectSecrets: v === '1' })); bindSeg('setOut', (v) => save({ outsideAsk: v })); bindSeg('setAutoDef', (v) => save({ autoDefault: v === '1' })); bindSeg('setLearn', (v) => save({ autoLearn: v === '1' }));
   const drawAF = async () => {
     const box = $('#afBox'); if (!box) return;
     const st2 = await AllFiles.status();

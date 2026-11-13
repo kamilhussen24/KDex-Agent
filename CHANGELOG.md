@@ -7,6 +7,16 @@ for its version.
 
 ## [Unreleased]
 
+## [1.49.6]
+
+### Security
+- Terminal and server commands that can print secrets now always ask, even in Auto mode and even after "Always allow". This covers any command that mentions a secret file (`.env`, keys, `~/.ssh`, `~/.aws`, `~/.docker`, shell history, `/etc/shadow`, `/proc/*/environ`, and so on), whatever the program is, and commands that dump the environment (`printenv`, `env`, `pm2 env/show/jlist`, `docker inspect`, `systemctl show`, `history`, `kubectl get secret`).
+- Command output now hides private key blocks, well-known token shapes (OpenAI, Anthropic, GitHub, AWS, Slack, Google, JWT, Bearer) and values of secret-named variables (`TOKEN=`, `PASSWORD=`, JSON `"apiKey": ...`), even when the secret is not in the start folder. This follows the "Protect secret files" setting.
+- New setting "Commands outside the start folder": a command that touches a path outside the start folder asks first, even in Auto mode. Choices: Ask on servers (default), Ask always, Off. Commands inside the folder are not affected.
+
+### Changed
+- The secret warning on command cards now reads "this command may print secrets".
+
 ## [1.49.5]
 
 ### Changed
