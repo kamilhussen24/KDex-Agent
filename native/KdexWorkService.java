@@ -1,4 +1,4 @@
-package com.kdex.agent;
+package com.kamildex.agent;
 
 import android.app.Notification;
 import android.app.NotificationChannel;

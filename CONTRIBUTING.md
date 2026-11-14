@@ -52,6 +52,9 @@ Native features (Keystore, real folders, Git on real repositories, notifications
 - [ ] No keys, tokens or personal data in code, logs or screenshots.
 - [ ] `CHANGELOG.md` updated.
 
+## Before you add a feature
+Anything that needs a new Android permission, a new foreground service type, installing or updating APKs, or sending a new kind of user data off the phone must be said in the pull request and in `PRIVACY.md`. Check the current Android documentation first, because the rules change.
+
 ## Where things are
 See "Repository layout" in the [README](README.md#how-it-works). Good starting points: `www/js/agent.js` (the tool loop), `www/js/tools.js` (file tools), `www/js/providers.js` (add a provider), `www/js/main.js` (UI).
 

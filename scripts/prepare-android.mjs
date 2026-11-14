@@ -15,7 +15,7 @@ const vm = /^(\d+)\.(\d+)\.(\d+)/.exec(versionName);
 const fromVersion = vm ? Number(vm[1]) * 1000000 + Number(vm[2]) * 1000 + Number(vm[3]) : 1;
 const versionCode = Number(process.env.APP_VERSION_CODE || fromVersion);
 const res = path.join(android, 'app/src/main/res');
-const javaDir = path.join(android, 'app/src/main/java/com/kdex/agent');
+const javaDir = path.join(android, 'app/src/main/java/com/kamildex/agent');
 const read = (p) => fs.readFileSync(p, 'utf8');
 const write = (p, t) => fs.writeFileSync(p, t);
 
@@ -30,7 +30,7 @@ if (useJgit) fs.copyFileSync(path.join(root, 'native/KdexGit.java'), path.join(j
 const useRemote = process.env.KDEX_REMOTE !== '0';
 if (useRemote) fs.copyFileSync(path.join(root, 'native/KdexRemote.java'), path.join(javaDir, 'KdexRemote.java'));
 write(path.join(javaDir, 'MainActivity.java'),
-`package com.kdex.agent;
+`package com.kamildex.agent;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

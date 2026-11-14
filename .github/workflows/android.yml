@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: "debug = test APK, release = signed APK (share directly), release-aab = signed bundle for Google Play"
+        description: "debug = test APK, release = signed APK (share directly)"
         type: choice
-        options: [debug, release, release-aab]
+        options: [debug, release]
         default: debug
   push:
     tags: ["v*"]
@@ -100,20 +100,14 @@ jobs:
           chmod +x gradlew
           case "$BUILD_TYPE" in
             release) ./gradlew assembleRelease --no-daemon ;;
-            release-aab) ./gradlew bundleRelease --no-daemon ;;
             *) ./gradlew assembleDebug --no-daemon ;;
           esac
 
       - name: Collect APK
         run: |
           mkdir -p out
-          if [ "$BUILD_TYPE" = "release-aab" ]; then
-            f=$(find android/app/build/outputs/bundle -name "*.aab" | head -n1)
-            cp "$f" "out/KDex-Agent-release.aab"
-          else
-            f=$(find android/app/build/outputs/apk -name "*.apk" | head -n1)
-            cp "$f" "out/KDex-Agent-${BUILD_TYPE}.apk"
-          fi
+          f=$(find android/app/build/outputs/apk -name "*.apk" | head -n1)
+          cp "$f" "out/KDex-Agent-${BUILD_TYPE}.apk"
           ls -lh out
 
       - uses: actions/upload-artifact@v4

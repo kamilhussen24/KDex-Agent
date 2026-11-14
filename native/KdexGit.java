@@ -1,4 +1,4 @@
-package com.kdex.agent;
+package com.kamildex.agent;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeResult;

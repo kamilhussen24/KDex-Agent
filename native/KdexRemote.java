@@ -1,4 +1,4 @@
-package com.kdex.agent;
+package com.kamildex.agent;
 
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.ChannelSftp;

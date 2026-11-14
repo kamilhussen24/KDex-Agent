@@ -7,6 +7,20 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.5]
+
+### Changed
+- Small internal cleanup in the folder sheet. No change in how the app looks or works.
+
+## [1.52.4]
+
+### Changed
+- The app id (package name) is now `com.kamildex.agent`, matching kamildex.com. Android treats it as a new app: install it next to the old KDex Agent, enter your keys again, grant the Termux permission again, then remove the old one.
+- KDex Agent is shipped only as an APK from GitHub Releases.
+
+### Added
+- Reports of AI replies now open an email draft to support@kamildex.com.
+
 ## [1.51.3]
 
 ### Fixed

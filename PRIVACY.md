@@ -35,4 +35,4 @@ The app is not directed to children under 13.
 If this policy changes, the new version is published in the repository and the date above is updated.
 
 ## Contact
-KDex - https://kamildex.com, or open an issue at https://github.com/kamilhussen24/KDex-Agent/issues (do not post keys or private data).
+KDex - https://kamildex.com, support@kamildex.com, or open an issue at https://github.com/kamilhussen24/KDex-Agent/issues (do not post keys or private data).

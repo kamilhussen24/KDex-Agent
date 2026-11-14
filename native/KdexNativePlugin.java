@@ -1,4 +1,4 @@
-package com.kdex.agent;
+package com.kamildex.agent;
 
 import android.app.Activity;
 import android.content.BroadcastReceiver;
@@ -159,7 +159,7 @@ public class KdexNativePlugin extends Plugin {
         if (getPermissionState("termux") != PermissionState.GRANTED) { call.reject("Permission \"Run commands in Termux\" is not granted."); return; }
 
         final Context ctx = getContext();
-        final String action = "com.kdex.agent.TERMUX_RESULT." + System.nanoTime();
+        final String action = "com.kamildex.agent.TERMUX_RESULT." + System.nanoTime();
         final Handler handler = new Handler(Looper.getMainLooper());
         final boolean[] done = {false};
 
@@ -933,7 +933,7 @@ public class KdexNativePlugin extends Plugin {
                 String rel = call.getString("path", "");
                 args.put("dir", fileFor(root, rel).getAbsolutePath());
                 System.setProperty("user.home", new File(getContext().getFilesDir(), "jgit-home").getAbsolutePath());
-                Class<?> k = Class.forName("com.kdex.agent.KdexGit");
+                Class<?> k = Class.forName("com.kamildex.agent.KdexGit");
                 java.lang.reflect.Method m = k.getMethod("run", String.class, Map.class, String.class, java.util.function.Consumer.class);
                 java.util.function.Consumer<Object[]> sink = x -> {
                     try {
@@ -970,7 +970,7 @@ public class KdexNativePlugin extends Plugin {
                     Iterator<String> keys = a.keys();
                     while (keys.hasNext()) { String k = keys.next(); args.put(k, a.isNull(k) ? "" : String.valueOf(a.get(k))); }
                 }
-                Class<?> k = Class.forName("com.kdex.agent.KdexRemote");
+                Class<?> k = Class.forName("com.kamildex.agent.KdexRemote");
                 java.lang.reflect.Method m = k.getMethod("run", String.class, Map.class);
                 Object r = m.invoke(null, op, args);
                 Object j = toJson(r);
@@ -990,7 +990,7 @@ public class KdexNativePlugin extends Plugin {
     @PluginMethod
     public void gitCancel(PluginCall call) {
         try {
-            Class<?> k = Class.forName("com.kdex.agent.KdexGit");
+            Class<?> k = Class.forName("com.kamildex.agent.KdexGit");
             k.getMethod("cancel", String.class).invoke(null, call.getString("id", ""));
         } catch (Throwable t) { /* nothing to cancel */ }
         call.resolve();
