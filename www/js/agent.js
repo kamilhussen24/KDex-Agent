@@ -94,6 +94,7 @@ export async function runtimeFor(modelId) {
   const provider = (await getProviders()).find((p) => p.id === m.providerId);
   if (!provider) throw new Error('The provider for this model was removed. Pick another model.');
   const apiKey = await secure.get(keyName(provider.id));
+  if (!apiKey && secure.wasUnreadable(keyName(provider.id))) throw new Error('The saved key for ' + provider.name + " can't be read on this phone. Add it again in Settings.");
   if (!apiKey) throw new Error('No API key saved for ' + provider.name + '. Add it in Settings.');
   return { model: m, provider, apiKey, apiModel: m.apiModel };
 }

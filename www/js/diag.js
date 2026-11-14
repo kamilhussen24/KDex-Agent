@@ -1,6 +1,7 @@
 // Diagnostics log: a small, private ring buffer of what the app did and what failed.
 // Stays on this phone. Secrets are masked before anything is stored.
 import { kvGet, kvSet } from './db.js';
+import { redactPatterns } from './secrets.js';
 
 const MAX = 200;
 const DAYS = 7;
@@ -10,7 +11,7 @@ let timer = null;
 
 /** Masks tokens and keys so a copied log is safe to share. */
 export function scrub(text) {
-  return String(text == null ? '' : text)
+  return redactPatterns(String(text == null ? '' : text))
     .replace(/(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}/g, '$1_***')
     .replace(/\bglpat-[A-Za-z0-9_-]{12,}/g, 'glpat-***')
     .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, 'sk-***')

@@ -1,6 +1,6 @@
 // Bridge to the native Android plugin, with a browser fallback so the UI can be developed and tested
 // in a normal browser (in-memory folder, fetch for HTTP).
-import { uid } from './util.js';
+import { uid, netText } from './util.js';
 import { isScratchUri, scratchFs } from './scratch.js';
 import { isRemoteUri, remoteFs, initRemote } from './remote.js';
 
@@ -9,9 +9,12 @@ export const isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform()
 const plugin = isNative ? cap.registerPlugin('KdexNative') : null;
 
 // ---------------------------------------------------------------- secure storage
+/** Keys the phone stored but could not decrypt (so they are missing for a different reason than never saved). */
+const unreadable = new Set();
 export const secure = {
+  wasUnreadable(key) { return unreadable.has(key); },
   async get(key) {
-    if (plugin) { const r = await plugin.secureGet({ key }); return r && r.value != null ? r.value : null; }
+    if (plugin) { const r = await plugin.secureGet({ key }); if (r && r.unreadable) unreadable.add(key); else unreadable.delete(key); return r && r.value != null ? r.value : null; }
     try { const v = localStorage.getItem('sec:' + key); return v === null ? null : v; } catch (e) { return null; }
   },
   async set(key, value) {
@@ -61,7 +64,8 @@ function bytesToB64(u8) {
  */
 export async function httpRaw({ url, method = 'POST', headers = {}, body = null, signal, noRedirect = false }) {
   if (!plugin) {
-    const res = await fetch(url, { method, headers, body, signal });
+    let res;
+    try { res = await fetch(url, { method, headers, body, signal }); } catch (e) { if (e && e.name === 'AbortError') throw e; throw new Error(netText(e) || (e && e.message) || 'Network error'); }
     const hdrs = {}; res.headers.forEach((v, k) => { hdrs[k] = v; });
     const reader = res.body ? res.body.getReader() : null;
     return {
@@ -88,7 +92,7 @@ export async function httpRaw({ url, method = 'POST', headers = {}, body = null,
     if (ev.type === 'head') { status = ev.status; respHeaders = ev.headers || {}; headResolve(); return; }
     if (ev.type === 'chunk') queue.push(b64ToBytes(ev.b64));
     else if (ev.type === 'end') { finished = true; headResolve(); }
-    else if (ev.type === 'error') { failure = new Error(ev.message || 'Network error'); finished = true; headResolve(); }
+    else if (ev.type === 'error') { failure = new Error(netText(ev.message) || ev.message || 'Network error'); finished = true; headResolve(); }
     if (wake) { const w = wake; wake = null; w(); }
   });
 
@@ -100,7 +104,7 @@ export async function httpRaw({ url, method = 'POST', headers = {}, body = null,
 
   const req = { id, url, method, headers, noRedirect: !!noRedirect };
   if (body instanceof Uint8Array) req.bodyB64 = bytesToB64(body); else if (body != null) req.body = body;
-  await plugin.httpStart(req);
+  try { await plugin.httpStart(req); } catch (e) { waiters.delete(id); throw new Error(netText(e) || (e && e.message) || 'Network error'); }
   await headReady;
   if (failure && !status) { waiters.delete(id); throw failure; }
 

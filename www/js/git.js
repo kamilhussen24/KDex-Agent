@@ -4,6 +4,7 @@
 import { fs as safFs, httpRaw, secure, subUri, gitNative } from './native.js';
 import { kvGet, kvSet } from './db.js';
 import { lineDiff, BINARY_EXT } from './tools.js';
+import { netText } from './util.js';
 import { isSecretPath, protectionOn } from './secrets.js';
 
 const git = () => window.git;
@@ -190,6 +191,7 @@ function nice(e, { host = '', hasToken = false, action = '', remote = [] } = {})
   let m = String((e && e.message) || e);
   const refusal = explainRefusal(m, remote);
   if (refusal) return new Error(refusal);
+  if (netText(e) || netText(m)) return new Error('No connection' + (host ? ' to ' + host : '') + '. Check your internet and try again.');
   const sub = e && Array.isArray(e.errors) ? e.errors.map((x) => String((x && x.message) || x)).join('; ') : '';
   if (sub) m = sub;
   const status = (e && e.data && e.data.statusCode) || (/\b(401|403|404|429|5\d\d)\b/.exec(m) || [])[1];

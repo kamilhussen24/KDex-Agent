@@ -7,6 +7,23 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.11]
+
+### Added
+- Adding a provider with the same address and the same key as one you already have is refused with a clear message. The same address with a different key is allowed and gets a numbered name.
+- When a saved API key cannot be read back from the phone's secure storage, the error says so and asks you to add it again, instead of claiming no key was saved.
+- Copying a chat that contains something that looks like a key or token now asks first.
+
+### Changed
+- The diagnostics log hides secrets with the same, wider rules used for files and commands.
+
+## [1.52.10]
+
+### Changed
+- With no internet, Git, servers, providers, the web tool and GitHub now say "No internet connection. Connect and try again." (Git names the host) instead of raw Java and network errors.
+- The ongoing notification reads "Waiting for connection" while the agent waits for the network, and "Working on your request" again once it is back.
+- A server that cannot be reached (no route, or the connection fails) now has its own plain message.
+
 ## [1.52.9]
 
 ### Changed

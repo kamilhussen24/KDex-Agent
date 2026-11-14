@@ -79,8 +79,11 @@ public class KdexRemote {
         String l = m.toLowerCase();
         if (l.contains("auth fail") || l.contains("auth cancel")) return new Exception("The server refused the sign-in. Check the user name and the password or key.");
         if (l.contains("unknownhost") || l.contains("unknown host") || l.contains("nodename nor servname") || l.contains("unresolved")) return new Exception("Could not find that host. Check the address.");
+        if (l.contains("enetunreach") || l.contains("network is unreachable") || l.contains("network unreachable")) return new Exception("No internet connection. Connect and try again.");
+        if (l.contains("no route to host") || l.contains("ehostunreach")) return new Exception("Could not reach the server. Check the address and that it is online.");
         if (l.contains("timeout") || l.contains("timed out")) return new Exception("The server did not answer in time. Check the address, the port and your connection.");
         if (l.contains("refused")) return new Exception("The server refused the connection. Check the port, and that SSH is running.");
+        if (l.contains("failed to connect") || l.contains("connect failed")) return new Exception("Could not connect to the server. Check the address, the port and your connection.");
         if (l.contains("invalid privatekey") || l.contains("invalid private key") || l.contains("privatekey")) return new Exception("This key cannot be read. Use an RSA or ECDSA key in PEM or OpenSSH format, or sign in with a password. Ed25519 keys are not supported yet.");
         if (l.contains("changed")) return new Exception(m);
         return new Exception(m.isEmpty() || m.equals("null") ? e.getClass().getSimpleName() : m);

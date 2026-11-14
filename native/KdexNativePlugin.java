@@ -267,6 +267,7 @@ public class KdexNativePlugin extends Plugin {
             ret.put("value", new String(pt, StandardCharsets.UTF_8));
         } catch (Exception e) {
             ret.put("value", JSObject.NULL); // unreadable (for example after a restore): treat as missing
+            ret.put("unreadable", true);
         }
         call.resolve(ret);
     }

@@ -12,7 +12,7 @@ import * as CI from './ci.js';
 import { renderMarkdown } from './md.js';
 import * as A from './agent.js';
 import * as G from './git.js';
-import { isSecretPath, isEnvLike, maskEnv, protectionOn, scrub } from './secrets.js';
+import { isSecretPath, isEnvLike, maskEnv, protectionOn, scrub, redactPatterns } from './secrets.js';
 import { SUPPORT_EMAIL, APP_VERSION } from './config.js';
 import { checkUpdate, isNewer, REPO_URL } from './update.js';
 import { officeText, isOffice, isPdf, pdfText, PDF_MAX_BYTES } from './docs.js';
@@ -298,7 +298,12 @@ function showSetup(first, title) {
     if (!key) { msg.innerHTML = '<div class="err">Enter your API key.</div>'; return; }
     const picked = [...new Set(getPicked())].slice(0, 20);
     if (!picked.length) { msg.innerHTML = '<div class="err">Pick or type at least one model.</div>'; return; }
-    const prov = { id: uid(), name, type: preset.type, baseUrl };
+    const same = (u) => String(u || '').trim().replace(/\/+$/, '').toLowerCase();
+    for (const q of S.providers) {
+      if (same(q.baseUrl) === same(baseUrl) && await secure.get(A.keyName(q.id)) === key) { msg.innerHTML = '<div class="err">This provider is already added (' + esc(q.name) + '). Add more models from its card in Settings.</div>'; return; }
+    }
+    let uniq = name; for (let n = 2; S.providers.some((q) => q.name === uniq); n++) uniq = name + ' (' + n + ')';
+    const prov = { id: uid(), name: uniq, type: preset.type, baseUrl };
     await secure.set(A.keyName(prov.id), key);
     S.providers.push(prov); await A.saveProviders(S.providers);
     picked.forEach((api) => S.models.push({ id: uid(), providerId: prov.id, apiModel: api, label: api + (S.providers.length > 1 ? ' (' + prov.name + ')' : '') }));
@@ -741,7 +746,7 @@ async function send(regenerate) {
     onTool: (m) => { if (!here()) return; renderMsg(m); if (m.status === 'applied' || m.status === 'rejected') updateChangesChip(); else if (m.name === 'make_file' && m.status === 'done') drawScratch(); },
     takeQueued: async () => { const q = S.queue.splice(0); drawQueue(); return q; }, hasQueued: () => S.queue.length > 0,
     requestSecret: (info, signal) => askSecret(info, signal), askUser: (q, opts, signal) => { Work.needs('A question is waiting for you', chat.id); return askChoice(q, opts, signal); }, watchBuild: (folder, sha, label) => { CI.watchBuild(folder, sha, label); },
-    onNotice: (t) => { if (/^No connection/i.test(t)) netLine('Offline. Waiting to reconnect...'); else if (/^Back online/i.test(t)) netLine(''); else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t, { kind: 'warn' }); }, onMemory: (n) => toast('Remembered: ' + n[0]),
+    onNotice: (t) => { if (/^No connection/i.test(t)) { netLine('Offline. Waiting to reconnect...'); Work.start('Waiting for connection'); } else if (/^Back online/i.test(t)) { netLine(''); Work.start('Working on your request'); } else if (/busy/i.test(t)) netLine('The provider is busy. Trying again...'); else toast(t, { kind: 'warn' }); }, onMemory: (n) => toast('Remembered: ' + n[0]),
     requestApproval: (tm, signal) => new Promise((resolve) => {
       const first = !pendingCount(); S.approvals.set(tm.id, resolve); S.approvalTm.set(tm.id, tm); updateApproveBar();
       if (first) Work.needs('Waiting for your approval', chat.id);
@@ -1862,6 +1867,7 @@ async function openUsage() {
 async function exportChat() {
   const msgs = (await db.byIndex('messages', 'chatId', S.chat.id)).sort((a, b) => a.id - b.id);
   const t = msgs.filter((m) => m.role === 'user' || m.role === 'assistant').map((m) => (m.role === 'user' ? 'You' : 'KDex') + ':\n' + (m.text || '')).join('\n\n');
+  if (redactPatterns(t) !== t && !await confirmBox('Copy chat?', 'This chat has what looks like a key or token. Its text goes to the clipboard, where other apps can read it.', 'Copy')) return;
   toast(await copyText(t) ? 'Chat copied to clipboard' : 'Could not copy');
 }
 
