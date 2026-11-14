@@ -81,7 +81,14 @@ export async function copyText(text) {
 
 /** Phone has no internet or the host cannot be reached: one plain sentence, or '' when the error is something else. */
 export const NO_NET = 'No internet connection. Connect and try again.';
-const NET_ERR = /ENETUNREACH|network is unreachable|unable to resolve host|UnknownHost|unknown host|No address associated|nodename nor servname|ENOTFOUND|EAI_AGAIN|Failed to fetch|NetworkError|Load failed|Software caused connection abort|connect failed|failed to connect|No route to host|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK/i;
+const NET_ERR = /ENETUNREACH|network is unreachable|unable to resolve host|UnknownHost|unknown host|No address associated|nodename nor servname|ENOTFOUND|EAI_AGAIN|Failed to fetch|NetworkError|Load failed|Software caused connection abort|No route to host|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK/i;
+/** The server was reached by name but would not take the connection (wrong address or port, server down). */
+export function connText(e, url) {
+  const m = String((e && e.message) || e || '');
+  if (!/failed to connect|connect failed|ConnectException|connection refused|ECONNREFUSED/i.test(m)) return '';
+  let host = ''; try { host = new URL(url).host; } catch (x) { /* no url */ }
+  return 'Could not connect to ' + (host || 'the server') + '. Check the address and that it is online.';
+}
 export function netText(e) {
   const m = String((e && e.message) || e || '');
   return NET_ERR.test(m) ? NO_NET : '';

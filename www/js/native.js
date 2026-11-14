@@ -1,6 +1,6 @@
 // Bridge to the native Android plugin, with a browser fallback so the UI can be developed and tested
 // in a normal browser (in-memory folder, fetch for HTTP).
-import { uid, netText } from './util.js';
+import { uid, netText, connText } from './util.js';
 import { isScratchUri, scratchFs } from './scratch.js';
 import { isRemoteUri, remoteFs, initRemote } from './remote.js';
 
@@ -92,7 +92,7 @@ export async function httpRaw({ url, method = 'POST', headers = {}, body = null,
     if (ev.type === 'head') { status = ev.status; respHeaders = ev.headers || {}; headResolve(); return; }
     if (ev.type === 'chunk') queue.push(b64ToBytes(ev.b64));
     else if (ev.type === 'end') { finished = true; headResolve(); }
-    else if (ev.type === 'error') { failure = new Error(netText(ev.message) || ev.message || 'Network error'); finished = true; headResolve(); }
+    else if (ev.type === 'error') { failure = new Error(netText(ev.message) || connText(ev.message, url) || ev.message || 'Network error'); finished = true; headResolve(); }
     if (wake) { const w = wake; wake = null; w(); }
   });
 
@@ -104,7 +104,7 @@ export async function httpRaw({ url, method = 'POST', headers = {}, body = null,
 
   const req = { id, url, method, headers, noRedirect: !!noRedirect };
   if (body instanceof Uint8Array) req.bodyB64 = bytesToB64(body); else if (body != null) req.body = body;
-  try { await plugin.httpStart(req); } catch (e) { waiters.delete(id); throw new Error(netText(e) || (e && e.message) || 'Network error'); }
+  try { await plugin.httpStart(req); } catch (e) { waiters.delete(id); throw new Error(netText(e) || connText(e, url) || (e && e.message) || 'Network error'); }
   await headReady;
   if (failure && !status) { waiters.delete(id); throw failure; }
 

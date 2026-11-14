@@ -4,7 +4,7 @@
 import { fs as safFs, httpRaw, secure, subUri, gitNative } from './native.js';
 import { kvGet, kvSet } from './db.js';
 import { lineDiff, BINARY_EXT } from './tools.js';
-import { netText } from './util.js';
+import { netText, connText } from './util.js';
 import * as D from './diag.js';
 import { isSecretPath, protectionOn } from './secrets.js';
 
@@ -215,9 +215,10 @@ export function explainRefusal(m, lines) {
 function nice(e, { host = '', hasToken = false, action = '', remote = [], branch = '' } = {}) {
   let m = String((e && e.message) || e);
   if (action === 'clone' && branch && /could not find|not found in upstream|remote (branch|ref)|couldn.t find remote ref|NotFoundError/i.test(m) && !/repository not found/i.test(m)) return new Error('Branch \'' + branch + '\' was not found in this repository. Check the name, or leave the branch empty to use the default.');
-  try { D.log('git', (action || 'git') + (host ? ' ' + host : '') + ': ' + m.slice(0, 600)); } catch (x) { /* log is optional */ }
+  if (!/aborted|cancel/i.test(m)) { try { D.log('git', (action || 'git') + (host ? ' ' + host : '') + ': ' + m.slice(0, 600)); } catch (x) { /* log is optional */ } }
   const refusal = explainRefusal(m, remote);
   if (refusal) return new Error(refusal);
+  { const ct = connText(m, host ? 'https://' + host : ''); if (ct) return new Error(ct); }
   if (netText(e) || netText(m)) return new Error('No connection' + (host ? ' to ' + host : '') + '. Check your internet and try again.');
   const sub = e && Array.isArray(e.errors) ? e.errors.map((x) => String((x && x.message) || x)).join('; ') : '';
   if (sub) m = sub;
@@ -238,7 +239,7 @@ function nice(e, { host = '', hasToken = false, action = '', remote = [], branch
   if (st >= 500) return new Error('The server' + where + ' had a problem (HTTP ' + st + '). Try again later.');
   if (/exceeds.*file size limit|GH001|large files detected|too large/i.test(m)) return new Error('Push refused: a file is larger than the host allows (GitHub: 100 MB). Remove it from the commit or use Git LFS on a computer. ' + m.slice(0, 200));
   if (/protected branch|GH006|pre-receive hook declined|hook declined/i.test(m)) return new Error('Push refused by the server: the branch is protected or a rule blocked it. Push to another branch and open a pull request. ' + m.slice(0, 200));
-  if (/Failed to fetch|NetworkError|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|timed? ?out|offline|Load failed|UnknownHost|Connection refused|SocketTimeout|connect timed out|Unable to resolve|Software caused connection abort/i.test(m)) return new Error('No connection to ' + (host || 'the server') + '. Check the internet and try again.');
+  if (/Failed to fetch|NetworkError|network (is )?(unreachable|error)|ENOTFOUND|ETIMEDOUT|timed? ?out|offline|Load failed|UnknownHost|SocketTimeout|connect timed out|Unable to resolve|Software caused connection abort/i.test(m)) return new Error('No connection to ' + (host || 'the server') + '. Check the internet and try again.');
   if (/ENOSPC|quota|no space/i.test(m)) return new Error('The phone is out of storage space.');
   if (/permission|EACCES|SecurityException/i.test(m)) return new Error('Android denied access to the folder. Open the folder again from the folder chip to grant access.');
   if (/TransportException|JGitInternalException|SSLHandshake|SSLException|SSLPeer|CertPath|cannot open git-/i.test(m)) {

@@ -1927,6 +1927,7 @@ function explainGitError(text) {
   if (/Local changes would be overwritten/i.test(t)) return { title: 'Local changes in the way', body: 'Commit or discard your changes first, then try again.' };
   if (/Push refused|Push was rejected|protected branch|secret/i.test(t)) { const m = /^(.{8,70}?[.:])\s+(.+)$/s.exec(t); return m ? { title: m[1].replace(/[.:]$/, ''), body: m[2] } : { title: 'Push refused', body: t }; }
   const m = /^(.{8,70}?[.!?])\s+(.+)$/s.exec(t);
+  if (!m && t.length <= 60) return { title: t.replace(/[.]$/, ''), body: '' };
   return m ? { title: m[1].replace(/[.]$/, ''), body: m[2] } : { title: 'Git could not finish', body: t };
 }
 function errLine(text, opts = {}) {
@@ -1935,7 +1936,7 @@ function errLine(text, opts = {}) {
   const x = explainGitError(text);
   const fixBtn = x.fix === 'pull' ? '<button class="btn sm" data-fx="pull">' + ICON('down') + '<span class="lbl">Pull now</span></button>'
     : x.fix === 'retry' && opts.retry ? '<button class="btn sm" data-fx="retry">' + ICON('refresh') + '<span class="lbl">Retry</span></button>' : '';
-  el.innerHTML = '<div class="gerr"><span class="gic">' + ICON('alert') + '</span><div class="gtx"><div class="gt1">' + esc(x.title) + '</div><div class="gt2">' + esc(midCut(x.body)).replace(/\n/g, '<br>') + '</div>' +
+  el.innerHTML = '<div class="gerr"><span class="gic">' + ICON('alert') + '</span><div class="gtx"><div class="gt1">' + esc(x.title) + '</div>' + (x.body ? '<div class="gt2">' + esc(midCut(x.body)).replace(/\n/g, '<br>') + '</div>' : '') +
     (fixBtn ? '<div class="erract">' + fixBtn + '</div>' : '') + '</div></div>';
   $$('[data-fx]', el).forEach((b) => b.onclick = () => {
     const f = S.folder; const k = b.dataset.fx;
@@ -2127,7 +2128,7 @@ function bindGit(folder, st, body) {
   };
   if ($('#gCommit')) {
     syncCommit(st);
-    const ta = $('#gMessage'); ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 96) + 'px'; };
+    const ta = $('#gMessage'); ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 96) + 'px'; syncCommit(st); };
     $('#gReview').onclick = () => { if (!S.models.length) { noModelNotice(); return; } closeSheet(); quickSend('Review my uncommitted changes before I commit: call review_changes, check what it spotted, then report_findings.'); };
     $('#gSuggest').onclick = async () => {
       const hint = (m) => { const h = $('#gHint'); if (!h) return; h.textContent = m; clearTimeout(h._t); h._t = setTimeout(() => { h.textContent = ''; }, 5000); };
@@ -2138,6 +2139,10 @@ function bindGit(folder, st, body) {
     };
     $('#gCommit').onclick = async () => {
       let paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p));
+      if (!ta.value.trim()) { // no message yet: fill in a plain one to review, do not commit
+        ta.value = draftMessage(st.changes.filter((c) => paths.includes(c.path))); ta.oninput(); ta.focus(); ta.select();
+        return;
+      }
       const found = await G.scanSecrets(folder, st.changes.filter((c) => paths.includes(c.path)));
       const unchecked = found.skipped || 0;
       if (unchecked && !found.length) toast('Secret scan checked the first 300 files: ' + unchecked + ' more were not checked. Review them before pushing.', { kind: 'warn' });
@@ -2173,7 +2178,22 @@ function bindGit(folder, st, body) {
 }
 function syncCommit(st) {
   const n = st.changes.filter((c) => GS.sel.has(c.path)).length; const b = $('#gCommit'); if (!b) return;
+  const ta = $('#gMessage'); const empty = !(ta && ta.value.trim());
   b.disabled = !n; b.querySelector('.lbl').textContent = n ? 'Commit ' + n + ' staged' : 'Stage files first';
+  b.classList.toggle('idle', !!n && empty); // pale until a message is written
+}
+/** A plain starting message from the staged files, for when the box is empty. */
+function draftMessage(changes) {
+  const base = (p) => String(p).split('/').pop();
+  const by = { new: [], modified: [], deleted: [] };
+  changes.forEach((c) => (by[c.kind] || by.modified).push(base(c.path)));
+  const total = changes.length;
+  const verbs = [['new', 'Add'], ['modified', 'Update'], ['deleted', 'Remove']].filter(([k]) => by[k].length);
+  let msg;
+  if (total <= 3) msg = verbs.map(([k, v], i) => (i ? v.toLowerCase() : v) + ' ' + by[k].join(', ')).join(', ');
+  else if (verbs.length === 1) msg = verbs[0][1] + ' ' + total + ' files';
+  else msg = 'Update ' + total + ' files: ' + verbs.map(([k]) => by[k].length + ' ' + ({ new: 'new', modified: 'changed', deleted: 'removed' })[k]).join(', ');
+  return msg.length > 72 ? msg.slice(0, 69).trimEnd() + '...' : msg;
 }
 /** Private input for a secret value. Resolves with the text, or null on Skip. The value never touches the chat. */
 function askSecret(info, signal) {

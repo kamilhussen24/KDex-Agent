@@ -7,6 +7,17 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.18]
+
+### Changed
+- Git > Changes: the Commit button is pale while the message box is empty and turns bright once there is a message. Tapping it with an empty box fills in a plain starting message from the staged files and puts the cursor there instead of showing an error. Suggest works as before.
+- A short Git notice such as "Write a commit message." no longer sits under the heading "Git could not finish".
+- "Failed to connect" and "connection refused" are no longer reported as "No internet connection". They now say the server could not be reached and to check the address (providers, web requests and Git).
+
+### Fixed
+- Cancelled Git actions are no longer written to Diagnostics.
+- A Git error that only contained the word "network" was shown as "No connection". Only real network failures are now.
+
 ## [1.52.17]
 
 ### Fixed
