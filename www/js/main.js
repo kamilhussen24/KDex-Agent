@@ -533,6 +533,7 @@ function renderMsg(m) {
   const empty = $('.empty', box); if (empty) empty.remove();
   let el = S.els.get(m.id);
   if (!el) { el = document.createElement('div'); el.dataset.id = m.id; S.els.set(m.id, el); box.appendChild(el); }
+  el.style.display = m.auto || (m.role === 'assistant' && m.empty && !m.text && !m.thought) ? 'none' : '';
   if (m.role === 'user') {
     el.className = 'msg user';
     el.innerHTML = (m.images && m.images.length ? '<div class="thumbs">' + m.images.map((i) => '<img alt="" src="data:' + i.mime + ';base64,' + i.data + '">').join('') + '</div>' : m.imagesRemoved ? '<div class="gone">' + m.imagesRemoved + ' picture' + (m.imagesRemoved > 1 ? 's' : '') + ' removed</div>' : '') +
@@ -566,7 +567,7 @@ function renderMsg(m) {
   }
   scrollEnd();
 }
-const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', find_symbol: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file', project_map: 'folder', project_checks: 'list', check_tools: 'terminal', github_runs: 'branch', github_run_log: 'branch', github_issues: 'branch', calculate: 'list', convert_units: 'list', remember: 'file', clipboard_read: 'file', clipboard_write: 'file', set_alarm: 'list', set_timer: 'list', generate_image: 'file', pre_push_check: 'list', bump_version: 'edit', release: 'up', release_info: 'list', review_changes: 'search', report_findings: 'list' };
+const TOOL_ICON = { git_status: 'branch', git_diff: 'branch', git_log: 'branch', git_commit: 'branch', git_push: 'up', git_pull: 'down', unzip: 'file', zip: 'file', run_command: 'terminal', request_env_var: 'lock', start_job: 'terminal', check_job: 'terminal', stop_job: 'terminal', list_jobs: 'terminal', update_plan: 'list', save_notes: 'list', make_file: 'file', list_dir: 'folder', find_files: 'search', search: 'search', find_symbol: 'search', read_file: 'file', write_file: 'edit', edit_file: 'edit', delete_file: 'trash', web_fetch: 'search', view_image: 'file', project_map: 'folder', project_checks: 'list', check_tools: 'terminal', github_runs: 'branch', github_run_log: 'branch', github_issues: 'branch', calculate: 'list', convert_units: 'list', remember: 'file', clipboard_read: 'file', clipboard_write: 'file', set_alarm: 'list', set_timer: 'list', generate_image: 'file', pre_push_check: 'list', bump_version: 'edit', release: 'up', release_info: 'list', review_changes: 'search', report_findings: 'list' };
 function planCard(m) {
   const done = m.steps.filter((x) => x.status === 'done').length;
   return '<div class="tool plan"><div class="th">' + ICON('list') + '<span class="nm">Plan</span><span class="pa">' + done + ' of ' + m.steps.length + ' done</span></div><div class="steps">' +
@@ -1660,7 +1661,8 @@ function openSettings() {
     '<label class="field"><span>Default model</span><select id="setModel">' + S.models.map((m) => '<option value="' + esc(m.id) + '"' + (m.id === st.defaultModel ? ' selected' : '') + '>' + esc(modelLabel(m)) + '</option>').join('') + '</select></label>' +
     '<div class="field"><span>Token saving</span>' + seg('setMode', [['economy', 'Economy'], ['balanced', 'Balanced'], ['full', 'Full']], st.mode) + '<small>Older messages are summarised to cut cost. Economy keeps the least context.</small></div>' +
     '<div class="field"><span>Default thinking</span>' + seg('setThink', [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], st.defaultThink) + '</div>' +
-    '<label class="field"><span>Max steps per message</span><input id="setSteps" type="number" min="1" max="60" value="' + st.maxSteps + '"><small>Stops runaway tool loops.</small></label>' +
+    '<label class="field"><span>Max steps per message</span><input id="setSteps" type="number" min="1" max="150" value="' + st.maxSteps + '"><small>Stops runaway tool loops. Raise it for big reviews or builds (try 60 or more); tap Continue if it still stops.</small></label>' +
+    '<label class="field"><span>Max reply length</span><input id="setOut" type="number" min="1000" max="64000" step="1000" value="' + (st.maxOut || 32000) + '"><small>Longest single reply, in tokens. You only pay for what the model actually writes. If a model allows less, the app lowers it by itself.</small></label>' +
     '<label class="field"><span>Custom instructions</span><textarea id="setInstr" placeholder="Tone, language, rules...">' + esc(st.instructions) + '</textarea></label>' +
     '<div class="h3">Images</div>' +
     '<label class="field"><span>Image provider</span><select id="setImgProv"><option value="">Off</option>' + S.providers.filter((p) => p.type !== 'anthropic').map((p) => '<option value="' + esc(p.id) + '"' + (p.id === st.imageProvider ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
@@ -1704,7 +1706,8 @@ function openSettings() {
   $('#setModel').onchange = (e) => save({ defaultModel: e.target.value });
   $('#setImgProv').onchange = (e) => save({ imageProvider: e.target.value });
   $('#setImgModel').onchange = (e) => save({ imageModel: e.target.value.trim() });
-  $('#setSteps').onchange = (e) => save({ maxSteps: Math.max(1, Math.min(60, Number(e.target.value) || 20)) });
+  $('#setSteps').onchange = (e) => save({ maxSteps: Math.max(1, Math.min(150, Number(e.target.value) || 20)) });
+  $('#setOut').onchange = (e) => save({ maxOut: Math.max(1000, Math.min(64000, Math.round(Number(e.target.value)) || 32000)) });
   $('#setInstr').onchange = (e) => save({ instructions: e.target.value });
   $('#addProv').onclick = () => showSetup(false);
   $$('[data-am]', body).forEach((b) => b.onclick = () => openAddModels(S.providers.find((x) => x.id === b.dataset.am)));
@@ -1922,7 +1925,7 @@ function explainGitError(text) {
   const t = String(text);
   if (/newer commits|Pull first/i.test(t)) return { title: 'Push rejected', body: 'The remote has newer commits. Pull them first, then push again.', fix: 'pull' };
   if (/token was rejected|needs an access token|Access denied/i.test(t)) return { title: /rejected/i.test(t) ? 'Token rejected' : /Access denied/i.test(t) ? 'Access denied' : 'Token needed', body: t, fix: 'token' };
-  if (/No connection/i.test(t)) return { title: 'No connection', body: 'Check the internet, then try again.', fix: 'retry' };
+  if (/No connection/i.test(t)) { const h = /No connection to ([\w-]+(?:\.[\w-]+)+)/i.exec(t); return { title: h ? 'No connection to ' + h[1] : 'No connection', body: 'Check the internet, then try again.', fix: 'retry' }; }
   if (/Merge conflict/i.test(t)) return { title: 'Merge conflict', body: t.replace(/^Merge conflict\.?\s*/i, '') || 'Some files changed in both places.' };
   if (/Local changes would be overwritten/i.test(t)) return { title: 'Local changes in the way', body: 'Commit or discard your changes first, then try again.' };
   if (/Push refused|Push was rejected|protected branch|secret/i.test(t)) { const m = /^(.{8,70}?[.:])\s+(.+)$/s.exec(t); return m ? { title: m[1].replace(/[.:]$/, ''), body: m[2] } : { title: 'Push refused', body: t }; }

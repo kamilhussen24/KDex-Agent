@@ -9,7 +9,7 @@ export const TOOL_LABEL = {
   run_command: 'Run command', start_job: 'Start job', stop_job: 'Stop job', list_jobs: 'List jobs', check_job: 'Check job',
   check_tools: 'Check tools', request_env_var: 'Ask for secret',
   web_fetch: 'Open page', generate_image: 'Generate image',
-  project_checks: 'Project checks', project_map: 'Project map', review_changes: 'Review changes', report_findings: 'Report findings', update_plan: 'Update plan',
+  project_checks: 'Project checks', project_map: 'Project map', review_changes: 'Review changes', report_findings: 'Report findings', update_plan: 'Update plan', save_notes: 'Save notes',
   calculate: 'Calculate', convert_units: 'Convert units', clipboard_read: 'Read clipboard', clipboard_write: 'Copy to clipboard',
   set_alarm: 'Set alarm', set_timer: 'Set timer', remember: 'Remember',
 };

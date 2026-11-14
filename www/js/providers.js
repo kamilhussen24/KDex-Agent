@@ -104,8 +104,18 @@ function openaiMessages(system, messages, passReasoning) {
   return out;
 }
 
+// Some models allow shorter replies than the app asks for. Read the real limit from the refusal so the request can be sent again.
+export function tokenCap(text, current) {
+  const t = String(text || '');
+  if (!/max_?(completion_)?tokens|max.?output|output tokens|maximum.{0,30}tokens/i.test(t)) return 0;
+  const m = t.match(/(?:at most|maximum(?: value)?(?: of| is| allowed)?|less than or equal to|<=|up to|range of \[?\d+,\s*|\[\d+,\s*|limit(?: is)?|exceeds?)\D{0,30}(\d{3,6})/i);
+  const n = m ? Number(m[1]) : 0;
+  return n >= 256 && n < current ? n : 0;
+}
+
 async function* openaiStream(o) {
-  const { provider, apiKey, apiModel, system, messages, tools, maxTokens, think, signal } = o;
+  const { provider, apiKey, apiModel, system, messages, tools, think, signal } = o;
+  let maxTokens = o.maxTokens;
   const base = trimBase(provider.baseUrl);
   const isOpenAI = /api\.openai\.com/.test(base);
   const passReasoning = /deepseek/i.test(base) || provider.passReasoning === true;
@@ -113,7 +123,7 @@ async function* openaiStream(o) {
   const msgs = openaiMessages(system, messages, passReasoning);
 
   let res = null;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     const body = { model: apiModel, messages: msgs, stream: true };
     if (flags.usage) body.stream_options = { include_usage: true };
     if (maxTokens) body[flags.maxParam] = maxTokens;
@@ -131,6 +141,7 @@ async function* openaiStream(o) {
     if (flags.effort && /reasoning|effort|thinking/i.test(text)) { flags.effort = ''; yield { t: 'notice', text: 'This model does not support thinking. Answering without it.' }; continue; }
     if (flags.maxParam === 'max_tokens' && /max_completion_tokens/i.test(text)) { flags.maxParam = 'max_completion_tokens'; continue; }
     if (flags.maxParam === 'max_completion_tokens' && /max_tokens/i.test(text) && !/max_completion_tokens/i.test(text)) { flags.maxParam = 'max_tokens'; continue; }
+    { const cap = maxTokens ? tokenCap(text, maxTokens) : 0; if (cap) { maxTokens = cap; yield { t: 'notice', text: 'This model allows replies up to ' + cap + ' tokens. Using that.' }; continue; } }
     throw httpError(res.status, text);
   }
 
@@ -161,6 +172,7 @@ async function* openaiStream(o) {
         });
       }
     }
+    if (ch && ch.finish_reason === 'length') yield { t: 'stop', reason: 'length' };
     if (j.usage) {
       const cached = j.usage.prompt_tokens_details && j.usage.prompt_tokens_details.cached_tokens;
       yield { t: 'usage', in: j.usage.prompt_tokens || 0, out: j.usage.completion_tokens || 0, cached: cached || 0 };
@@ -215,12 +227,13 @@ function anthropicMessages(messages, withThinking) {
 }
 
 async function* anthropicStream(o) {
-  const { provider, apiKey, apiModel, system, messages, tools, maxTokens, think, signal } = o;
+  const { provider, apiKey, apiModel, system, messages, tools, think, signal } = o;
+  let maxTokens = o.maxTokens;
   const base = trimBase(provider.baseUrl);
   let thinkOn = !!BUDGET[think];
 
   let res = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     const msgs = anthropicMessages(messages, thinkOn);
     // cache the stable prefix: everything before the newest turn
     if (msgs.length >= 2) {
@@ -253,6 +266,7 @@ async function* anthropicStream(o) {
       yield { t: 'notice', text: 'This model does not support thinking. Answering without it.' };
       continue;
     }
+    if (res.status === 400 || res.status === 422) { const cap = tokenCap(text, maxTokens || 8192); if (cap) { maxTokens = cap; yield { t: 'notice', text: 'This model allows replies up to ' + cap + ' tokens. Using that.' }; continue; } }
     throw httpError(res.status, text);
   }
 
@@ -278,6 +292,7 @@ async function* anthropicStream(o) {
       else if (d.type === 'input_json_delta' && b) b.json += d.partial_json || '';
     } else if (j.type === 'message_delta' && j.usage) {
       tout = j.usage.output_tokens || tout;
+      if (j.delta && j.delta.stop_reason === 'max_tokens') yield { t: 'stop', reason: 'length' };
     } else if (j.type === 'error') {
       throw new Error((j.error && j.error.message) || 'Provider error');
     }

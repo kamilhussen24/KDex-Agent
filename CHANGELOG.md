@@ -7,6 +7,23 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.20]
+
+### Fixed
+- Long jobs no longer stop half way. When a model reaches its reply limit mid-answer, or sends no answer text after thinking, the app now asks it to carry on by itself (up to three times) instead of ending with "The steps above are finished".
+- When it still cannot finish, the message says why and a Continue button picks the work up again.
+- A model that allows shorter replies than the app asks for no longer causes an error: the app reads the real limit and sends the request again.
+- A reply cut off in the middle of a big file write now tells the model to write the file in smaller pieces instead of repeating the same call.
+- The Git error card names the server it could not reach, for example "No connection to gitlab.com".
+
+### Changed
+- The default reply length is raised from 8,000 to 32,000 tokens. You still pay only for the tokens a model actually writes.
+- Max steps per message can now go up to 150.
+
+### Added
+- Settings > Chat > Max reply length.
+- Notes for long jobs: the agent saves what it finds after each part of a big review or build inside the chat (not in your project), so it is not lost when older messages are summarised, and writes one final report from them.
+
 ## [1.52.19]
 
 ### Fixed

@@ -37,7 +37,7 @@ const ASK_TOOL = {
 /** Tools whose output can contain file text. Terminal and job output is cleaned separately. */
 const SHIELDED = new Set(['read_file', 'search', 'find_symbol', 'git_diff', 'git_log', 'review_changes', 'project_map', 'project_checks', 'pre_push_check', 'release_info', 'git_remote', 'git_push', 'git_pull', 'git_fetch', 'git_commit', 'git_branch']);
 /** Plan mode: only tools that cannot change anything. */
-const PLAN_OK = new Set(['list_dir', 'find_files', 'search', 'find_symbol', 'read_file', 'update_plan', 'ask_user', 'view_image', 'web_fetch', 'git_status', 'git_diff', 'git_log', 'pre_push_check', 'release_info', 'review_changes', 'project_map', 'calculate', 'convert_units']);
+const PLAN_OK = new Set(['save_notes', 'list_dir', 'find_files', 'search', 'find_symbol', 'read_file', 'update_plan', 'ask_user', 'view_image', 'web_fetch', 'git_status', 'git_diff', 'git_log', 'pre_push_check', 'release_info', 'review_changes', 'project_map', 'calculate', 'convert_units']);
 const PLAN_TEXT = 'PLAN MODE (read only): the user turned on Plan mode. You can read, search and inspect, but you cannot change anything: no writing, editing, moving or deleting files, no commands, no commits. Look at what you need (find_symbol and search are cheap), then reply with the plan: a short numbered list of the steps, the files each step changes, and any risk or open question. Do not start the work and do not ask whether to start; the user sees a Build this plan button. Keep it under about 15 lines.';
 /** Runs the project\'s own check (for example npm run lint) after the agent changed files. Returns null when no changed file matches the project\'s file patterns. */
 async function runChecks(ck, paths, folder, signal) {
@@ -55,6 +55,12 @@ async function runChecks(ck, paths, folder, signal) {
   const shown = cmd.includes('{files}') ? cmd.replace(/\{files\}/g, hit.slice(0, 20).join(' ')) : cmd; // what the card and the agent see: the real file names
   return { ok, cmd: shown, files: hit, text };
 }
+const NOTES_TOOL = {
+  name: 'save_notes',
+  description: 'Save working notes for this chat so they are not lost when older messages are summarised. Use it during long jobs (a big review, audit or build): after each part, add what you found or decided (file, line, what is wrong, what is done). The notes are shown to you again on every later step. Set replace to true only to rewrite all notes shorter.',
+  parameters: { type: 'object', properties: { text: { type: 'string' }, replace: { type: 'boolean' } }, required: ['text'] },
+};
+const NOTES_MAX = 14000;
 const PLAN_TOOL = {
   name: 'update_plan',
   description: 'Show the user a short checklist of the steps of a multi-step task and keep it up to date. Call it at the start of any task with 3 or more steps, then again each time a step starts or finishes. Send the full list every time.',
@@ -64,10 +70,12 @@ const PLAN_TOOL = {
     required: ['steps'],
   },
 };
-export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 8000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true, outsideAsk: 'server', quietToasts: true, imageProvider: '', imageModel: '' };
+export const defaults = { theme: 'system', mode: 'balanced', maxSteps: 20, autoApply: false, autoDefault: false, maxOut: 32000, instructions: '', autoLearn: true, defaultModel: '', defaultThink: 'off', termux: false, gitTokenTermux: true, protectSecrets: true, outsideAsk: 'server', quietToasts: true, imageProvider: '', imageModel: '' };
 
 export async function getSettings() {
-  return { ...defaults, ...(await kvGet('settings', {})) };
+  const st = await kvGet('settings', {});
+  if (st.maxOut === 8000) delete st.maxOut; // the old default (never shown in Settings): use the new, larger one
+  return { ...defaults, ...st };
 }
 export async function saveSettings(patch) {
   const cur = await getSettings();
@@ -146,6 +154,7 @@ const WORK_TOOLS_GUIDE =
 const RELEASE_GUIDE =
   'RELEASE AND REVIEW. bump_version raises the version in package.json, package-lock.json and the app version constant with exact edits: always use it, never sed or a broad replace on version numbers. pre_push_check finds the usual causes of a failed build before you push (invalid package.json, version mismatch, dependency ranges that disagree with package-lock.json); git_push runs it by itself. For "release", "publish a new version" or "ship it": call release_info, write short user-facing notes from the commits, then call release (one approval card). ' +
   'REVIEW: when the user asks you to review their changes or check before a commit, call review_changes, confirm each spotted item in the code, look for real mistakes, then call report_findings once with only real findings (an empty list when all is fine). Do not edit files during a review; the user taps Fix on a finding when they want it fixed. ' +
+  'LONG JOBS: for a whole-project review, an audit or a large build, never try to do it in one go. Call update_plan first with the parts (for example one folder or about 8 files each), do one part at a time, and tick it off. After each part call save_notes with what you found or finished (file, line, what is wrong), so nothing is lost when older messages are summarised. Read only what you need and each file once. When every part is done, write ONE final report from your notes: problems ordered by how serious they are, then a line saying which files you checked and which you did not. In a review do not edit files. Keep each reply short enough to finish; if one is cut off, carry on from the exact spot without repeating. For a large file, write it in pieces (create it, then add the rest with edit_file) instead of one huge call. ' +
   'CI FIX: when the user says the build failed and asks to fix it, call github_run_log, find the cause, make the smallest fix, run pre_push_check, and commit. Do not push without asking; push always asks.\n';
 const TERMINAL_TOOLS_GUIDE =
   'check_tools tells which programs are installed in Termux and how much space is free: use it before a task that needs a program and when something is "not found". ' +
@@ -210,7 +219,7 @@ async function readKdex(folder) {
   return '';
 }
 
-function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, imgOn, planMode) {
+function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, imgOn, planMode, notes) {
   const local = !!(folder && !folder.scratch && !folder.remote); // a real folder on the phone
   const parts = [ABOUT, 'LANGUAGE AND LENGTH: reply in the language of the user\'s latest message: an English message gets English; Bengali, or Bengali typed in English letters, gets Bengali. Never switch language on your own. Keep every reply as short as the question allows: a greeting such as "Hi" gets one short line in the same language, without emoji, without a feature list and without describing the app. Longer answers only when the task needs them; this saves the user money.'];
   if (folder && folder.remote) {
@@ -258,6 +267,7 @@ function systemPrompt(folder, memory, summary, custom, termuxPath, pmap, kdex, i
   if (custom && custom.trim()) parts.push('User instructions:\n' + custom.trim());
   if (memory.length) parts.push('What you know about the user from earlier chats (use it naturally, do not recite it):\n' + memory.map((m) => '- ' + m.text).join('\n'));
   if (summary) parts.push('Summary of the earlier part of this chat:\n' + summary);
+  if (notes) parts.push('Your working notes for this chat (saved earlier with save_notes; use them for your final report):\n' + notes);
   parts.push('LIVE INFORMATION: when the user wants something that changes or that you cannot be sure of (today\'s exchange rate, a crypto price, weather, the time, news, a new version, a link they gave you), get it yourself right away by the simplest way and answer with the result; do not ask for permission in words (the app shows its own approval) and do not explain how you will do it. Pick ONE direct source, never a search page. ' +
       (termuxPath ? 'The terminal is on, so prefer ONE curl command that already extracts only the needed value (pipe to python3 -c or grep -o), never cut with head, for example: curl -sL --max-time 25 URL | python3 -c "import sys,json;d=json.load(sys.stdin);print(...)". ' : '') +
       'Without a terminal use web_fetch with a small max_chars (for example 1500) on a simple address; it also reads JSON and plain text. Free keyless sources that usually work: exchange rates https://open.er-api.com/v6/latest/USD (field rates, then the currency code, updated once a day); crypto prices https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd; weather https://wttr.in/City?format=3 (plain text); other facts: the official site or documentation page. If one source fails, try one other, then say plainly what you could not get. ' +
@@ -286,7 +296,7 @@ function toNeutral(m, opts) {
       return { id: c.id, name: c.name, args };
     });
     const same = !m.model || m.model === opts.model; // provider-specific thinking data only goes back to the model that wrote it
-    return { role: 'assistant', text: m.text || '', calls, raw: same ? m.raw : undefined, reasoning: same ? m.reasoning : undefined };
+    return { role: 'assistant', text: m.text || (m.empty && !calls.length ? '(no answer text)' : ''), calls, raw: same ? m.raw : undefined, reasoning: same ? m.reasoning : undefined };
   }
   let content = m.content || '';
   if (opts.compact && content.length > 600) content = content.slice(0, 300) + '\n[earlier tool output omitted to save tokens]';
@@ -382,7 +392,7 @@ async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
   const pmap = real ? await projectMap(folder) : '';
   const kdex = real ? await readKdex(folder) : '';
   const imgOn = !!(real && settings.imageProvider && settings.imageModel);
-  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx, pmap, kdex, imgOn, !!settings.planMode), messages: msgs };
+  return { system: systemPrompt(folder, memory, chat.summary, settings.custom || settings.instructions, termuxPathCtx, pmap, kdex, imgOn, !!settings.planMode, chat.notes), messages: msgs };
 }
 
 /** How full the chat history is compared with the token budget of the chosen mode (what the next message would send). */
@@ -478,13 +488,13 @@ export async function runTurn(ctx) {
   const hasGit = scratch || remote ? false : await isRepo(folder).catch(() => false);
   const termuxPath = !scratch && !remote && settings.termux ? await getTermuxPath(folder).catch(() => null) : null;
   const imgOn = !!(!scratch && !remote && settings.imageProvider && settings.imageModel);
-  const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
-  const tools = scratch ? TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL, FILE_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS) : remote ? TOOLS.concat([PLAN_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS, SERVER_TOOLS) : (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version')));
+  const base = TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, NOTES_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_FOLDER_TOOLS, EXTRA_ANY_TOOLS, DEVICE_TOOLS, termuxPath ? TERMUX_TOOLS.concat([CHECK_TOOLS_TOOL]) : [], imgOn ? [IMAGE_TOOL] : []);
+  const tools = scratch ? TOOLS.concat(ARCHIVE_TOOLS, [PLAN_TOOL, NOTES_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL, FILE_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS) : remote ? TOOLS.concat([PLAN_TOOL, NOTES_TOOL, ASK_TOOL, VIEW_TOOL, WEB_TOOL], EXTRA_ANY_TOOLS, DEVICE_TOOLS, SERVER_TOOLS) : (hasGit ? base.concat(GIT_TOOLS, GITHUB_TOOLS, RELEASE_TOOLS) : base.concat(RELEASE_TOOLS.filter((t) => t.name === 'bump_version')));
   const toolsRun = planMode ? tools.filter((t) => PLAN_OK.has(t.name)) : tools;
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
 
-  const readSeen = new Set(); let ranTools = false; let scale = 1;
+  const readSeen = new Set(); let ranTools = false; let scale = 1; let autoCont = 0; let nudged = 0;
   const seenSigs = new Map(); let errRun = 0; let stuck = '';
   for (;;) {
     if (signal.aborted) return;
@@ -533,10 +543,12 @@ export async function runTurn(ctx) {
             asst.raw = ev.blocks;
           } else if (ev.t === 'reasoning') {
             asst.reasoning = ev.text;
+          } else if (ev.t === 'stop') {
+            if (ev.reason === 'length') asst.cut = true;
           } else if (ev.t === 'usage') {
             usage = ev;
           } else if (ev.t === 'restart') {
-            asst.text = ''; asst.thought = ''; asst.calls = []; delete asst.raw; delete asst.reasoning; thinkStart = 0; usage = null;
+            asst.text = ''; asst.thought = ''; asst.calls = []; asst.cut = false; delete asst.raw; delete asst.reasoning; thinkStart = 0; usage = null;
             ui.onDelta(asst);
           } else if (ev.t === 'notice') {
             ui.onNotice(ev.text);
@@ -568,9 +580,26 @@ export async function runTurn(ctx) {
     await db.put('messages', asst);
     ui.onAssistant(asst);
 
-    if (!failed && !asst.calls.length && !asst.text.trim() && !signal.aborted && ranTools) {
-      asst.text = 'The steps above are finished. Ask me if you want a summary or a next step.';
-      await db.put('messages', asst); ui.onAssistant(asst);
+    // The model ran out of reply room (or thought for the whole budget and wrote nothing): carry on by itself instead of stopping half way.
+    if (!failed && !signal.aborted && !asst.calls.length) {
+      const empty = !asst.text.trim();
+      if (asst.cut || empty) {
+        if (empty) { asst.empty = true; await db.put('messages', asst); ui.onAssistant(asst); }
+        const canGo = asst.cut ? autoCont < 3 : nudged < 1;
+        if (canGo) {
+          if (asst.cut) autoCont++; else nudged++;
+          const nm = { chatId: chat.id, role: 'user', auto: true, status: 'done', at: Date.now(), text: asst.cut && !empty
+            ? '[Automatic note from the app: your last reply was cut off by the reply limit. Carry on exactly where you stopped and do not repeat what you already wrote. Keep it shorter if you can.]'
+            : '[Automatic note from the app: your last reply had no answer text. Write your answer now in plain words, focused and short, without long thinking first. If parts of the job are still open, say which.]' };
+          nm.id = await db.put('messages', nm); ui.onUser(nm);
+          ui.onNotice(asst.cut ? 'The reply hit its length limit. Carrying on...' : 'The model sent no answer. Asking it to write one...');
+          continue;
+        }
+        const why = asst.cut ? 'The model hit its reply limit again and stopped. Tap Continue to go on, or raise Max reply length in Settings > Chat.' : 'The model returned no answer text, most likely because it used its whole reply limit on thinking. Tap Continue to try again, turn Thinking down, or raise Max reply length in Settings > Chat.';
+        const note = { chatId: chat.id, role: 'assistant', text: why, model: rt.model.id, status: 'done', cont: true, at: Date.now() };
+        note.id = await db.put('messages', note); ui.onAssistant(note);
+        return;
+      }
     }
     if (failed) return;
     if (!asst.calls.length) { if (ui.hasQueued && ui.hasQueued() && !signal.aborted) continue; return; }
@@ -588,13 +617,21 @@ export async function runTurn(ctx) {
       tm.id = await db.put('messages', tm);
       ui.onTool(tm);
       try {
-        if (call.bad) throw new Error('The tool arguments were not valid JSON. Try again with valid arguments.');
+        if (call.bad) throw new Error(asst.cut ? 'Your reply was cut off by the reply limit while you were writing this call, so nothing was done. Do it in smaller pieces: for a big file, create it with the first part and add the rest with edit_file in several calls.' : 'The tool arguments were not valid JSON. Try again with valid arguments.');
         if (planMode && !PLAN_OK.has(call.name)) throw new Error('Plan mode is on, so nothing can be changed. Finish the plan in words; the user will switch Plan mode off to build it.');
-        if (!folder && call.name !== 'update_plan' && call.name !== 'ask_user' && call.name !== 'make_file' && call.name !== 'web_fetch' && !EXTRA_ANY_NAMES.has(call.name) && !DEVICE_NAMES.has(call.name)) throw new Error('No project folder is open. Tell the user to tap the folder button above the chat and pick the project folder.');
+        if (!folder && call.name !== 'update_plan' && call.name !== 'save_notes' && call.name !== 'ask_user' && call.name !== 'make_file' && call.name !== 'web_fetch' && !EXTRA_ANY_NAMES.has(call.name) && !DEVICE_NAMES.has(call.name)) throw new Error('No project folder is open. Tell the user to tap the folder button above the chat and pick the project folder.');
         if (call.name === 'update_plan') {
           const steps = (Array.isArray(call.args && call.args.steps) ? call.args.steps : []).slice(0, 20).map((x) => ({ text: String((x && x.text) || '').slice(0, 160), status: ['todo', 'doing', 'done'].includes(x && x.status) ? x.status : 'todo' })).filter((x) => x.text);
           tm.steps = steps; tm.args = steps.filter((x) => x.status === 'done').length + '/' + steps.length + ' done';
           tm.content = 'Plan updated.'; tm.status = 'done';
+        } else if (call.name === 'save_notes') {
+          const add = String((call.args && call.args.text) || '').trim();
+          if (!add) throw new Error('Give the notes text.');
+          const cur = call.args && call.args.replace ? '' : String(chat.notes || '');
+          const next = (cur ? cur + '\n' : '') + add;
+          if (next.length > NOTES_MAX) throw new Error('The notes would be too long (' + next.length + ' of ' + NOTES_MAX + ' characters). Call save_notes again with replace set to true and a shorter version that keeps every finding and the list of files checked.');
+          chat.notes = next; await db.put('chats', chat);
+          tm.args = next.length + ' characters'; tm.content = 'Notes saved (' + next.length + ' of ' + NOTES_MAX + ' characters used).'; tm.status = 'done';
         } else if (call.name === 'ask_user') {
           const q = String((call.args && call.args.question) || '').trim().slice(0, 300);
           const opts = (Array.isArray(call.args && call.args.options) ? call.args.options : []).map((x) => String(x || '').trim().slice(0, 60)).filter(Boolean).slice(0, 4);
