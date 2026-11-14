@@ -69,7 +69,7 @@ fs.mkdirSync(path.join(res, 'drawable-nodpi'), { recursive: true });
 fs.copyFileSync(path.join(icons, 'splash-logo.png'), path.join(res, 'drawable-nodpi', 'kdex_splash_logo.png'));
 write(path.join(res, 'values/kdex_splash_colors.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="kdex_splash_bg">#FFFFFF</color>\n</resources>\n');
 write(path.join(res, 'values-night/kdex_splash_colors.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="kdex_splash_bg">#121214</color>\n</resources>\n');
-write(path.join(res, 'drawable/kdex_splash.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\n    <item android:drawable="@color/kdex_splash_bg" />\n    <item>\n        <bitmap android:src="@drawable/kdex_splash_logo" android:gravity="center" />\n    </item>\n</layer-list>\n');
+write(path.join(res, 'drawable/kdex_splash.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\n    <item android:drawable="@color/kdex_splash_bg" />\n    <item android:width="240dp" android:height="240dp" android:gravity="center">\n        <bitmap android:src="@drawable/kdex_splash_logo" android:gravity="fill" />\n    </item>\n</layer-list>\n');
 const stylesFile = path.join(res, 'values/styles.xml');
 let st = read(stylesFile);
 if (!st.includes('kdex_splash')) {
@@ -91,6 +91,12 @@ if (!m.includes('com.termux.permission.RUN_COMMAND')) {
 if (!m.includes('MANAGE_EXTERNAL_STORAGE')) {
   m = m.replace('<application', '<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <application');
 }
+// Android 8 to 10 have no "All files access": the ordinary storage permission gives the same direct paths there.
+// requestLegacyExternalStorage keeps Android 10 from sandboxing the storage; Android 11+ ignores it.
+for (const perm of ['WRITE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE']) {
+  if (!m.includes('android.permission.' + perm + '"')) m = m.replace('<application', '<uses-permission android:name="android.permission.' + perm + '" android:maxSdkVersion="29" />\n    <application');
+}
+if (!m.includes('requestLegacyExternalStorage')) m = m.replace('<application', '<application android:requestLegacyExternalStorage="true"');
 // Keep working with the screen off: foreground service (notification) + wake lock
 // Alarms and timers in the phone's Clock app (reminders)
 if (!m.includes('com.android.alarm.permission.SET_ALARM')) {

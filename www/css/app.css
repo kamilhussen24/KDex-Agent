@@ -271,6 +271,8 @@ html[data-theme=dark] .toast.card.warn .tic{color:#fbbf24}
 .chip.on{border-color:var(--b2);color:var(--b2)}
 
 .dlg-actions{flex-wrap:wrap}
+.dlg-actions.stack{flex-direction:column;align-items:stretch}.dlg-actions.stack .btn{width:100%;justify-content:center;margin:0}
+.dlg-actions.stack #dlgYes{order:1}.dlg-actions.stack #dlgAlt{order:2}.dlg-actions.stack #dlgNo{order:3}
 .askopts{display:flex;flex-direction:column;gap:8px}.askopts .btn{width:100%;justify-content:center;white-space:normal;text-align:center}
 .msg.event{display:flex;align-items:center;gap:10px;color:var(--mut);font-size:12.5px;margin:10px 0}
 .msg.event::before,.msg.event::after{content:"";flex:1;height:1px;background:var(--line)}

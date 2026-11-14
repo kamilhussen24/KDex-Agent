@@ -7,6 +7,29 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.7]
+
+### Added
+- Android 8, 9 and 10 now get fast file access too. The app asks once for the ordinary storage permission (when you open a folder or clone a repository), and files and Git then use direct paths, like on Android 11 and newer. Before, these phones always used the slow folder access, so Git was slow.
+- Copy in the file menu for files on a server (text files up to 1 MB).
+- Copy for protected secret files (such as `.env`) in phone folders and Scratch. It asks first, because the text goes to the clipboard where other apps can read it.
+
+### Changed
+- Settings shows "Storage access" (On or Off) with a button on Android 8 to 10, instead of "All files access: Not needed".
+- The start screen logo has the same size on every screen, so it is no longer huge on small phones.
+
+## [1.52.6]
+
+### Added
+- One file menu in all three file lists (your phone's folders and cloned repositories, Scratch, and servers). Tap a file for: Open (only for files the app can show: text and code up to 1 MB, pictures up to 8 MB), Preview (HTML files), Rename, Copy (text files), Download (servers) and Delete. The file name shows above the menu.
+- Rename for files in all three lists. It keeps the file in its folder, refuses a name that already exists, and is not offered for protected secret files.
+- Delete for files in your phone's folders, with a confirmation. It cannot be undone from the app.
+
+### Changed
+- Tapping a file in a phone folder now opens this menu instead of opening the file at once. Choose Open to see it.
+- The "Possible secret found" dialog shows its three buttons as equal full-width rows: Leave them out, Commit anyway, Cancel.
+- A line in this changelog no longer looks like a password to the secret scan, so committing it gives no false warning.
+
 ## [1.52.5]
 
 ### Changed
@@ -360,7 +383,7 @@ for its version.
 
 ### Security
 - The `.git` folder is hidden from the AI's read, search and file-find tools; it can hold access tokens. Git tools remain available.
-- Credentials inside URLs (`https://user:token@host`) are masked in tool output.
+- Passwords written inside web addresses are masked in tool output.
 - Terminal commands that send data out (curl/wget uploads, POST, auth headers, nc/scp/rsync, reads of Git credential files) always ask first, even in Auto mode. Plain downloads are unaffected.
 - The update check only accepts APK links from this project's GitHub repository.
 

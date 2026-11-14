@@ -5,7 +5,7 @@ import { secure, fs, App, Termux, AllFiles, Work, Launch, setBars, isNative } fr
 import * as D from './diag.js';
 import { highlight, langOf } from './highlight.js';
 import { diffHtml } from './diffview.js';
-import { BINARY_EXT } from './tools.js';
+import { BINARY_EXT, isGitInternal } from './tools.js';
 import { PRESETS, QUICK_FILL, listModels, popularModels, likelySeesImages } from './providers.js';
 import { getTermuxPath, setTermuxPath, hasCustomTermuxPath, runTermux, isRiskyCommand } from './termux.js';
 import * as CI from './ci.js';
@@ -140,13 +140,14 @@ function confirmBox(title, text, yes = 'OK') {
 }
 /** Dialog with two actions plus Cancel. Resolves 0 (first), 1 (second) or -1 (cancel). */
 function choiceBox(title, text, labels, opts) {
-  const noCancel = !!(opts && opts.noCancel);
+  const noCancel = !!(opts && opts.noCancel); const stack = !!(opts && opts.stack);
   return new Promise((res) => {
+    $('#dlgYes').parentElement.classList.toggle('stack', stack);
     $('#dlgTitle').textContent = title; $('#dlgText').textContent = text;
     $('#dlgYes').firstElementChild.textContent = labels[0]; $('#dlgAlt').firstElementChild.textContent = labels[1] || ''; $('#dlgAlt').classList.toggle('hidden', labels.length < 2);
     if (noCancel) $('#dlgNo').classList.add('hidden');
     $('#dialog').classList.remove('hidden');
-    const done = (v) => { $('#dialog').classList.add('hidden'); $('#dlgAlt').classList.add('hidden'); $('#dlgNo').classList.remove('hidden'); $('#dialog').onclick = null; $('#dlgYes').onclick = $('#dlgNo').onclick = $('#dlgAlt').onclick = null; res(v); };
+    const done = (v) => { $('#dialog').classList.add('hidden'); $('#dlgYes').parentElement.classList.remove('stack'); $('#dlgAlt').classList.add('hidden'); $('#dlgNo').classList.remove('hidden'); $('#dialog').onclick = null; $('#dlgYes').onclick = $('#dlgNo').onclick = $('#dlgAlt').onclick = null; res(v); };
     $('#dlgYes').onclick = () => done(0); $('#dlgAlt').onclick = () => done(1); $('#dlgNo').onclick = () => done(-1);
     if (noCancel) $('#dialog').onclick = (e) => { if (e.target === $('#dialog')) done(-1); };
   });
@@ -184,7 +185,15 @@ async function boot() {
 }
 /** Opens Android's permission screen; when the user comes back it checks the result. */
 async function askAllFiles(done) {
-  try { await AllFiles.request(); } catch (e) { toast('Could not open the settings screen'); if (done) done(); return; }
+  let r = null;
+  try { r = await AllFiles.request(); } catch (e) { toast('Could not open the settings screen'); if (done) done(); return; }
+  const check = async () => {
+    const st = await AllFiles.status(); G.resetGitCache();
+    toast(st.granted ? 'Fast file access is on' : 'Fast file access is still off');
+    if (done) done();
+  };
+  // Android 8 to 10 answer with a small box; the answer is already in when the request returns (unless the settings page had to open)
+  if (r && r.legacy && !r.settings) { await check(); return; }
   const back = async () => {
     if (document.hidden) return;
     document.removeEventListener('visibilitychange', back);
@@ -201,7 +210,7 @@ async function offerAllFiles() {
   if (!st.supported || st.granted) return;
   if (await kvGet('allFilesAsked', 0) >= 2) return;
   await kvSet('allFilesAsked', (await kvGet('allFilesAsked', 0)) + 1);
-  const r = await choiceBox('Fast file access', 'Allow "All files access" so files and Git run at full speed, like Termux. Android opens a settings screen: turn on the switch for KDex Agent, then come back.', ['Allow', 'Not now'], { noCancel: true });
+  const r = await choiceBox('Fast file access', st.legacy ? 'Allow storage access so files and Git run at full speed, like Termux. Android asks once: tap Allow.' : 'Allow "All files access" so files and Git run at full speed, like Termux. Android opens a settings screen: turn on the switch for KDex Agent, then come back.', ['Allow', 'Not now'], { noCancel: true });
   if (r === 0) await new Promise((res) => askAllFiles(res));
 }
 async function enter() {
@@ -1140,14 +1149,14 @@ async function openByPath() {
   body.innerHTML = '<p class="note" style="text-align:left;margin-top:0">Type or paste the full path of a folder on this phone, for example <code>/storage/emulated/0/Projects/my-app</code>. It must exist before it can be opened.</p>' +
     '<input id="opPath" class="inp" type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="/storage/emulated/0/..." style="width:100%;font:14px ui-monospace,Menlo,monospace">' +
     '<div id="opMsg" class="opmsg"></div>' +
-    (ok ? '' : '<button id="opAllow" class="btn" style="width:100%;margin-top:8px">' + ICON('shield') + '<span class="lbl">Allow all files access</span></button>') +
+    (ok ? '' : '<button id="opAllow" class="btn" style="width:100%;margin-top:8px">' + ICON('shield') + '<span class="lbl">' + (st.legacy ? 'Allow storage access' : 'Allow all files access') + '</span></button>') +
     '<button id="opGo" class="btn primary" style="width:100%;margin-top:10px">' + ICON('folder') + '<span class="lbl">Check and open</span></button>';
   const inp = $('#opPath'); const msg = $('#opMsg'); let found = null; let seq = 0;
   const show = (kind, text) => { msg.className = 'opmsg ' + kind; msg.textContent = text; };
   const check = async () => {
     const v = inp.value.trim(); const my = ++seq; found = null;
     if (!v) { show('', ''); return null; }
-    if (!ok) { show('err', 'Turn on "All files access" first.'); return null; }
+    if (!ok) { show('err', st.legacy ? 'Allow storage access first.' : 'Turn on "All files access" first.'); return null; }
     show('', 'Checking...');
     try {
       const r = await fs.openPath(v); if (my !== seq) return null;
@@ -1361,6 +1370,57 @@ async function saveBytes(name, bytes, mime) {
   const url = URL.createObjectURL(file); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000); toast('Saving ' + name);
 }
+/** Files the viewer can show: pictures up to 8 MB, text and code up to 1 MB. Anything else gets no "Open" in its menu. */
+const isImgName = (n) => /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i.test(String(n || ''));
+function canOpenFile(name, size) {
+  const sz = Number(size) || 0;
+  if (isImgName(name)) return sz > 0 && sz <= 8 * 1048576;
+  return !BINARY_EXT.test(name) && sz <= 1048576;
+}
+/** The menu of a file row, the same in the phone folder, Scratch and a server. kind: 'local' | 'scratch' | 'server'. */
+async function fileMenu(row, kind, p, size, reopen) {
+  const nm = baseOf(p); const fo = curF(); if (!fo) return;
+  const git = kind === 'local' && isGitInternal(p);
+  const prot = kind !== 'server' && isSecretPath(p) && await protectionOn(); // renaming would make a secret file look ordinary
+  const open = canOpenFile(nm, size);
+  const items = [];
+  if (open) items.push({ a: 'open', label: 'Open', icon: 'file' });
+  if (kind !== 'server' && isHtmlName(nm)) items.push({ a: 'prev', label: 'Preview', icon: 'eye' });
+  if (!git && !prot) items.push({ a: 'ren', label: 'Rename', icon: 'edit' });
+  if (open && !isImgName(nm)) items.push({ a: 'copy', label: 'Copy', icon: 'copy' });
+  if (kind === 'server') items.push({ a: 'dl', label: 'Download', icon: 'down' });
+  if (!git) items.push({ a: 'del', label: 'Delete', icon: 'trash', danger: true });
+  popMenu(row, items, async (a) => {
+    if (a === 'open') { const b = sheet(p, { back: reopen }); openFileView(p, b); }
+    else if (a === 'prev') previewFile(p);
+    else if (a === 'dl') downloadFromServer(p, reopen);
+    else if (a === 'ren') await renameFile(fo, p, reopen);
+    else if (a === 'copy') {
+      if (prot && !await confirmBox('Copy secrets?', 'This file holds secrets. Its text goes to the clipboard, where other apps can read it.', 'Copy')) return;
+      try { const t = await fs.readText(fo.uri, p, 1048576); toast(t.binary ? 'This file is not text' : (await copyText(t.text)) ? 'Copied ' + nm : 'Could not copy', { kind: t.binary ? 'warn' : undefined, result: true }); } catch (e) { toast(e.message || 'Could not copy', { kind: 'err' }); }
+    } else if (a === 'del') {
+      const msg = kind === 'server' ? 'It is removed from the server and cannot be restored from the app.' : kind === 'scratch' ? 'The file is removed from Scratch. This cannot be undone.' : 'The file is removed from the folder. This cannot be undone from the app.';
+      if (!await confirmBox('Delete "' + nm + '"?', msg, 'Delete')) return;
+      try { await fs.remove(fo.uri, p); } catch (e) { toast((e && e.message) || 'Could not delete the file', { kind: 'err' }); }
+      if (kind === 'scratch') drawScratch();
+      reopen();
+    }
+  }, nm);
+}
+/** Asks for a new name and renames the file in its own folder. */
+async function renameFile(fo, p, after) {
+  const nm = baseOf(p); const dir = p.slice(0, p.length - nm.length);
+  const v = await askText('Rename file', 'File name', nm, true);
+  if (!v || v === nm) return;
+  if (/[\\/]/.test(v) || v === '.' || v === '..') { toast('Use a file name only, without slashes.', { kind: 'warn' }); return; }
+  try {
+    const st = await fs.stat(fo.uri, dir + v);
+    if (st && st.exists) { toast('"' + v + '" already exists here.', { kind: 'warn' }); return; }
+    await fs.rename(fo.uri, p, dir + v);
+    toast('Renamed to ' + v);
+  } catch (e) { toast((e && e.message) || 'Could not rename the file', { kind: 'err' }); return; }
+  after();
+}
 async function openScratch() {
   if (!S.chat || S.folder) return;
   const chat = S.chat; const body = sheet('Scratch');
@@ -1369,21 +1429,9 @@ async function openScratch() {
     if (!files.length) { closeSheet(); drawScratch(); return; }
     const total = files.reduce((n, f) => n + f.size, 0);
     body.innerHTML = '<div class="note" style="text-align:left">Temporary files for this chat. Only you and this app can see them. ' + fmtBytes(total) + ' of ' + fmtBytes(SCRATCH_CAP) + ' used.</div>' +
-      files.map((f) => '<div class="row-item" data-p="' + esc(f.path) + '"><div class="grow"><div class="t">' + esc(f.path) + '</div></div><div class="s">' + fmtBytes(f.size) + '</div></div>').join('') +
+      files.map((f) => '<div class="row-item" data-p="' + esc(f.path) + '" data-s="' + f.size + '"><div class="grow"><div class="t">' + esc(f.path) + '</div></div><div class="s">' + fmtBytes(f.size) + '</div></div>').join('') +
       '<div class="sc-acts"><button id="scMove" class="btn" type="button"><span class="lbl">Move to a folder</span></button><button id="scZip" class="btn" type="button"><span class="lbl">Download all (zip)</span></button><button id="scClear" class="btn danger" type="button"><span class="lbl">Clear this scratch</span></button></div>';
-    $$('[data-p]', body).forEach((row) => row.onclick = () => {
-      const p = row.dataset.p; const nm = p.split('/').pop();
-      popMenu(row, [{ a: 'view', label: 'View', icon: 'file' }, { a: 'copy', label: 'Copy', icon: 'copy' }].concat(isHtmlName(nm) ? [{ a: 'prev', label: 'Preview', icon: 'eye' }] : [], [{ a: 'del', label: 'Delete', icon: 'trash', danger: true }]), async (a) => {
-        if (a === 'view') { const b2 = sheet(p, { back: openScratch }); openFileView(p, b2); }
-        else if (a === 'prev') previewFile(p);
-        else if (a === 'copy') { try { const t = await fs.readText(scratchFolder(chat.id).uri, p, 1048576); toast(t.binary ? 'This file is not text' : (await copyText(t.text)) ? 'Copied ' + nm : 'Could not copy', { kind: t.binary ? 'warn' : undefined }); } catch (e) { toast(e.message || 'Could not copy', { kind: 'err' }); } }
-        else if (a === 'del') {
-          if (!await confirmBox('Delete ' + nm + '?', 'The file is removed from Scratch. This cannot be undone.', 'Delete')) return;
-          try { await fs.remove(scratchFolder(chat.id).uri, p); } catch (e) { toast(e.message || 'Could not delete', { kind: 'err' }); }
-          await draw(); drawScratch();
-        }
-      }, nm);
-    });
+    $$('[data-p]', body).forEach((row) => row.onclick = () => fileMenu(row, 'scratch', row.dataset.p, row.dataset.s, openScratch));
     $('#scZip').onclick = async () => {
       try {
         if (!window.fflate) throw new Error('The zip engine did not load.');
@@ -1436,24 +1484,12 @@ async function openFiles(path = '') {
   body.innerHTML = '<div class="note">Loading...</div>';
   try {
     const es = (await fs.list(S.folder.uri, path)).sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name));
-    body.innerHTML = (S.folder.remote ? '<button id="rfUp" class="btn" style="width:100%;margin-bottom:8px">' + ICON('upload') + '<span class="lbl">Upload a file...</span></button>' : '') + (es.length ? es.map((e) => '<div class="row-item" data-p="' + esc(e.path) + '" data-d="' + (e.isDir ? 1 : 0) + '">' + ICON(e.isDir ? 'folder' : 'file') + '<div class="grow"><div class="t">' + esc(e.name) + '</div>' + (e.isDir ? '' : '<div class="s">' + fmtBytes(e.size) + '</div>') + '</div>' + (!e.isDir && isHtmlName(e.name) ? '<button class="icon-btn" data-pv="' + esc(e.path) + '" aria-label="Preview ' + esc(e.name) + '">' + ICON('eye') + '</button>' : '') + '</div>').join('') : '<div class="note">This folder is empty</div>');
+    body.innerHTML = (S.folder.remote ? '<button id="rfUp" class="btn" style="width:100%;margin-bottom:8px">' + ICON('upload') + '<span class="lbl">Upload a file...</span></button>' : '') + (es.length ? es.map((e) => '<div class="row-item" data-p="' + esc(e.path) + '" data-d="' + (e.isDir ? 1 : 0) + '" data-s="' + (e.size || 0) + '">' + ICON(e.isDir ? 'folder' : 'file') + '<div class="grow"><div class="t">' + esc(e.name) + '</div>' + (e.isDir ? '' : '<div class="s">' + fmtBytes(e.size) + '</div>') + '</div>' + (!e.isDir && isHtmlName(e.name) ? '<button class="icon-btn" data-pv="' + esc(e.path) + '" aria-label="Preview ' + esc(e.name) + '">' + ICON('eye') + '</button>' : '') + '</div>').join('') : '<div class="note">This folder is empty</div>');
     if ($('#rfUp')) $('#rfUp').onclick = () => uploadToServer(path);
     $$('[data-p]', body).forEach((r) => r.onclick = async (ev) => {
       const pv = ev.target.closest('[data-pv]'); if (pv) { ev.stopPropagation(); previewFile(pv.dataset.pv); return; }
       if (r.dataset.d === '1') return openFiles(r.dataset.p);
-      if (S.folder.remote) {
-        const rp = r.dataset.p;
-        popMenu(r, [{ a: 'view', label: 'View', icon: 'file' }, { a: 'dl', label: 'Download', icon: 'down' }, { a: 'del', label: 'Delete', icon: 'trash', danger: true }], async (a) => {
-          if (a === 'view') { const b3 = sheet(rp, { back: () => openFiles(path) }); openFileView(rp, b3); return; }
-          if (a === 'dl') { downloadFromServer(rp, () => openFiles(path)); return; }
-          if (!await confirmBox('Delete "' + baseOf(rp) + '"?', 'It is removed from the server and cannot be restored from the app.', 'Delete')) return;
-          try { await fs.remove(S.folder.uri, rp); } catch (e) { toast((e && e.message) || 'Could not delete the file', { kind: 'err' }); }
-          openFiles(path);
-        }, baseOf(rp));
-        return;
-      }
-      const p = r.dataset.p; const b2 = sheet(p, { back: () => openFiles(path) });
-      openFileView(p, b2);
+      fileMenu(r, S.folder.remote ? 'server' : 'local', r.dataset.p, r.dataset.s, () => openFiles(path));
     });
   } catch (e) { body.innerHTML = '<div class="err">' + esc(e.message || 'Could not read the folder') + '</div>'; }
 }
@@ -1628,7 +1664,7 @@ function openSettings() {
   const drawAF = async () => {
     const box = $('#afBox'); if (!box) return;
     const st2 = await AllFiles.status();
-    box.innerHTML = '<div class="kv"><span>All files access</span><span>' + (st2.web ? 'Android only' : !st2.supported ? 'Not needed' : st2.granted ? 'On' : 'Off') + '</span></div><div class="note" style="text-align:left">' + (st2.granted ? 'Files and Git use direct paths, like Termux does.' : 'Direct file access makes files and Git much faster. You turn it on once in Android settings.') + '</div>' + (st2.supported && !st2.granted ? '<button id="afOn" class="btn primary" style="width:100%;margin-bottom:8px"><span class="lbl">Turn on fast access</span></button>' : '');
+    box.innerHTML = '<div class="kv"><span>' + (st2.legacy ? 'Storage access' : 'All files access') + '</span><span>' + (st2.web ? 'Android only' : !st2.supported ? 'Not available' : st2.granted ? 'On' : 'Off') + '</span></div><div class="note" style="text-align:left">' + (st2.granted ? 'Files and Git use direct paths, like Termux does.' : st2.legacy ? 'Direct file access makes files and Git much faster. Android asks once; tap Allow.' : 'Direct file access makes files and Git much faster. You turn it on once in Android settings.') + '</div>' + (st2.supported && !st2.granted ? '<button id="afOn" class="btn primary" style="width:100%;margin-bottom:8px"><span class="lbl">Turn on fast access</span></button>' : '');
     if ($('#afOn')) $('#afOn').onclick = () => askAllFiles(drawAF);
   };
   drawAF();
@@ -2073,7 +2109,7 @@ function bindGit(folder, st, body) {
         const names = [...new Set(found.map((f) => f.path))];
         const detail = found.slice(0, 4).map((f) => f.path + ' (' + f.kind + ', line ' + f.line + ')').join('\n') + (found.length > 4 ? '\n+' + (found.length - 4) + ' more' : '') + (unchecked ? '\n\n' + unchecked + ' more files were not checked.' : '');
         D.log('git', 'Secret scan flagged ' + found.length + ' place(s) before commit');
-        const pick = await choiceBox('Possible secret found', 'These files look like they contain a key or token. Once pushed, it is public.\n\n' + detail, ['Leave them out', 'Commit anyway']);
+        const pick = await choiceBox('Possible secret found', 'These files look like they contain a key or token. Once pushed, it is public.\n\n' + detail, ['Leave them out', 'Commit anyway'], { stack: true });
         if (pick === -1) return;
         if (pick === 0) { paths = paths.filter((p) => !names.includes(p)); if (!paths.length) { toast('Nothing left to commit.'); return; } }
       }

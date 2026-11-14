@@ -78,7 +78,8 @@ import javax.crypto.spec.GCMParameterSpec;
  *  - folder access through the Storage Access Framework (the user picks a folder; nothing else is reachable)
  */
 @CapacitorPlugin(name = "KdexNative", permissions = {
-        @Permission(strings = {"com.termux.permission.RUN_COMMAND"}, alias = "termux")
+        @Permission(strings = {"com.termux.permission.RUN_COMMAND"}, alias = "termux"),
+        @Permission(strings = {"android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.READ_EXTERNAL_STORAGE"}, alias = "storage")
 })
 public class KdexNativePlugin extends Plugin {
 
@@ -495,7 +496,7 @@ public class KdexNativePlugin extends Plugin {
     @PluginMethod
     public void openPath(PluginCall call) {
         try {
-            if (!allFilesGranted()) { call.reject("Opening by path needs \"All files access\". Turn it on in Settings, then try again."); return; }
+            if (!allFilesGranted()) { call.reject("Opening by path needs fast file access. Turn it on in Settings, then try again."); return; }
             String raw = call.getString("path", "");
             raw = raw == null ? "" : raw.trim();
             if ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'"))) raw = raw.substring(1, raw.length() - 1).trim();
@@ -1001,20 +1002,35 @@ public class KdexNativePlugin extends Plugin {
     // works and it is far faster than Android's folder access (SAF), which needs a content query for every step.
     // Without the permission, or for folders outside shared storage, the SAF code below is used unchanged.
 
+    /** Direct paths work with "All files access" (Android 11+) or, on Android 8 to 10, the ordinary storage permission. */
     private boolean allFilesGranted() {
-        try { return Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager(); } catch (Throwable t) { return false; }
+        try {
+            if (Build.VERSION.SDK_INT >= 30) return android.os.Environment.isExternalStorageManager();
+            Context c = getContext();
+            boolean perm = c.checkSelfPermission("android.permission.WRITE_EXTERNAL_STORAGE") == PackageManager.PERMISSION_GRANTED
+                    && c.checkSelfPermission("android.permission.READ_EXTERNAL_STORAGE") == PackageManager.PERMISSION_GRANTED;
+            if (!perm) return false;
+            return Build.VERSION.SDK_INT != 29 || android.os.Environment.isExternalStorageLegacy();
+        } catch (Throwable t) { return false; }
     }
 
     @PluginMethod
     public void allFilesStatus(PluginCall call) {
         JSObject ret = new JSObject();
-        ret.put("supported", Build.VERSION.SDK_INT >= 30);
+        ret.put("supported", true);
+        ret.put("legacy", Build.VERSION.SDK_INT < 30);
         ret.put("granted", allFilesGranted());
         call.resolve(ret);
     }
 
     @PluginMethod
     public void requestAllFiles(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 30) {
+            // Android 8 to 10: one ordinary permission box
+            if (allFilesGranted()) { JSObject r = new JSObject(); r.put("legacy", true); call.resolve(r); return; }
+            requestPermissionForAlias("storage", call, "storageResult");
+            return;
+        }
         try {
             Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + getContext().getPackageName()));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -1030,6 +1046,24 @@ public class KdexNativePlugin extends Plugin {
     }
 
     /** The real folder behind a picked tree, or null when direct access is not possible (then SAF is used). */
+    @PermissionCallback
+    private void storageResult(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("legacy", true);
+        r.put("settings", false);
+        try {
+            if (!allFilesGranted() && getActivity() != null
+                    && !getActivity().shouldShowRequestPermissionRationale("android.permission.WRITE_EXTERNAL_STORAGE")) {
+                // "Don't ask again" was chosen earlier: the only way left is the app's settings page
+                Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName()));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(i);
+                r.put("settings", true);
+            }
+        } catch (Exception e) { /* the status check afterwards tells the truth */ }
+        call.resolve(r);
+    }
+
     private File directRoot(Uri tree) {
         try {
             if (!allFilesGranted()) return null;

@@ -239,6 +239,16 @@ export const fs = {
     if (plugin) { await plugin.writeB64({ uri: treeOf(uri), path: jn(baseOf(uri), path), b64: bytesToB64(data) }); return; }
     memPut(memFolder(uri), path, data);
   },
+  /** Renames a file in the same folder. The phone folder and Scratch have no rename call, so the file is copied under the new name and the old one removed. */
+  async rename(uri, from, to) {
+    if (isRemoteUri(uri)) return remoteFs.rename(uri, from, to);
+    const st = await fs.stat(uri, from);
+    if (!st || !st.exists) throw new Error('Not found: ' + from);
+    if (st.isDir) throw new Error('Folders cannot be renamed here.');
+    if (st.size > 20971520) throw new Error('This file is larger than 20 MB. Rename it with the terminal (mv).');
+    await fs.writeBytes(uri, to, await fs.readBytes(uri, from));
+    await fs.remove(uri, from);
+  },
   async mkdir(uri, path) { if (isRemoteUri(uri)) return remoteFs.mkdir(uri, path); if (isScratchUri(uri)) return; if (plugin) await plugin.mkdir({ uri: treeOf(uri), path: jn(baseOf(uri), path) }); },
   async remove(uri, path) {
     if (isRemoteUri(uri)) return remoteFs.remove(uri, path);
