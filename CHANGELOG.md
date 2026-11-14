@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.22]
+
+### Changed
+- Settings > Images: the Image model box and its long explanation now appear only after you pick an image provider. With the provider off you see a one-line hint, and the model name you typed is kept for when you switch it on again.
+
 ## [1.52.21]
 
 ### Changed

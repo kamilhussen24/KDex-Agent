@@ -1666,7 +1666,8 @@ function openSettings() {
     '<label class="field"><span>Custom instructions</span><textarea id="setInstr" placeholder="Tone, language, rules...">' + esc(st.instructions) + '</textarea></label>' +
     '<div class="h3">Images</div>' +
     '<label class="field"><span>Image provider</span><select id="setImgProv"><option value="">Off</option>' + S.providers.filter((p) => p.type !== 'anthropic').map((p) => '<option value="' + esc(p.id) + '"' + (p.id === st.imageProvider ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
-    '<label class="field"><span>Image model</span><input id="setImgModel" value="' + esc(st.imageModel || '') + '" placeholder="gpt-image-1" autocapitalize="off" autocomplete="off"><small>Lets the agent create pictures such as thumbnails and backgrounds with your own key. It always asks first, because each picture uses credits. Examples: gpt-image-1 or dall-e-3 (OpenAI), imagen-3.0-generate-002 (Gemini). Anthropic models cannot make pictures.</small></label>' +
+    '<small id="imgOff" class="' + (st.imageProvider ? 'hidden' : '') + '" style="display:block;margin:-4px 0 8px">Pick a provider to let the agent create pictures.</small>' +
+    '<div id="imgMore" class="' + (st.imageProvider ? '' : 'hidden') + '"><label class="field"><span>Image model</span><input id="setImgModel" value="' + esc(st.imageModel || '') + '" placeholder="gpt-image-1" autocapitalize="off" autocomplete="off"><small>Lets the agent create pictures such as thumbnails and backgrounds with your own key. It always asks first, because each picture uses credits. Examples: gpt-image-1 or dall-e-3 (OpenAI), imagen-3.0-generate-002 (Gemini). Anthropic models cannot make pictures.</small></label></div>' +
     '<div class="h3">Files</div>' +
     '<div class="field"><span>Approvals in new chats</span>' + seg('setAutoDef', [['0', 'Ask first'], ['1', 'Auto']], st.autoDefault ? '1' : '0') + '<small>Auto runs file changes, zip, commits and everyday commands without asking. Deleting data, sudo, force push, publishing and similar risky actions still ask. You can switch any chat with the chip above the messages. Backups and Undo always work.</small></div>' +
     '<div class="field"><span>Commands outside the start folder</span>' + seg('setOut', [['server', 'Servers'], ['all', 'Always'], ['off', 'Off']], st.outsideAsk || 'server') + '<small>Servers asks before a command goes outside the start folder, even in Auto. Always does that everywhere. Off never asks. Commands inside the folder are not affected.</small></div>' +
@@ -1704,7 +1705,7 @@ function openSettings() {
   bindSeg('setTheme', (v) => { save({ theme: v }); applyTheme(); });
   bindSeg('setQuiet', (v) => save({ quietToasts: v === '1' }));
   $('#setModel').onchange = (e) => save({ defaultModel: e.target.value });
-  $('#setImgProv').onchange = (e) => save({ imageProvider: e.target.value });
+  $('#setImgProv').onchange = (e) => { save({ imageProvider: e.target.value }); $('#imgMore').classList.toggle('hidden', !e.target.value); $('#imgOff').classList.toggle('hidden', !!e.target.value); };
   $('#setImgModel').onchange = (e) => save({ imageModel: e.target.value.trim() });
   $('#setSteps').onchange = (e) => save({ maxSteps: Math.max(1, Math.min(150, Number(e.target.value) || 20)) });
   $('#setOut').onchange = (e) => save({ maxOut: Math.max(1000, Math.min(64000, Math.round(Number(e.target.value)) || 32000)) });
