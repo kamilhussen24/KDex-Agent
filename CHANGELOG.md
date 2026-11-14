@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.9]
+
+### Changed
+- The menu of a chat (Pin, Rename, Delete) opens below the chat row, or above it when there is no room, like the file menu. Before, pressing and holding put it under your finger, over the row's own text.
+
 ## [1.52.8]
 
 ### Changed

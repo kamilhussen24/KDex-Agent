@@ -400,14 +400,11 @@ function openRowMenu(btn, id, pt) {
   m.innerHTML = '<button data-a="pin">' + ICON('pin') + '<span>' + (c.pinned ? 'Unpin' : 'Pin') + '</span></button><button data-a="rename">' + ICON('edit') + '<span>Rename</span></button><button data-a="del" class="danger">' + ICON('trash') + '<span>Delete</span></button>';
   document.body.appendChild(m);
   markMenuRow(btn.closest('.chat-item'), $('#chatList'));
-  const r = btn.getBoundingClientRect(); const mh = m.offsetHeight, mw = m.offsetWidth;
-  if (pt) { // opened by a long press: appear next to the finger
-    m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, pt.x - mw / 2)) + 'px';
-    m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, pt.y + 12 > window.innerHeight - mh - 8 ? pt.y - mh - 12 : pt.y + 12)) + 'px';
-  } else {
-    m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw)) + 'px';
-    m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, r.bottom + 4)) + 'px';
-  }
+  // Below the row, or above it when there is no room, like the file menu: the pressed row is never covered.
+  // A long press and the three dots give the same place.
+  const rowEl = btn.closest('.chat-item') || btn; const r = rowEl.getBoundingClientRect(); const mh = m.offsetHeight, mw = m.offsetWidth;
+  m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(window.innerHeight - mh - 8, r.bottom + 4 + mh > window.innerHeight - 8 ? r.top - mh - 4 : r.bottom + 4)) + 'px';
   m.onclick = async (e) => {
     const b = e.target.closest('[data-a]'); if (!b) return; closeRowMenu();
     const row = await db.get('chats', id); if (!row) return;
