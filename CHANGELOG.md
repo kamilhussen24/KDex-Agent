@@ -7,6 +7,13 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.8]
+
+### Changed
+- The eye button in the secret box shows an eye when the value is hidden and a crossed-out eye when it is shown.
+- Boxes with a text field (rename, access token, name, secret value) have the same space above and below the field, so the buttons sit closer.
+- The file icon is a little wider and shorter, with soft corners like the folder and copy icons. It changes everywhere at once.
+
 ## [1.52.7]
 
 ### Added

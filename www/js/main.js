@@ -2146,12 +2146,12 @@ function askSecret(info, signal) {
     $('#dlgText').innerHTML = (info.description ? '<div style="margin-bottom:8px">' + esc(info.description) + '</div>' : '') +
       '<div style="margin-bottom:8px;font-size:12.5px">Saved to <b>' + esc(info.file) + '</b> in this project. The agent never sees the value and it is not shown in the chat.</div>' +
       '<div style="display:flex;gap:6px"><input id="dlgInput" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1;min-width:0;height:42px;border:1px solid var(--line);border-radius:12px;padding:0 12px;background:var(--card);outline:0" placeholder="Value"><button id="dlgEye" type="button" class="icon-btn" aria-label="Show value">' + ICON('eye') + '</button></div>';
-    $('#dlgYes').firstElementChild.textContent = 'Save'; $('#dlgNo').firstElementChild.textContent = 'Skip'; $('#dialog').classList.remove('hidden');
+    $('#dlgText').classList.add('has-in'); $('#dlgYes').firstElementChild.textContent = 'Save'; $('#dlgNo').firstElementChild.textContent = 'Skip'; $('#dialog').classList.remove('hidden');
     setTimeout(() => { const i = $('#dlgInput'); if (i) i.focus(); }, 60);
-    $('#dlgEye').onclick = () => { const i = $('#dlgInput'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; $('#dlgEye').setAttribute('aria-label', show ? 'Hide value' : 'Show value'); };
+    $('#dlgEye').onclick = () => { const i = $('#dlgInput'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; $('#dlgEye').setAttribute('aria-label', show ? 'Hide value' : 'Show value'); $('#dlgEye').innerHTML = ICON(show ? 'eye-off' : 'eye'); };
     const done = (v) => {
       const t = $('#dlgInput') ? $('#dlgInput').value : '';
-      $('#dialog').classList.add('hidden'); $('#dlgText').textContent = ''; $('#dlgNo').firstElementChild.textContent = 'Cancel'; $('#dlgYes').onclick = $('#dlgNo').onclick = null;
+      $('#dialog').classList.add('hidden'); $('#dlgText').classList.remove('has-in'); $('#dlgText').textContent = ''; $('#dlgNo').firstElementChild.textContent = 'Cancel'; $('#dlgYes').onclick = $('#dlgNo').onclick = null;
       res(v && t.trim() ? t.trim() : null);
     };
     $('#dlgYes').onclick = () => { if (!$('#dlgInput').value.trim()) { $('#dlgInput').focus(); return; } done(true); };
@@ -2175,9 +2175,9 @@ function askChoice(question, options, signal) {
 function askText(title, placeholder, value = '', toEnd = false) {
   return new Promise((res) => {
     $('#dlgTitle').textContent = title; $('#dlgText').innerHTML = '<input id="dlgInput" style="width:100%;height:42px;border:1px solid var(--line);border-radius:12px;padding:0 12px;background:var(--card);outline:0" placeholder="' + esc(placeholder) + '" autocapitalize="off" autocomplete="off">';
-    $('#dlgInput').value = value; $('#dlgYes').firstElementChild.textContent = 'OK'; $('#dialog').classList.remove('hidden');
+    $('#dlgText').classList.add('has-in'); $('#dlgInput').value = value; $('#dlgYes').firstElementChild.textContent = 'OK'; $('#dialog').classList.remove('hidden');
     setTimeout(() => { const i = $('#dlgInput'); if (i) { i.focus(); if (toEnd) { const n = i.value.length; try { i.setSelectionRange(n, n); } catch (e) { /* ignore */ } } } }, 50);
-    const done = (v) => { const t = $('#dlgInput') ? $('#dlgInput').value.trim() : ''; $('#dialog').classList.add('hidden'); $('#dlgText').textContent = ''; $('#dlgYes').onclick = $('#dlgNo').onclick = null; res(v ? t : null); };
+    const done = (v) => { const t = $('#dlgInput') ? $('#dlgInput').value.trim() : ''; $('#dialog').classList.add('hidden'); $('#dlgText').classList.remove('has-in'); $('#dlgText').textContent = ''; $('#dlgYes').onclick = $('#dlgNo').onclick = null; res(v ? t : null); };
     $('#dlgYes').onclick = () => done(true); $('#dlgNo').onclick = () => done(false);
   });
 }

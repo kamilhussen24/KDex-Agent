@@ -435,6 +435,7 @@ html[data-theme=dark]{--b2:#FF7A92;--ink:#FF7A92;--tint:rgba(255,110,140,.14);--
 .dialog-card .dlg-title{font-size:16px;margin-bottom:8px}
 .dialog-card .btn,.dialog-card .btn.primary:not(.sm){min-height:36px;padding:0 16px;border-radius:10px;font-size:14px;font-weight:500}
 .dialog-card .btn.primary:not(.sm){font-weight:600;padding:0 20px}
+.dlg-text.has-in{margin-bottom:10px}.dlg-text.has-in input{margin-bottom:0}
 .dialog-card input,.dialog-card .inp{height:38px;border-radius:10px;font-size:14px;padding:0 12px;margin-bottom:12px}
 .btn.dim{opacity:.75}
 :root{--ink:#BD2845;--bad-text:#C23535}
