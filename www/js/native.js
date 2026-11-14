@@ -319,7 +319,9 @@ export const Termux = {
   async run(command, cwd, timeoutMs) {
     if (window.__kdexTermux) return window.__kdexTermux({ command, cwd, timeoutMs });
     if (!plugin) throw new Error('The terminal works only in the Android app.');
-    return plugin.termuxRun({ command, cwd, timeoutMs });
+    const r = await plugin.termuxRun({ command, cwd, timeoutMs });
+    if (r && r.exitCode != null) import('./db.js').then((m) => m.kvSet('termuxOk', true)).catch(() => {}); // Termux answered, so the one-time setup is done
+    return r;
   },
 };
 

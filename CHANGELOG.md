@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.13]
+
+### Changed
+- Terminal settings: the "One-time setup" steps are shown until the Termux connection has worked once. After a successful test (or any successful Termux command) they are hidden behind a "Show setup steps" link. A failed test brings them back.
+
 ## [1.52.12]
 
 ### Fixed

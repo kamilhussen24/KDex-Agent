@@ -1730,7 +1730,8 @@ async function drawTerm(redraw) {
         : '<div class="note">Open a project to see its Termux path.</div>') +
       '<div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">' + (stt.granted ? '' : '<button id="tmPerm" class="btn sm"><span class="lbl">Grant permission</span></button>') +
       '<button id="tmTest" class="btn sm"><span class="lbl">Test connection</span></button></div><div id="tmMsg"></div>' +
-      '<div class="card tmsetup"><div class="t">One-time setup</div>' +
+      '<div id="tmSteps"></div>';
+    const SETUP = '<div class="card tmsetup"><div class="t">One-time setup</div>' +
       '<p>1. Install Termux from F-Droid or GitHub (not Google Play).</p>' +
       '<p>2. Open Termux and run these two commands, one after the other:</p>' +
       '<pre class="cmd">mkdir -p ~/.termux</pre>' +
@@ -1739,12 +1740,15 @@ async function drawTerm(redraw) {
       '<p>3. Tap Grant permission here (Run commands in Termux environment).</p>' +
       '<p>4. Pick your project folder through Termux\'s own storage entry, or run this in Termux and pick a folder in shared storage:</p>' +
       '<pre class="cmd">termux-setup-storage</pre></div>';
+    let verified = !!(await kvGet('termuxOk', false)) && !!stt.installed && !!stt.granted;
+    const drawSteps = (show) => { $('#tmSteps').innerHTML = show ? SETUP + (verified ? '<button id="tmHide" class="linkbtn" type="button" style="margin:8px 0 0;padding:0">Hide setup steps</button>' : '') : '<button id="tmShow" class="linkbtn" type="button" style="margin:4px 0 0;padding:0">Show setup steps</button>'; if ($('#tmHide')) $('#tmHide').onclick = () => drawSteps(false); if ($('#tmShow')) $('#tmShow').onclick = () => drawSteps(true); };
+    drawSteps(!verified);
     const msg = (h) => { $('#tmMsg').innerHTML = h; };
     if ($('#tmPerm')) $('#tmPerm').onclick = async () => { try { await Termux.permission(); } catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); } redraw(); };
     if ($('#tmTest')) $('#tmTest').onclick = async () => {
       msg('<div class="busy"><span class="spin"></span>Running a test command...</div>');
-      try { const r = await Termux.run('echo ok; uname -m', undefined, 20000); msg('<div class="ok">Works (exit ' + r.exitCode + '): ' + esc((r.stdout || '').trim().replace(/\n/g, ', ')) + '</div>'); }
-      catch (e) { msg('<div class="err">' + esc(e.message) + '</div>'); }
+      try { const r = await Termux.run('echo ok; uname -m', undefined, 20000); await kvSet('termuxOk', true); verified = true; drawSteps(false); msg('<div class="ok">Works (exit ' + r.exitCode + '): ' + esc((r.stdout || '').trim().replace(/\n/g, ', ')) + '</div>'); }
+      catch (e) { await kvSet('termuxOk', false); verified = false; drawSteps(true); msg('<div class="err">' + esc(e.message) + '</div>'); }
     };
     if ($('#tmReset')) $('#tmReset').onclick = async () => { await setTermuxPath(S.folder, ''); redraw(); };
     if ($('#tmPath')) $('#tmPath').onclick = async () => { const v = await askText('Path in Termux', '/data/data/com.termux/files/home/project', path || ''); if (v !== null) { await setTermuxPath(S.folder, v); redraw(); } };
