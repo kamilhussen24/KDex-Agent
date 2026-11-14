@@ -67,7 +67,7 @@ export async function scrub(text, folder) {
 /** Hides things that look like secrets wherever they appear: private keys, well-known token shapes, and NAME=value lines with a secret-like name. */
 export function redactPatterns(text) {
   return String(text)
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|$)/g, '[private key hidden]')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----(?=(?:\\r|\\n|\s)*(?:Proc-Type|[A-Za-z0-9+\/=]{16,}))[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|$)/g, '[private key hidden]')
     .replace(/\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g, '***')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{20,}=*/g, 'Bearer ***')
     .replace(/\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|PRIVATE|CREDENTIALS?|AUTH(?!OR))[A-Z0-9_]*)(\s*[=:]\s*)(["']?)([^\s"']{6,})\3/g, '$1$2$3***$3')

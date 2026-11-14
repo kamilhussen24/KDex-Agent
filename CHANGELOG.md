@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.12]
+
+### Fixed
+- The secret check before a commit and the secret hiding for the model no longer treat a hint such as `-----BEGIN ... PRIVATE KEY-----` inside source code as a real key. Only a header followed by key text counts, so projects that merely mention the format are no longer flagged or partly hidden.
+
 ## [1.52.11]
 
 ### Added

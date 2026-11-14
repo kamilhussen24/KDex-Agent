@@ -354,7 +354,7 @@ async function loadExecs(folder) {
 const SECRET_PATTERNS = [
   ['GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})\b/],
   ['GitLab token', /\bglpat-[A-Za-z0-9_-]{16,}\b/],
-  ['Private key', /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/],
+  ['Private key', /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----(?:\\r|\\n)+[A-Za-z0-9+\/=]{16,}/], // a real key has its text right after the header; a hint like '-----BEGIN ... KEY-----' in a form is not one
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/],
   ['Google API key', /\bAIza[0-9A-Za-z_-]{35}\b/],
   ['Stripe live key', /\b[sr]k_live_[0-9A-Za-z]{16,}\b/],
@@ -374,7 +374,8 @@ export async function scanSecrets(folder, changes) {
       if (!r || r.binary || typeof r.text !== 'string') continue;
       const lines = r.text.split('\n');
       for (let i = 0; i < lines.length && out.length < 60; i++) {
-        const l = lines[i]; if (l.length > 4000) continue;
+        let l = lines[i]; if (l.length > 4000) continue;
+        if (/PRIVATE KEY-----\s*$/.test(l) && i + 1 < lines.length) l = l.trimEnd() + '\\n' + lines[i + 1].slice(0, 200).trim(); // header alone on its line: look at the next line
         const hit = SECRET_PATTERNS.find(([, re]) => re.test(l));
         if (hit) { out.push({ path: c.path, kind: hit[0], line: i + 1 }); break; }
       }
