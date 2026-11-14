@@ -7,6 +7,16 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.17]
+
+### Fixed
+- A refused push to GitLab (no write permission on the token, or a protected branch) was shown as "No connection". Git errors from the built-in Git engine now keep their real reason, so you see "Access denied" or "The token was rejected" instead.
+- Genuine internet failures are still recognised and shown as "No connection".
+
+### Changed
+- When Git cannot finish for an unknown reason, the message now includes a short technical reason, and the same text is kept in Diagnostics.
+- Token hints now mention the GitLab scope (write_repository).
+
 ## [1.52.16]
 
 ### Added

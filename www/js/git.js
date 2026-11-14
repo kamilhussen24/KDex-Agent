@@ -5,6 +5,7 @@ import { fs as safFs, httpRaw, secure, subUri, gitNative } from './native.js';
 import { kvGet, kvSet } from './db.js';
 import { lineDiff, BINARY_EXT } from './tools.js';
 import { netText } from './util.js';
+import * as D from './diag.js';
 import { isSecretPath, protectionOn } from './secrets.js';
 
 const git = () => window.git;
@@ -189,7 +190,7 @@ async function remoteUrl(folder) {
 async function tokenFor(folder, url) {
   return getToken(hostOf(url || (await remoteUrl(folder)) || ''));
 }
-const TOKEN_HELP = 'Add one in Settings > Git > Identity and access tokens. GitHub: a classic token with the "repo" scope, or a fine-grained token with Contents: Read and write.';
+const TOKEN_HELP = 'Add one in Settings > Git > Identity and access tokens. GitHub: a classic token with the "repo" scope, or a fine-grained token with Contents: Read and write. GitLab: a token with the "write_repository" scope.';
 /** Turns Git and network failures into a message that says what is wrong and what to do. */
 /** Collects the lines a Git server prints while pushing ("remote: ..."), which hold the real reason for a refusal. */
 function collect() {
@@ -214,13 +215,14 @@ export function explainRefusal(m, lines) {
 function nice(e, { host = '', hasToken = false, action = '', remote = [], branch = '' } = {}) {
   let m = String((e && e.message) || e);
   if (action === 'clone' && branch && /could not find|not found in upstream|remote (branch|ref)|couldn.t find remote ref|NotFoundError/i.test(m) && !/repository not found/i.test(m)) return new Error('Branch \'' + branch + '\' was not found in this repository. Check the name, or leave the branch empty to use the default.');
+  try { D.log('git', (action || 'git') + (host ? ' ' + host : '') + ': ' + m.slice(0, 600)); } catch (x) { /* log is optional */ }
   const refusal = explainRefusal(m, remote);
   if (refusal) return new Error(refusal);
   if (netText(e) || netText(m)) return new Error('No connection' + (host ? ' to ' + host : '') + '. Check your internet and try again.');
   const sub = e && Array.isArray(e.errors) ? e.errors.map((x) => String((x && x.message) || x)).join('; ') : '';
   if (sub) m = sub;
   const status = (e && e.data && e.data.statusCode) || (/\b(401|403|404|429|5\d\d)\b/.exec(m) || [])[1];
-  const st = Number(status) || 0;
+  const st = Number(status) || (/not authorized|authentication is required|authentication not supported/i.test(m) ? 401 : /forbidden|not permitted|access denied|not allowed to push/i.test(m) ? 403 : 0);
   const where = host ? ' on ' + host : '';
   if (/aborted|cancel/i.test(m)) return new Error('Cancelled.');
   if (st === 401 || /Authentication|HTTP Error: 401|could not read Username|not authorized|CredentialsProvider/i.test(m)) {
@@ -228,7 +230,7 @@ function nice(e, { host = '', hasToken = false, action = '', remote = [], branch
       : 'This needs an access token' + where + ' (the repository is private or the action needs login). ' + TOKEN_HELP);
   }
   if (st === 403) {
-    return new Error(hasToken ? 'Access denied' + where + '. The token has no permission for this' + (action === 'push' ? ' (it cannot write; give it the "repo" scope or Contents: Read and write)' : ' repository') + ', or the branch is protected. If the repository belongs to an organization, authorize the token for it.'
+    return new Error(hasToken ? 'Access denied' + where + '. The token has no permission for this' + (action === 'push' ? ' (it cannot write; ' + (/gitlab/i.test(host) ? 'give it the "write_repository" scope' : 'give it the "repo" scope or Contents: Read and write') + ')' : ' repository') + ', or the branch is protected. If the repository belongs to an organization, authorize the token for it.'
       : 'Access denied' + where + '. ' + TOKEN_HELP);
   }
   if (st === 404) return new Error('Repository not found' + where + '. Check the URL. If it is private, save a token that can see it. ' + TOKEN_HELP);
@@ -239,6 +241,10 @@ function nice(e, { host = '', hasToken = false, action = '', remote = [], branch
   if (/Failed to fetch|NetworkError|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|timed? ?out|offline|Load failed|UnknownHost|Connection refused|SocketTimeout|connect timed out|Unable to resolve|Software caused connection abort/i.test(m)) return new Error('No connection to ' + (host || 'the server') + '. Check the internet and try again.');
   if (/ENOSPC|quota|no space/i.test(m)) return new Error('The phone is out of storage space.');
   if (/permission|EACCES|SecurityException/i.test(m)) return new Error('Android denied access to the folder. Open the folder again from the folder chip to grant access.');
+  if (/TransportException|JGitInternalException|SSLHandshake|SSLException|SSLPeer|CertPath|cannot open git-/i.test(m)) {
+    const why = m.replace(/^\w*Exception:\s*/, '').replace(/\s*\|\s*caused by /g, ' / ').slice(0, 240);
+    return new Error('Git could not finish' + (host ? ' with ' + host : '') + '. ' + why);
+  }
   return e instanceof Error && !sub ? e : new Error(m);
 }
 /** The saved token for a remote. A missing token is reported by nice() when the server answers 401 or 403. */

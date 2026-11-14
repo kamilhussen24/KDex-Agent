@@ -953,11 +953,22 @@ public class KdexNativePlugin extends Plugin {
             } catch (java.lang.reflect.InvocationTargetException e) {
                 Throwable c = e.getCause() != null ? e.getCause() : e;
                 if (c instanceof LinkageError) call.reject("native-git-unavailable: " + c);
-                else call.reject(c.getClass().getSimpleName() + ": " + String.valueOf(c.getMessage()));
+                else call.reject(errorChain(c));
             } catch (Throwable e) {
-                call.reject(e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
+                call.reject(errorChain(e));
             }
         });
+    }
+
+    /** "Class: message", followed by the messages of up to three underlying causes, so the real reason is not lost. */
+    private static String errorChain(Throwable c) {
+        StringBuilder sb = new StringBuilder(c.getClass().getSimpleName() + ": " + String.valueOf(c.getMessage()));
+        Throwable t = c.getCause(); int n = 0;
+        while (t != null && n < 3) {
+            sb.append(" | caused by ").append(t.getClass().getSimpleName()).append(": ").append(String.valueOf(t.getMessage()));
+            t = t.getCause(); n++;
+        }
+        return sb.toString();
     }
 
     /** Servers over SSH (files and commands). Runs in KdexRemote by reflection; if JSch is not in the build the app reports that servers are unavailable. */
