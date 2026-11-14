@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.21]
+
+### Changed
+- Tapping Commit with an empty message now only fills in the suggested message. The keyboard no longer opens and the text is no longer selected; tap the box if you want to edit it.
+
 ## [1.52.20]
 
 ### Fixed

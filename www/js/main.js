@@ -2143,7 +2143,7 @@ function bindGit(folder, st, body) {
     $('#gCommit').onclick = async () => {
       let paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p));
       if (!ta.value.trim()) { // no message yet: fill in a plain one to review, do not commit
-        ta.value = draftMessage(st.changes.filter((c) => paths.includes(c.path))); ta.oninput(); ta.focus(); ta.select();
+        ta.value = draftMessage(st.changes.filter((c) => paths.includes(c.path))); ta.oninput();
         return;
       }
       const found = await G.scanSecrets(folder, st.changes.filter((c) => paths.includes(c.path)));
