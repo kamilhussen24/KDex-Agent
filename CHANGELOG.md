@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.19]
+
+### Fixed
+- With no network, Git could show "Could not connect to <host>. Check the address" instead of "No connection". The no-network check now comes first, so a missing connection is reported as "No connection" again.
+
 ## [1.52.18]
 
 ### Changed

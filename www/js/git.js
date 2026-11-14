@@ -218,8 +218,8 @@ function nice(e, { host = '', hasToken = false, action = '', remote = [], branch
   if (!/aborted|cancel/i.test(m)) { try { D.log('git', (action || 'git') + (host ? ' ' + host : '') + ': ' + m.slice(0, 600)); } catch (x) { /* log is optional */ } }
   const refusal = explainRefusal(m, remote);
   if (refusal) return new Error(refusal);
-  { const ct = connText(m, host ? 'https://' + host : ''); if (ct) return new Error(ct); }
   if (netText(e) || netText(m)) return new Error('No connection' + (host ? ' to ' + host : '') + '. Check your internet and try again.');
+  { const ct = connText(m, host ? 'https://' + host : ''); if (ct) return new Error(ct); }
   const sub = e && Array.isArray(e.errors) ? e.errors.map((x) => String((x && x.message) || x)).join('; ') : '';
   if (sub) m = sub;
   const status = (e && e.data && e.data.statusCode) || (/\b(401|403|404|429|5\d\d)\b/.exec(m) || [])[1];
