@@ -7,6 +7,17 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.15]
+
+### Added
+- Drafts: what you type in the message box is kept for each chat (and for a new chat), so leaving the chat, closing the app or a phone shutdown no longer loses it. Sending, or emptying the box, removes the draft. A draft that looks like a key or token is not kept. Deleting a chat deletes its draft.
+
+## [1.52.14]
+
+### Changed
+- Long chats keep more of their history: the automatic summary of older messages may now be up to 650 words (was 450).
+- The project instructions file KDEX.md is read up to 6,000 characters (was 4,000).
+
 ## [1.52.13]
 
 ### Changed

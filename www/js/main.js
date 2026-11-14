@@ -218,7 +218,8 @@ async function enter() {
   fillModels();
   await loadChats();
   const last = await kvLast();
-  if (last && S.chats.find((c) => c.id === last)) await openChat(last); else await newChat();
+  const pending = await kvGet('draft:new', ''); // an unsent message in a new chat: open that new chat so it is there
+  if (!pending && last && S.chats.find((c) => c.id === last)) await openChat(last); else await newChat();
 }
 async function kvLast() { const r = await db.get('kv', 'lastChat'); return r && r.value; }
 function fillModels(sel) {
@@ -423,14 +424,17 @@ function openRowMenu(btn, id, pt) {
       if (!await confirmBox('Delete chat?', 'This chat and its backups are removed from the phone.' + (busyHere ? ' Its running task stops too.' : ''), 'Delete')) return;
       if (S.running && S.runChat && S.runChat.id === id) { stopRun(); await waitIdle(); }
       await A.removeChat(id); await loadChats(); if (S.chat && S.chat.id === id) await newChat(null);
+      await db.del('kv', 'draft:' + id).catch(() => {});
     }
   };
 }
 async function newChat(folder) {
+  await flushDraft(); $('#input').value = ''; autoGrow();
   S.chat = { id: uid(), title: '', model: currentModelId(), think: S.settings.defaultThink || 'off', auto: !!S.settings.autoDefault && !(folder && folder.remote), folderId: folder ? folder.id : null, updated: Date.now() };
   S.folder = folder || null; S.think = S.chat.think; S.chat.fresh = true;
   S.els.clear(); if (!S.running) S.approvals.clear();
   fillModels(S.chat.model); drawCtx(); drawThink(); drawPlan(); $('#messages').innerHTML = ''; renderEmpty(); setRunning(S.running); updateApproveBar(); closeDrawer(); drawRing();
+  await loadDraft();
 }
 /** Content shared from another app, or a notification tap: open the right chat and drop the shared text/files into the composer. */
 async function handleLaunch(l) {
@@ -448,6 +452,7 @@ async function handleLaunch(l) {
 }
 window.__kdexLaunch = handleLaunch;
 async function openChat(id) {
+  if (!(S.chat && S.chat.id === id)) { await flushDraft(); $('#input').value = ''; autoGrow(); }
   const live = S.running && S.runChat && S.runChat.id === id; // the task of this chat is still running: use its live chat object
   const c = live ? S.runChat : await db.get('chats', id); if (!c) return newChat();
   S.chat = c; S.folder = S.folders.find((f) => f.id === c.folderId) || null; S.think = c.think || 'off'; touchFolder(S.folder);
@@ -460,6 +465,7 @@ async function openChat(id) {
   if (!msgs.length) renderEmpty();
   msgs.forEach((m) => renderMsg(m));
   trimCont(); scrollEnd(true); closeDrawer(); drawChatList(); setRunning(S.running); updateApproveBar(); drawRing();
+  await loadDraft();
 }
 /** Hand a text file to the user: share sheet when available; on the phone otherwise save it into a folder they pick; in a browser a normal download. */
 async function saveOut(name, text) {
@@ -717,7 +723,7 @@ async function send(regenerate) {
     const qt = $('#input').value.trim();
     if (!qt && !S.attach.length) return;
     if (S.attach.length) { toast('Attachments can be added when the task is done', { kind: 'warn' }); return; }
-    S.queue.push(qt); $('#input').value = ''; autoGrow(); ghostGuard(qt); drawQueue(); return;
+    S.queue.push(qt); $('#input').value = ''; autoGrow(); dropDraft(false); ghostGuard(qt); drawQueue(); return;
   }
   if (S.running) { // a task runs in another chat: one task at a time, so ask what to do
     if (!regenerate && !$('#input').value.trim() && !S.attach.length) return;
@@ -732,7 +738,7 @@ async function send(regenerate) {
   const attach = regenerate ? [] : S.attach;
   const images = attach.filter((a) => a.img).map((a) => ({ mime: a.mime, data: a.data }));
   const files = attach.filter((a) => !a.img);
-  if (!regenerate) { input.value = ''; autoGrow(); S.attach = []; drawChips(); if (text) { lastSent.text = text; lastSent.at = Date.now(); ghostGuard(text); } }
+  if (!regenerate) { input.value = ''; autoGrow(); dropDraft(!!(S.chat && S.chat.fresh)); S.attach = []; drawChips(); if (text) { lastSent.text = text; lastSent.at = Date.now(); ghostGuard(text); } }
   if (S.chat.fresh && !S.chat.title) { S.chat.title = (text || (attach[0] && attach[0].name) || 'New chat').slice(0, 48); }
   const tu = $('#turnUndo'); if (tu) tu.remove();
   $$('.controw').forEach((x) => x.remove()); const pd = $('#planDone'); if (pd) pd.remove(); input.placeholder = 'Message KDex Agent';
@@ -846,6 +852,27 @@ async function addFiles(list) {
 function warnNoVision() {
   const m = S.models.find((x) => x.id === currentModelId());
   if (m && !likelySeesImages(m.apiModel) && !(S.visionWarned = S.visionWarned || new Set()).has(m.id) && S.visionWarned.add(m.id)) toast("Pictures may not work. This model may not read pictures; if the reply ignores it, switch to a vision model (for example Claude, GPT-4o or Gemini).", { kind: 'warn' });
+}
+// ---- drafts: what is typed in the message box survives leaving the chat, closing the app or a phone shutdown
+let draftTimer = null;
+const draftKey = () => (S.chat && !S.chat.fresh ? 'draft:' + S.chat.id : 'draft:new');
+async function flushDraft() {
+  clearTimeout(draftTimer); draftTimer = null;
+  if (!S.chat) return; // no chat is open yet (app start): there is nothing to save and the stored draft must stay
+  const t = $('#input'); if (!t) return; const v = t.value; const key = draftKey();
+  try {
+    if (!v.trim() || redactPatterns(v) !== v) await db.del('kv', key); // empty, or it looks like a key or token: do not keep it
+    else await kvSet(key, v);
+  } catch (e) { /* storage unavailable */ }
+}
+const scheduleDraft = () => { clearTimeout(draftTimer); draftTimer = setTimeout(flushDraft, 600); };
+async function loadDraft() {
+  const t = $('#input'); if (!t || t.value) return;
+  try { const v = await kvGet(draftKey(), ''); if (v && !t.value) { t.value = v; autoGrow(); } } catch (e) { /* none */ }
+}
+async function dropDraft(fresh) {
+  clearTimeout(draftTimer); draftTimer = null;
+  try { await db.del('kv', fresh ? 'draft:new' : draftKey()); if (S.chat) await db.del('kv', 'draft:' + S.chat.id); } catch (e) { /* none */ }
 }
 function autoGrow() { const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; }
 
@@ -1708,6 +1735,8 @@ function openSettings() {
     for (const row of await db.all('backups')) if (!keep.has(row.chatId)) await db.del('backups', row.id);
     for (const row of await db.all('chats')) if (!keep.has(row.id)) await db.del('chats', row.id);
     for (const u of await scratchUsage()) if (!keep.has(u.chatId)) await scratchClear(u.chatId);
+    for (const k of await db.all('kv')) if (String(k.key).startsWith('draft:') && !keep.has(String(k.key).slice(6))) await db.del('kv', k.key);
+    if (!S.chat || !keep.has(S.chat.id)) { $('#input').value = ''; autoGrow(); }
     closeSheet(); await newChat(null); await loadChats(); toast(keep.size ? 'Conversations deleted (pinned kept)' : 'All conversations deleted');
   };
   $('#bkOut').onclick = () => exportBackup().catch((e) => toast(e.message, { kind: 'err' })); $('#bkIn').onclick = () => importBackup().catch((e) => toast(e.message, { kind: 'err' }));
@@ -2426,7 +2455,9 @@ function wire() {
     const it = e.target.closest('[data-id]'); if (it) openChat(it.dataset.id);
   };
   $('#composer').onsubmit = (e) => { e.preventDefault(); send(false); };
-  $('#input').addEventListener('input', autoGrow);
+  $('#input').addEventListener('input', () => { autoGrow(); scheduleDraft(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flushDraft(); });
+  window.addEventListener('pagehide', () => { flushDraft(); });
   $('#attachBtn').onclick = () => $('#fileInput').click();
   $('#fileInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
   $('#chips').onclick = (e) => { const b = e.target.closest('[data-rm]'); if (b) { S.attach.splice(Number(b.dataset.rm), 1); drawChips(); } };

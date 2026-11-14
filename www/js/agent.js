@@ -123,7 +123,7 @@ const ABOUT =
   '- New chat: the + button (no folder). Add or change a project folder: the folder button above the chat. Attach photos or text files: the paperclip. Delete one chat: its trash icon in the menu list; delete everything: Settings > Data > Delete all conversations.\n' +
   '- Save tokens: Settings > Chat > Token saving (Economy, Balanced, Full); older messages are summarised automatically and reading each file once also saves cost. Memory and learning: Settings > Memory. Theme: Settings > Appearance. Token usage: Settings > Data > Token usage.\n' +  '- Connect a model: Settings > Add provider, pick the service, paste the API key, choose models (a few popular ones are listed; any other model id can be typed). Thinking: bulb button (Off, Low, Medium, High). Token usage: Settings > Token usage.\n' +
   '- Open a project: folder button > Open a folder, then pick the folder. Only that folder is accessible.\n' +
-  '- Project instructions: a file named KDEX.md in the project folder is read at the start of every message of that chat (rules such as language, test command, files not to touch; up to 4000 characters). Pictures: Settings > Images (choose the provider and image model; each picture asks first).\n' +
+  '- Project instructions: a file named KDEX.md in the project folder is read at the start of every message of that chat (rules such as language, test command, files not to touch; up to 6000 characters). Pictures: Settings > Images (choose the provider and image model; each picture asks first).\n' +
   '- Approvals: the chip above the chat switches Ask first and Auto. Auto runs everyday actions and still asks for risky ones (rm, sudo, every git push, discarding changes, publishing). File changes keep backups and Undo.\n' +
   '- Git: the Git chip. Folder without Git: Clone, New repo (publishes to GitHub or GitLab) or Local only. Pushing, and private repositories, need a name, email and access token: Settings > Git > Identity and access tokens (GitHub classic token with the repo scope, or fine-grained with Contents: Read and write). The built-in Git supports https only, one branch at a time, no Git LFS, no submodules and no SSH, and it is slow on very large repositories. When Terminal is on, real git in Termux (pkg install git) handles those cases, and the app lends it the saved token automatically for clone, fetch, pull and push.\n' +
 
@@ -194,7 +194,7 @@ async function projectMap(folder) {
 }
 
 
-/** The project's own instructions: KDEX.md in the folder root (up to 4000 characters, read fresh every turn). */
+/** The project's own instructions: KDEX.md in the folder root (up to 6000 characters, read fresh every turn). */
 async function readKdex(folder) {
   for (const name of ['KDEX.md', 'kdex.md']) {
     try {
@@ -204,7 +204,7 @@ async function readKdex(folder) {
       if (r.binary) continue;
       const t = r.text.trim();
       if (!t) return '';
-      return t.length > 4000 ? t.slice(0, 4000) + '\n[KDEX.md is longer than 4000 characters; only the start is used. Tell the user to shorten it.]' : t;
+      return t.length > 6000 ? t.slice(0, 6000) + '\n[KDEX.md is longer than 6000 characters; only the start is used. Tell the user to shorten it.]' : t;
     } catch (e) { /* no file or unreadable */ }
   }
   return '';
@@ -333,9 +333,9 @@ async function summarize(chat, rt, dropped) {
       provider: rt.provider, apiKey: rt.apiKey, apiModel: rt.apiModel,
       system: 'You maintain a compact memory of a long chat between a user and an AI assistant. You receive the previous summary (may be empty) and older messages. ' +
         'Write an UPDATED summary that keeps what is needed to continue: goals, decisions, important facts, names, file names, code identifiers, constraints and open tasks. ' +
-        'Also record the current state of the work and the exact next step. Dense and factual, at most 450 words, same language as the user. Reply with the summary text only.',
+        'Also record the current state of the work and the exact next step. Dense and factual, at most 650 words, same language as the user. Reply with the summary text only.',
       messages: [{ role: 'user', text: 'Previous summary:\n' + (chat.summary || '(none)') + '\n\nOlder messages:\n' + block }],
-      maxTokens: 900,
+      maxTokens: 1300,
     });
     await recordUsage('summary', rt, usage);
     chat.summary = text.trim();

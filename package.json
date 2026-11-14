@@ -1,6 +1,6 @@
 {
   "name": "kdex-agent",
-  "version": "1.52.13",
+  "version": "1.52.15",
   "private": true,
   "description": "KDex Agent for Android: a private AI assistant that works inside a folder you choose. Bring your own API key; no server.",
   "scripts": {
