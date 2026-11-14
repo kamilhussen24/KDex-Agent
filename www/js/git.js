@@ -135,10 +135,34 @@ function userFor(host) { return /gitlab/.test(host) ? 'oauth2' : /bitbucket/.tes
 function authFor(token) {
   return (url) => { const h = hostOf(url); return token ? { username: userFor(h), password: token } : undefined; };
 }
-async function author() {
+const blankId = (v) => !v || /^root(@localhost)?$/i.test(String(v).trim());
+/** The author set for this repository only (kept in its own Git config), or null. */
+export async function repoAuthor(folder) {
+  const name = (await cfg(folder, 'user.name')).trim(); const email = (await cfg(folder, 'user.email')).trim();
+  return !blankId(name) && !blankId(email) ? { name, email } : null;
+}
+/** Who the next commit is made as: this repository's own author, else the default one. source is 'repo', 'default' or 'none'. */
+export async function effectiveAuthor(folder) {
+  const own = folder ? await repoAuthor(folder) : null;
+  if (own) return { ...own, source: 'repo' };
   const s = await getGitSettings();
-  if (!s.name || !s.email) throw new Error('Set your Git name and email first (Git > Identity).');
-  return { name: s.name, email: s.email };
+  if (!blankId(s.name) && !blankId(s.email)) return { name: s.name, email: s.email, source: 'default' };
+  return { name: '', email: '', source: 'none' };
+}
+export async function setRepoAuthor(folder, name, email) {
+  const c = ctx(folder);
+  await git().setConfig({ ...c, path: 'user.name', value: name });
+  await git().setConfig({ ...c, path: 'user.email', value: email });
+}
+export async function clearRepoAuthor(folder) {
+  const c = ctx(folder);
+  await git().setConfig({ ...c, path: 'user.name', value: undefined });
+  await git().setConfig({ ...c, path: 'user.email', value: undefined });
+}
+async function author(folder) {
+  const a = await effectiveAuthor(folder);
+  if (a.source === 'none') throw new Error('Set your Git name and email first (Git > Identity).');
+  return { name: a.name, email: a.email };
 }
 
 // ---------------------------------------------------------------- context
@@ -187,8 +211,9 @@ export function explainRefusal(m, lines) {
   }
   return '';
 }
-function nice(e, { host = '', hasToken = false, action = '', remote = [] } = {}) {
+function nice(e, { host = '', hasToken = false, action = '', remote = [], branch = '' } = {}) {
   let m = String((e && e.message) || e);
+  if (action === 'clone' && branch && /could not find|not found in upstream|remote (branch|ref)|couldn.t find remote ref|NotFoundError/i.test(m) && !/repository not found/i.test(m)) return new Error('Branch \'' + branch + '\' was not found in this repository. Check the name, or leave the branch empty to use the default.');
   const refusal = explainRefusal(m, remote);
   if (refusal) return new Error(refusal);
   if (netText(e) || netText(m)) return new Error('No connection' + (host ? ' to ' + host : '') + '. Check your internet and try again.');
@@ -235,6 +260,7 @@ async function viaNative(folder, op, args, opts) {
 
 // ---------------------------------------------------------------- operations
 export async function clone(folder, url, { token, depth = 1, branch, onProgress, signal } = {}) {
+  branch = String(branch || '').trim().replace(/^refs\/heads\//, '');
   const host = hostOf(url);
   if (!host) throw new Error('Enter a valid https:// repository URL.');
   const entries = await safFs.list(folder.uri, '');
@@ -254,7 +280,7 @@ export async function clone(folder, url, { token, depth = 1, branch, onProgress,
   } catch (e) {
     try { await safFs.remove(folder.uri, '.git'); } catch (x) { /* ignore */ }
     modes.delete(folder.id); resetGitCache(folder);
-    throw nice(e, { host, hasToken: !!t, action: 'clone' });
+    throw nice(e, { host, hasToken: !!t, action: 'clone', branch });
   }
 }
 /** Clone into a new sub-folder named after the repository. Returns the new project folder. */
@@ -385,7 +411,7 @@ export async function scanSecrets(folder, changes) {
 }
 export async function commit(folder, message, paths, known) {
   await loadExecs(folder);
-  const c = ctx(folder); const au = await author();
+  const c = ctx(folder); const au = await author(folder);
   if (!message || !message.trim()) throw new Error('Write a commit message.');
   const ch = known || await status(folder); // the screen already scanned; do not read every file again
   const prot = await protectionOn();
@@ -437,7 +463,7 @@ export async function push(folder, { force = false, onProgress, signal } = {}) {
   }
 }
 export async function pull(folder, { onProgress, signal } = {}) {
-  const c = ctx(folder); const au = await author();
+  const c = ctx(folder); const au = await author(folder);
   const url = await remoteUrl(folder);
   if (!url) throw new Error('No remote set. Add a remote URL in Git > Remote.');
   const branch = await currentBranch(folder);
@@ -519,7 +545,7 @@ export async function deleteBranch(folder, name) {
   await git().deleteBranch({ ...ctx(folder), ref: name });
 }
 export async function mergeBranch(folder, theirs) {
-  const au = await author(); const c = ctx(folder);
+  const au = await author(folder); const c = ctx(folder);
   const ours = await currentBranch(folder);
   if (ours === theirs) throw new Error('Pick a different branch to merge.');
   try { return await git().merge({ ...c, ours, theirs, author: au, committer: au, abortOnConflict: true }); }
@@ -619,12 +645,13 @@ export async function inspectRepo(folder) {
   try { if (await exists(folder, '.gitattributes')) info.lfs = /filter=lfs/.test((await safFs.readText(folder.uri, '.gitattributes', 20000)).text); } catch (e) { /* ignore */ }
 
   const app = await getGitSettings();
-  const cand = info.config.name && info.config.email ? { name: info.config.name, email: info.config.email, from: 'the repository settings' } : (info.head ? { name: info.head.name, email: info.head.email, from: 'the last commit' } : null);
+  const cand = !blankId(info.config.name) && !blankId(info.config.email) ? { name: info.config.name, email: info.config.email, from: 'the repository settings' } : (info.head && !blankId(info.head.name) && !blankId(info.head.email) ? { name: info.head.name, email: info.head.email, from: 'the last commit' } : null);
   const origin = info.remotes.find((r) => r.name === 'origin') || info.remotes[0];
   if (origin && origin.protocol === 'ssh') info.issues.push({ code: 'ssh', level: 'warn', text: 'The remote "' + origin.name + '" uses SSH (' + origin.url + '). The built-in Git works over HTTPS, so push and pull would fail.', fix: 'Switch to HTTPS', remote: origin.name, to: origin.https });
   else if (origin && origin.protocol === 'git') info.issues.push({ code: 'ssh', level: 'warn', text: 'The remote uses the git:// protocol, which is read-only. Use HTTPS to push.', fix: 'Switch to HTTPS', remote: origin.name, to: origin.https });
   if (!info.remotes.length) info.issues.push({ code: 'noremote', level: 'info', text: 'No remote yet. Add a URL in the Remote tab to push this project to GitHub or GitLab.' });
-  if (!app.name || !app.email) info.issues.push({ code: 'identity', level: cand ? 'info' : 'warn', text: cand ? 'Your Git name and email are not saved in the app. This repository was last used by ' + cand.name + ' <' + cand.email + '> (from ' + cand.from + ').' : 'Your Git name and email are not saved in the app. You need them to commit.', fix: cand ? 'Use ' + cand.name : 'Set identity', cand });
+  const repoHas = !blankId(info.config.name) && !blankId(info.config.email);
+  if ((blankId(app.name) || blankId(app.email)) && !repoHas) info.issues.push({ code: 'identity', level: cand ? 'info' : 'warn', text: cand ? 'Your Git name and email are not saved in the app. This repository was last used by ' + cand.name + ' <' + cand.email + '> (from ' + cand.from + ').' : 'Your Git name and email are not saved in the app. You need them to commit.', fix: cand ? 'Use ' + cand.name : 'Set identity', cand });
   if (info.detached) info.issues.push({ code: 'detached', level: 'warn', text: 'HEAD is detached, so new commits are not on a branch. Switch to a branch in the Branches tab first.' });
   if (info.lfs) info.issues.push({ code: 'lfs', level: 'info', text: 'This repository uses Git LFS. Large files appear as small pointer files here; fetch them with git in the terminal.' });
   if (info.submodules) info.issues.push({ code: 'sub', level: 'info', text: 'This repository has submodules. The built-in Git does not fetch them; use the terminal for those.' });

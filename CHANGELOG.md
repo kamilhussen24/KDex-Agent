@@ -7,6 +7,17 @@ for its version.
 
 ## [Unreleased]
 
+## [1.52.16]
+
+### Added
+- Clone form: an optional Branch field under the repository URL. Empty clones the repository's default branch; a name that does not exist shows a clear "Branch not found" message.
+- A commit author for each repository. Git > Identity shows the default author (edited in Settings) and an author for the open repository, with Save for this repo and Use default. Leaving both fields empty follows the default again.
+- Git > Remote > Account shows who the next commit is made as, with a tag for this repo or the default.
+
+### Changed
+- Commits, pulls, merges and Termux git commands use the repository's own author first, then the default.
+- root@localhost is treated as not set, so a missing name is asked for instead of committing as root.
+
 ## [1.52.15]
 
 ### Added

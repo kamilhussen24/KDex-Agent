@@ -1,7 +1,7 @@
 // Terminal tool: runs a shell command in Termux. Off by default; every command needs the user's approval.
 import { Termux } from './native.js';
 import { db, kvGet } from './db.js';
-import { getToken, getGitSettings, remoteInfo, resetGitCache, listTokenHosts } from './git.js';
+import { getToken, getGitSettings, effectiveAuthor, remoteInfo, resetGitCache, listTokenHosts } from './git.js';
 import { cleanRel } from './util.js';
 import { remoteExec } from './remote.js';
 
@@ -185,7 +185,7 @@ async function withGitToken(command, folder) {
   else { const info = folder ? await remoteInfo(folder).catch(() => null) : null; host = info ? info.host : ''; }
   if (!host) { const hs = await listTokenHosts(); if (hs.length === 1) host = hs[0]; } // only one account saved: unambiguous
   const token = host ? await getToken(host) : null;
-  const id = await getGitSettings().catch(() => ({}));
+  const id = await effectiveAuthor(folder).catch(() => getGitSettings().catch(() => ({})));
   const env = [];
   if (id.name) env.push('GIT_AUTHOR_NAME=' + shq(id.name), 'GIT_COMMITTER_NAME=' + shq(id.name));
   if (id.email) env.push('GIT_AUTHOR_EMAIL=' + shq(id.email), 'GIT_COMMITTER_EMAIL=' + shq(id.email));

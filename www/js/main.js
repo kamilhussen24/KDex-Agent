@@ -1959,7 +1959,7 @@ async function gitRun(label, fn, after, keep) {
   } catch (e) {
     const m = (e && e.message) || String(e);
     if (ac.signal.aborted) { await openGit(GS.tab); toast('Cancelled'); return; }
-    if (/^Set your Git name/.test(m)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGit()); return; }
+    if (/^Set your Git name/.test(m)) { toast('Add your Git name and email first.'); openGitIdentity(() => openGit(), { repo: S.folder }); return; }
     D.log('git', label + ' failed: ' + m); await openGit(GS.tab, true); errLine(m, { retry: () => gitRun(label, fn, after, keep) });
   }
 }
@@ -2065,7 +2065,7 @@ function renderGitTab(folder, st, head, body) {
     h += repoCard(st);
     h += '<div class="h3">Remote</div><div class="card"><div class="t" style="word-break:break-all">' + (st.remote ? esc(st.remote.url) : 'No remote set') + '</div><div style="margin-top:10px"><button id="gRemote" class="btn sm"><span class="lbl">' + (st.remote ? 'Change URL' : 'Set remote URL') + '</span></button></div></div>';
     if (!st.remote) h += '<div class="h3">Create a new repository</div><div class="card"><p>Create a repository on GitHub or GitLab for these files and upload them.</p><button id="gPublish" class="btn primary" style="width:100%"><span class="lbl">Create and push</span></button></div>';
-    h += '<div class="h3">Account</div><div class="card"><div class="kv" style="border:0"><span>Author</span><span id="gAuthor"></span></div><button id="gIdent" class="btn sm"><span class="lbl">Identity and tokens</span></button></div>' +
+    h += '<div class="h3">Account</div><div class="card"><div class="kv" style="border:0;padding-bottom:2px"><span>Author</span><span id="gTag" class="badge cur" style="display:none"></span></div><div id="gAuthor" style="line-height:1.5;margin:0 0 12px;word-break:normal;overflow-wrap:anywhere"></div><button id="gIdent" class="btn sm"><span class="lbl">Identity and tokens</span></button></div>' +
       '<div class="h3">Danger zone</div><div class="card danger-zone"><p>Force push replaces the remote branch with yours. Commits only on the remote are lost.</p><button id="gForce" class="btn sm danger"' + (st.remote ? '' : ' disabled') + '><span class="lbl">Force push</span></button>' +
       '<p style="margin-top:14px">Remove Git data for this folder from the app. Your files stay untouched.</p><button id="gWipe" class="btn sm danger"><span class="lbl">Remove Git from this folder</span></button></div>';
   }
@@ -2161,7 +2161,7 @@ function bindGit(folder, st, body) {
   if ($('#gUndo')) $('#gUndo').onclick = async () => { if (await confirmBox('Undo last commit?', 'The commit is removed from this branch. Its changes come back as uncommitted changes. Nothing is lost.', 'Undo commit')) run('Undoing commit', () => G.undoLastCommit(folder)); };
   if ($('#gRemote')) $('#gRemote').onclick = async () => { const u = await askText(st.remote ? 'Change remote URL' : 'Set remote URL', 'https://github.com/user/repo.git', st.remote ? st.remote.url : ''); if (u) run('Saving remote', () => G.setRemote(folder, u), true); };
   if ($('#gPublish')) $('#gPublish').onclick = () => openGitStart(folder, 'new');
-  if ($('#gIdent')) { G.getGitSettings().then((g) => { const a = $('#gAuthor'); if (a) a.textContent = g.name ? g.name + ' <' + g.email + '>' : 'not set'; }); $('#gIdent').onclick = () => openGitIdentity(() => openGit('remote')); }
+  if ($('#gIdent')) { G.effectiveAuthor(folder).then((a) => { const el = $('#gAuthor'); if (!el) return; if (a.source === 'none') { el.innerHTML = '<b style="font-weight:600">Not set</b><br><span style="color:var(--muted,#666)">Add your name and email</span>'; return; } const t = $('#gTag'); t.style.display = ''; t.textContent = a.source === 'repo' ? 'this repo' : 'default'; el.innerHTML = '<b style="font-weight:600">' + esc(a.name) + '</b><br><span style="color:var(--muted,#666)">' + esc(a.email).replace('@', '<wbr>@') + '</span>'; }); $('#gIdent').onclick = () => openGitIdentity(() => openGit('remote'), { repo: folder }); }
   if ($('#gForce')) $('#gForce').onclick = async () => {
     if (!await confirmBox('Force push?', 'This overwrites "' + st.branch + '" on the remote with your local version. Anyone else\'s commits there will be lost.', 'Force push')) return;
     run('Force pushing', (pr, sg) => G.push(folder, { force: true, onProgress: pr, signal: sg }), true);
@@ -2290,8 +2290,10 @@ async function openGitStart(folder, mode) {
   draw();
 }
 
-async function openGitIdentity(back) {
+async function openGitIdentity(back, opts = {}) {
   const body = sheet('Git identity and tokens', { back });
+  const repo = opts && opts.repo && (await G.isRepo(opts.repo).catch(() => false)) ? opts.repo : null;
+  const own = repo ? await G.repoAuthor(repo) : null;
   const gs = await G.getGitSettings(); const hosts = await G.listTokenHosts();
   const blank = (v) => !v || /^root(@localhost)?$/i.test(v);
   const nm = blank(gs.name) ? '' : gs.name; const em = blank(gs.email) ? '' : gs.email;
@@ -2302,11 +2304,18 @@ async function openGitIdentity(back) {
     '<label class="field"><span>Host</span><input id="tHost" value="github.com" autocapitalize="off"></label>' +
     '<label class="field"><span id="tTokLbl">Token</span><input id="tTok" type="password" autocomplete="off" autocapitalize="off"><small>GitHub: Settings > Developer settings > Personal access tokens (needs repo access). GitLab: a token with write_repository.</small></label>' +
     '<button id="tSave" class="btn primary" style="width:100%"><span class="lbl">Save token</span></button><div id="tMsg"></div></div>' +
-    '<div class="h3">Commit author</div>' +
-    '<label class="field"><span>Name</span><input id="gName" value="' + esc(nm) + '" placeholder="Your name"></label>' +
-    '<label class="field"><span>Email</span><input id="gEmail" type="email" value="' + esc(em) + '" placeholder="you@example.com" autocapitalize="off"></label>' +
-    '<div class="note" style="text-align:left">' + (nm && em ? 'Commits will show this name and email.' : 'Set your name and email so commits show you.') + '</div>' +
-    '<button id="aSave" class="btn" style="width:100%"><span class="lbl">Save author</span></button><div id="aMsg"></div>';
+    (repo
+      ? '<div class="h3">Default author</div><div id="gDef" class="note" style="text-align:left;line-height:1.5;margin-top:0"></div>' +
+        '<div class="h3">This repository: ' + esc(repo.name || 'folder') + '</div>' +
+        '<label class="field"><span>Name</span><input id="rName" value="' + esc(own ? own.name : '') + '" placeholder="Your name" autocapitalize="words"></label>' +
+        '<label class="field"><span>Email</span><input id="rEmail" type="email" value="' + esc(own ? own.email : '') + '" placeholder="you@example.com" autocapitalize="off"></label>' +
+        '<div class="note" style="text-align:left">Only this folder uses this author. Other repositories are not changed. Leave both empty to follow the default.</div>' +
+        '<div style="display:flex;gap:10px"><button id="rSave" class="btn primary" style="flex:1"><span class="lbl">Save for this repo</span></button><button id="rDef" class="btn" style="flex:1"><span class="lbl">Use default</span></button></div><div id="rMsg"></div>'
+      : '<div class="h3">Default author</div>' +
+        '<label class="field"><span>Name</span><input id="gName" value="' + esc(nm) + '" placeholder="Your name"></label>' +
+        '<label class="field"><span>Email</span><input id="gEmail" type="email" value="' + esc(em) + '" placeholder="you@example.com" autocapitalize="off"></label>' +
+        '<div class="note" style="text-align:left">' + (nm && em ? 'Used for every repository that has no author of its own.' : 'Set your name and email so commits show you.') + '</div>' +
+        '<button id="aSave" class="btn" style="width:100%"><span class="lbl">Save author</span></button><div id="aMsg"></div>');
   const say = (id, m) => { $(id).innerHTML = '<div class="ghint">' + esc(m) + '</div>'; };
   const hostIn = () => $('#tHost').value.trim().toLowerCase();
   const syncLbl = () => { $('#tSave').firstElementChild.textContent = hosts.indexOf(hostIn()) >= 0 ? 'Replace token' : 'Save token'; };
@@ -2317,30 +2326,48 @@ async function openGitIdentity(back) {
     if (!t) return say('#tMsg', 'Paste the token first.');
     if (t.length < 20 || /\s/.test(t)) return say('#tMsg', 'That does not look like an access token. Copy it again from the website.');
     await G.saveToken(h, t); await G.rememberHost(h);
-    openGitIdentity(back);
+    openGitIdentity(back, opts);
   };
-  $('#aSave').onclick = async () => {
+  if (repo) {
+    const defA = { name: nm, email: em };
+    $('#gDef').innerHTML = defA.name && defA.email ? '<b style="font-weight:600;color:var(--text,#222)">' + esc(defA.name) + '</b><br>' + esc(defA.email).replace('@', '<wbr>@') + '<br>Default for all repositories. Change it in Settings.' : 'Not set. Add it in Settings > Git.';
+    $('#rDef').onclick = () => { if (!defA.name || !defA.email) return say('#rMsg', 'No default author is set yet. Add it in Settings > Git.'); $('#rName').value = defA.name; $('#rEmail').value = defA.email; say('#rMsg', 'Default filled in. Tap Save for this repo to keep it.'); };
+    $('#rSave').onclick = async () => {
+      const n = $('#rName').value.trim(); const e = $('#rEmail').value.trim();
+      try {
+        if (!n && !e) { await G.clearRepoAuthor(repo); }
+        else {
+          if (!n || !e) return say('#rMsg', 'Enter both a name and an email, or leave both empty.');
+          if (!/^[^@\s]+@[^@\s]+$/.test(e)) return say('#rMsg', 'That email does not look right.');
+          await G.setRepoAuthor(repo, n, e);
+        }
+      } catch (x) { return say('#rMsg', (x && x.message) || 'Could not save.'); }
+      if (back) back(); else closeSheet();
+    };
+  }
+  if ($('#aSave')) $('#aSave').onclick = async () => {
     const n = $('#gName').value.trim(); const e = $('#gEmail').value.trim();
     if (!n || !e) return say('#aMsg', 'Enter both your name and your email.');
     if (!/^[^@\s]+@[^@\s]+$/.test(e)) return say('#aMsg', 'That email does not look right.');
     await G.saveGitSettings({ name: n, email: e });
     if (back) back(); else closeSheet();
   };
-  $$('[data-rh]', body).forEach((b) => b.onclick = async () => { await G.forgetHost(b.dataset.rh); openGitIdentity(back); });
+  $$('[data-rh]', body).forEach((b) => b.onclick = async () => { await G.forgetHost(b.dataset.rh); openGitIdentity(back, opts); });
 }
 
 // ------------------------------------------------------------ clone from Projects
 function cloneFields(hosts) {
   return '<label class="field"><span>Repository URL</span><input id="cUrl" placeholder="https://github.com/user/repo.git" autocapitalize="off" autocomplete="off"></label>' +
+    '<label class="field"><span>Branch (optional)</span><input id="cBr" placeholder="Defaults to the repository\'s main branch" autocapitalize="off" autocomplete="off"></label>' +
     '<label class="field"><span>Access token</span><input id="cTok" type="password" autocomplete="off" autocapitalize="off" placeholder="' + (hosts && hosts.length ? 'Leave empty to use a saved token' : 'Private repos and pushing') + '"><small>Stored encrypted on this phone, once per host.</small></label>' +
     '<label class="field"><span>Folder name (optional)</span><input id="cName" placeholder="Defaults to the repository name" autocapitalize="off" autocomplete="off"></label>' +
     '<label class="gr" style="border:0"><input type="checkbox" class="cb" id="cFull"><span>Download full history (slower)</span></label>';
 }
-const readCloneFields = () => ({ url: $('#cUrl').value.trim(), token: $('#cTok').value.trim(), name: $('#cName').value.trim(), full: $('#cFull').checked });
+const readCloneFields = () => ({ url: $('#cUrl').value.trim(), token: $('#cTok').value.trim(), name: $('#cName').value.trim(), branch: ($('#cBr') ? $('#cBr').value.trim() : ''), full: $('#cFull').checked });
 /** Clone into a new sub-folder of `parent` and open it as a project. */
 async function runClone(parent, v, say) {
   say('Cloning...');
-  const f = await G.cloneInto(parent, v.url, { token: v.token, name: v.name, depth: v.full ? 0 : 1, id: uid(), onProgress: (p) => say('Cloning ' + pct(p)) });
+  const f = await G.cloneInto(parent, v.url, { token: v.token, name: v.name, branch: v.branch, depth: v.full ? 0 : 1, id: uid(), onProgress: (p) => say('Cloning ' + pct(p)) });
   S.folders.push(f); await A.saveFolders(S.folders);
   GS.keepSel = false; closeSheet(); await applyFolder(f);
   if (S.folder && S.folder.id === f.id) { toast('Cloned into ' + f.name, { result: true }); openGit('changes'); }
