@@ -42,7 +42,8 @@ async function readAll(body) {
   return s;
 }
 
-function httpError(status, text) {
+function httpError(status, text, provider) {
+  let who = ''; try { if (provider && provider.baseUrl) who = ' (' + (provider.name ? provider.name + ' · ' : '') + new URL(provider.baseUrl).host + ')'; } catch (e) { /* no address */ }
   let detail = String(text || '').slice(0, 600);
   try {
     const j = JSON.parse(text);
@@ -53,7 +54,7 @@ function httpError(status, text) {
   if (status === 401 || status === 403) hint = ' Check your API key in Settings.';
   if (status === 429) hint = ' Rate limit or no credit left on this key.';
   if (/image|vision|multimodal|modalit/i.test(detail) && /not support|unsupported|invalid|cannot|does not|only text|text-only|no support/i.test(detail)) hint = ' This model cannot read pictures. Remove the picture or switch to a vision model.' + hint;
-  const err = new Error('Provider error ' + status + (detail ? ': ' + detail : '') + hint);
+  const err = new Error('Provider error ' + status + who + (detail ? ': ' + detail : '') + hint);
   err.status = status;
   return err;
 }
@@ -136,13 +137,13 @@ async function* openaiStream(o) {
     });
     if (res.status < 400) break;
     const text = await readAll(res.body);
-    if (res.status !== 400 && res.status !== 422) throw httpError(res.status, text);
+    if (res.status !== 400 && res.status !== 422) throw httpError(res.status, text, provider);
     if (flags.usage && /stream_options|include_usage/i.test(text)) { flags.usage = false; continue; }
     if (flags.effort && /reasoning|effort|thinking/i.test(text)) { flags.effort = ''; yield { t: 'notice', text: 'This model does not support thinking. Answering without it.' }; continue; }
     if (flags.maxParam === 'max_tokens' && /max_completion_tokens/i.test(text)) { flags.maxParam = 'max_completion_tokens'; continue; }
     if (flags.maxParam === 'max_completion_tokens' && /max_tokens/i.test(text) && !/max_completion_tokens/i.test(text)) { flags.maxParam = 'max_tokens'; continue; }
     { const cap = maxTokens ? tokenCap(text, maxTokens) : 0; if (cap) { maxTokens = cap; yield { t: 'notice', text: 'This model allows replies up to ' + cap + ' tokens. Using that.' }; continue; } }
-    throw httpError(res.status, text);
+    throw httpError(res.status, text, provider);
   }
 
   const calls = [];
@@ -267,7 +268,7 @@ async function* anthropicStream(o) {
       continue;
     }
     if (res.status === 400 || res.status === 422) { const cap = tokenCap(text, maxTokens || 8192); if (cap) { maxTokens = cap; yield { t: 'notice', text: 'This model allows replies up to ' + cap + ' tokens. Using that.' }; continue; } }
-    throw httpError(res.status, text);
+    throw httpError(res.status, text, provider);
   }
 
   let tin = 0; let tout = 0; let cached = 0;
@@ -385,7 +386,7 @@ export async function listModels(provider, apiKey) {
       : { Authorization: 'Bearer ' + apiKey },
   });
   const text = await readAll(res.body);
-  if (res.status >= 400) throw httpError(res.status, text);
+  if (res.status >= 400) throw httpError(res.status, text, provider);
   let j;
   try { j = JSON.parse(text); } catch (e) { throw new Error('Unexpected reply from the provider'); }
   const arr = Array.isArray(j.data) ? j.data : Array.isArray(j) ? j : [];

@@ -101,6 +101,23 @@ public class KdexRemote {
         return c;
     }
 
+    private static final String CHANGED_MSG = "The server's key changed since you first connected. This can mean the server was rebuilt, or someone is in the middle. Remove the saved server and add it again only if you trust the change.";
+
+    /** Accepts only the server key whose fingerprint was saved on the first connection, so a password is never sent to a different server. */
+    private static final class PinnedKeys implements com.jcraft.jsch.HostKeyRepository {
+        private final JSch jsch; private final String want;
+        PinnedKeys(JSch j, String w) { jsch = j; want = w; }
+        public int check(String host, byte[] key) {
+            try { return want.equals(new com.jcraft.jsch.HostKey(host, key).getFingerPrint(jsch)) ? OK : CHANGED; } catch (Exception e) { return CHANGED; }
+        }
+        public void add(com.jcraft.jsch.HostKey hk, com.jcraft.jsch.UserInfo ui) { /* nothing is stored */ }
+        public void remove(String host, String type) { }
+        public void remove(String host, String type, byte[] key) { }
+        public String getKnownHostsRepositoryID() { return "kdex"; }
+        public com.jcraft.jsch.HostKey[] getHostKey() { return new com.jcraft.jsch.HostKey[0]; }
+        public com.jcraft.jsch.HostKey[] getHostKey(String host, String type) { return new com.jcraft.jsch.HostKey[0]; }
+    }
+
     private static Conn open(Map<String, String> a) throws Exception {
         String host = need(a, "host"); String user = need(a, "user");
         int port = 22; try { port = Integer.parseInt(a.getOrDefault("port", "22")); } catch (Exception e) { /* default */ }
@@ -109,21 +126,23 @@ public class KdexRemote {
         try {
             if (key != null && !key.trim().isEmpty()) jsch.addIdentity("kdex", (key.trim() + "\n").getBytes(StandardCharsets.UTF_8), null, pass == null || pass.isEmpty() ? null : pass.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) { throw explain(e); }
+        final String want = a.get("fingerprint");
+        final boolean pinned = want != null && !want.isEmpty();
+        if (pinned) jsch.setHostKeyRepository(new PinnedKeys(jsch, want));
         Session s = jsch.getSession(user, host, port);
         String password = a.get("password");
         if (password != null && !password.isEmpty()) s.setPassword(password);
         Properties cfg = new Properties();
-        cfg.put("StrictHostKeyChecking", "no"); // the key is compared below with the one saved on the first connection
+        cfg.put("StrictHostKeyChecking", pinned ? "yes" : "no"); // saved servers are checked before any password is sent; the first connection has nothing to compare
         cfg.put("PreferredAuthentications", key != null && !key.trim().isEmpty() ? "publickey,password,keyboard-interactive" : "password,keyboard-interactive,publickey");
         s.setConfig(cfg);
         s.setServerAliveInterval(15000);
         s.setServerAliveCountMax(3);
-        try { s.connect(CONNECT_MS); } catch (Exception e) { throw explain(e); }
+        try { s.connect(CONNECT_MS); } catch (Exception e) { throw pinned && String.valueOf(e.getMessage()).toLowerCase().contains("hostkey") ? new Exception(CHANGED_MSG) : explain(e); }
         String fp = s.getHostKey().getFingerPrint(jsch);
-        String want = a.get("fingerprint");
         if (want != null && !want.isEmpty() && !want.equals(fp)) {
             try { s.disconnect(); } catch (Throwable t) { /* ignore */ }
-            throw new Exception("The server's key changed since you first connected. This can mean the server was rebuilt, or someone is in the middle. Remove the saved server and add it again only if you trust the change.");
+            throw new Exception(CHANGED_MSG);
         }
         ChannelSftp f;
         try { f = (ChannelSftp) s.openChannel("sftp"); f.connect(CONNECT_MS); }

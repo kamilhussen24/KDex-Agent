@@ -7,6 +7,16 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.11]
+
+### Security
+- Saved servers are now checked against the pinned host key before any password or key is sent, so a changed or impersonated server never receives your credentials.
+
+## [1.54.10]
+
+### Changed
+- Provider errors now name the provider and its address, for example `Provider error 402 (Custom · api.x.ai)`, so a wrong Base URL is easy to spot.
+
 ## [1.54.9]
 
 ### Changed
