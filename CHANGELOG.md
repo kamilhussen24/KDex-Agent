@@ -7,6 +7,14 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.7]
+
+### Added
+- Git > Changes: a slim "protected files" bar with **Commit anyway**. You decide per file and the choice is remembered for that folder. The AI still cannot read those files.
+
+### Fixed
+- `debug.keystore`, `google-services.json`, public certificates and keys, and source files such as `secrets.js` or `credentials.ts` are no longer treated as secret files.
+
 ## [1.54.6]
 
 ### Fixed

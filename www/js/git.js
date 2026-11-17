@@ -424,6 +424,15 @@ export async function scanSecrets(folder, changes) {
   }
   return out;
 }
+/** Files the user chose to commit even though their name looks secret. Kept per folder; this never lets the AI read them. */
+export async function allowedSecrets(folder) { const m = await kvGet('secretAllow', {}); return new Set((m && m[folder.id]) || []); }
+export async function allowSecrets(folder, paths) { const m = await kvGet('secretAllow', {}) || {}; m[folder.id] = [...new Set([...(m[folder.id] || []), ...paths])]; await kvSet('secretAllow', m); }
+/** The new files in `changes` that are held back because their name looks secret and the user has not allowed them. */
+export async function blockedSecrets(folder, changes) {
+  if (!(await protectionOn())) return [];
+  const ok = await allowedSecrets(folder);
+  return changes.filter((x) => x.kind === 'new' && isSecretPath(x.path) && !ok.has(x.path)).map((x) => x.path);
+}
 export async function commit(folder, message, paths, known) {
   await loadExecs(folder);
   const c = ctx(folder); const au = await author(folder);
@@ -432,7 +441,8 @@ export async function commit(folder, message, paths, known) {
   const prot = await protectionOn();
   let list = paths ? ch.filter((x) => paths.includes(x.path)) : ch;
   // New secret files are never added to a commit by accident (they would be published on push).
-  const skipped = prot ? list.filter((x) => x.kind === 'new' && isSecretPath(x.path)).map((x) => x.path) : [];
+  const okSecrets = await allowedSecrets(folder);
+  const skipped = prot ? list.filter((x) => x.kind === 'new' && isSecretPath(x.path) && !okSecrets.has(x.path)).map((x) => x.path) : [];
   if (skipped.length) list = list.filter((x) => !skipped.includes(x.path));
   if (!list.length) throw new Error(skipped.length ? 'Only secret files changed (' + skipped.join(', ') + '). They are never committed automatically. Add them to .gitignore.' : 'Nothing to commit.');
   const nat = await viaNative(folder, 'commit', { message: message.trim(), name: au.name, email: au.email, adds: list.filter((f) => f.kind !== 'deleted').map((f) => f.path).join('\n'), removes: list.filter((f) => f.kind === 'deleted').map((f) => f.path).join('\n') });

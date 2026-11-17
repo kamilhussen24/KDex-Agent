@@ -6,14 +6,16 @@ import { kvGet } from './db.js';
 const SAFE_ENV = /^\.env\.(example|sample|template|dist|defaults)$/i;
 const SECRET_NAME = [
   /^\.env(\..+)?$/i, /\.(pem|key|p12|pfx|jks|keystore|asc|gpg)$/i, /^id_(rsa|dsa|ecdsa|ed25519)$/i, /^\.netrc$/i, /^\.git-credentials$/i,
-  /^\.npmrc$/i, /^\.pypirc$/i, /^\.htpasswd$/i, /^credentials(\..+)?$/i, /^secrets?(\..+)?$/i, /service[-_]?account.*\.json$/i, /\.tfvars$/i, /^google-services\.json$/i,
+  /^\.npmrc$/i, /^\.pypirc$/i, /^\.htpasswd$/i, /^credentials(\.(json|ya?ml|toml|ini|txt|csv))?$/i, /^secrets?(\.(json|ya?ml|toml|ini|txt|env))?$/i, /service[-_]?account.*\.json$/i, /\.tfvars$/i,
 ];
+// Look like secrets by name but are public by design: Android's debug key, and public certificates or keys.
+const PUBLIC_OK = /^debug\.keystore$|(^|[-_.])(public|pub|cert|certificate|fullchain|chain|ca)([-_.]|$).*\.(pem|asc)$|^(public|pub|cert|certificate|fullchain|chain|ca)[-_.]?.*\.(pem|asc)$/i;
 const ENV_LIKE = /^(\.env(\..+)?|\.npmrc|\.pypirc|\.netrc|secrets?\.(env|ya?ml|toml|ini)|.*\.tfvars)$/i;
 
 export async function protectionOn() { const s = await kvGet('settings', {}); return s.protectSecrets !== false; }
 const base = (rel) => String(rel || '').replace(/\\/g, '/').split('/').pop();
 /** True for files whose contents must stay hidden. */
-export function isSecretPath(rel) { const b = base(rel); return !!b && !SAFE_ENV.test(b) && SECRET_NAME.some((r) => r.test(b)); }
+export function isSecretPath(rel) { const b = base(rel); return !!b && !SAFE_ENV.test(b) && !PUBLIC_OK.test(b) && SECRET_NAME.some((r) => r.test(b)); }
 export const isEnvLike = (rel) => ENV_LIKE.test(base(rel));
 
 /** Hide the values of an env-style file but keep the variable names, so the model knows what exists. */

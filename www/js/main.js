@@ -2203,6 +2203,7 @@ async function loadGitChanges(folder, st) {
   GS.sel = new Set([...cur].filter((p) => !prevKnown.has(p) || GS.sel.has(p)));
   GS.known = cur; GS.keepSel = true;
   st.changes = changes; st.pending = false;
+  st.blocked = await G.blockedSecrets(folder, changes);
 }
 
 const skeleton = () => '<div class="skel"><i style="width:60%"></i><i style="width:90%"></i><i style="width:75%"></i></div>';
@@ -2270,6 +2271,8 @@ function renderGitTab(folder, st, head, body) {
     else {
       const staged = st.changes.filter((c) => GS.sel.has(c.path)); const unstaged = st.changes.filter((c) => !GS.sel.has(c.path));
       const row = (c, on) => '<div class="gr"><button class="stg' + (on ? ' on' : '') + '" data-sel="' + esc(c.path) + '" aria-label="' + (on ? 'Unstage ' : 'Stage ') + esc(c.path) + '">' + ICON(on ? 'minus' : 'plus') + '</button><div class="grow" data-gf="' + esc(c.path) + '"><div class="t">' + esc(baseOf(c.path)) + '</div>' + (dirOf(c.path) ? '<div class="s">' + esc(dirOf(c.path)) + '</div>' : '') + '</div><span class="kind ' + c.kind + '">' + c.kind + '</span><button class="icon-btn" data-gd="' + esc(c.path) + '" aria-label="Discard ' + esc(c.path) + '" style="width:34px;height:34px">' + ICON('undo') + '</button></div>';
+      const held = (st.blocked || []).filter((p) => GS.sel.has(p));
+      if (held.length) h += '<div class="gprot">' + ICON('lock') + '<span class="gpt">' + held.length + ' protected file' + (held.length > 1 ? 's' : '') + '</span><button id="gProtGo" class="btn sm" type="button"><span class="lbl">Commit anyway</span></button></div>';
       h += '<div class="gbar"><span class="h4">Staged (' + staged.length + ')</span>' + (staged.length ? '<button id="gUnstageAll" class="gchip" type="button">' + ICON('minus') + '<span class="lbl">Unstage all</span></button>' : '') + '</div>' +
         (staged.map((c) => row(c, true)).join('') || '<div class="note" style="text-align:left">Nothing staged. Tap + on a file to include it in the next commit.</div>') +
         '<div class="gbar"><span class="h4">Changes (' + unstaged.length + ')</span><span class="gchips">' + (unstaged.length ? '<button id="gStageAll" class="gchip" type="button">' + ICON('plus') + '<span class="lbl">Stage all</span></button>' : '') + '<button id="gDiscardAll" class="gchip danger" type="button">' + ICON('trash') + '<span class="lbl">Discard all</span></button></span></div>' +
@@ -2361,6 +2364,11 @@ function bindGit(folder, st, body) {
       const b = $('#gSuggest'); b.disabled = true; const l = b.querySelector('.lbl'); l.textContent = 'Thinking...';
       try { ta.value = await A.suggestCommitMessage(currentModelId(), folder); ta.oninput(); } catch (e) { hint(e.message || 'Could not suggest a message.'); }
       b.disabled = false; l.textContent = 'Suggest';
+    };
+    if ($('#gProtGo')) $('#gProtGo').onclick = async () => {
+      const held = (st.blocked || []).filter((p) => GS.sel.has(p));
+      if (!await confirmBox('Commit protected files?', held.join('\n') + '\n\nThese look like secret files. If your repository is public, anyone can read them.', 'Commit anyway')) return;
+      await G.allowSecrets(folder, held); toast(held.length > 1 ? 'Files allowed' : 'File allowed'); openGit(GS.tab);
     };
     $('#gCommit').onclick = async () => {
       let paths = st.changes.map((c) => c.path).filter((p) => GS.sel.has(p));
