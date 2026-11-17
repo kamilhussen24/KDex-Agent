@@ -678,3 +678,14 @@ html[data-theme=dark] .exithint{box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .nf-note{font-size:12px;color:var(--mut);margin-top:6px}
 #nfDlg .dlg-actions{margin-top:14px}
 .row-item.pressing{background:var(--bg2)}
+
+/* model picker */
+.mpk-back{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:24px}
+.mpk-card{width:100%;max-width:420px;max-height:70vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:16px}
+.mpk-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:12px 16px;background:none;border:0;border-bottom:1px solid var(--line);text-align:left;cursor:pointer}
+.mpk-row:last-child{border-bottom:0}
+.mpk-t{min-width:0;display:flex;flex-direction:column}
+.mpk-n{font-size:15px;overflow-wrap:anywhere}
+.mpk-p{font-size:12px;color:var(--mut);margin-top:1px}
+.mpk-r{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--mut)}
+.mpk-r.on{border:5px solid var(--b2)}

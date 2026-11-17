@@ -168,7 +168,19 @@ function fitViewport() {
   if (window.visualViewport) { visualViewport.addEventListener('resize', set); visualViewport.addEventListener('scroll', set); }
   addEventListener('resize', set);
 }
-const modelLabel = (m) => m.label || m.apiModel;
+const modelLabel = (m) => {
+  const l = m.label || m.apiModel; const pv = S.providers.find((q) => q.id === m.providerId);
+  return pv && l.endsWith(' (' + pv.name + ')') ? l.slice(0, -(pv.name.length + 3)) : l; // the provider is shown on its own line in the picker
+};
+const modelProvider = (m) => { const pv = S.providers.find((q) => q.id === m.providerId); return pv ? pv.name : ''; };
+function openModelPicker() {
+  const el = $('#modelSelect'); const multi = S.providers.length > 1; const cur = el.value;
+  const back = document.createElement('div'); back.className = 'mpk-back';
+  back.innerHTML = '<div class="mpk-card" role="listbox">' + S.models.map((m) => '<button type="button" class="mpk-row" role="option" data-id="' + esc(m.id) + '"><span class="mpk-t"><span class="mpk-n">' + esc(modelLabel(m)) + '</span>' + (multi && modelProvider(m) ? '<span class="mpk-p">' + esc(modelProvider(m)) + '</span>' : '') + '</span><span class="mpk-r' + (m.id === cur ? ' on' : '') + '"></span></button>').join('') + '</div>';
+  const close = () => back.remove();
+  back.onclick = (e) => { const b = e.target.closest('.mpk-row'); if (b) { el.value = b.dataset.id; el.dispatchEvent(new Event('change')); close(); } else if (!e.target.closest('.mpk-card')) close(); };
+  document.body.appendChild(back);
+}
 function currentModelId() { return $('#modelSelect').value || (S.models[0] && S.models[0].id); }
 
 // ------------------------------------------------------------ boot
@@ -2733,7 +2745,7 @@ function wire() {
   $('#thinkMenu').onclick = (e) => { const b = e.target.closest('[data-think]'); if (!b) return; S.think = b.dataset.think; drawThink(); $('#thinkMenu').classList.add('hidden'); persistChat(); };
   document.addEventListener('click', (e) => { if (!e.target.closest('#thinkMenu')) $('#thinkMenu').classList.add('hidden'); });
   $('#modelSelect').onchange = persistChat;
-  $('#modelSelect').addEventListener('pointerdown', (e) => { if (!S.models.length) { e.preventDefault(); showSetup(false, 'Connect a model'); } });
+  $('#modelSelect').addEventListener('pointerdown', (e) => { e.preventDefault(); if (!S.models.length) showSetup(false, 'Connect a model'); else openModelPicker(); });
   $('#approveAll').onclick = () => [...S.approvals.keys()].forEach((id) => { const tm = S.approvalTm.get(id); if (tm && tm.plan && tm.plan.warn) return; decide(id, 'apply'); }); // a push held back by the pre-push check is never approved in bulk
   $('#messages').addEventListener('click', async (e) => {
     const c = e.target.closest('[data-copy]');

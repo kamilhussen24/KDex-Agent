@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.4]
+
+### Changed
+- Model picker: provider name shows on its own line under each model (only with two or more providers). The top bar shows just the model name.
+
 ## [1.54.3]
 
 ### Added
