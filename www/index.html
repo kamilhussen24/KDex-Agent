@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<link rel="apple-touch-icon" href="img/icon-192.png">
+<title>KDex Agent</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="fatal" style="display:none;position:fixed;inset:0;z-index:9999;background:#fff;color:#b00020;padding:calc(env(safe-area-inset-top,0px) + 24px) 16px 16px;font:13px/1.5 monospace;white-space:pre-wrap;overflow:auto"></div>
+<script>
+(function(){try{var t=localStorage.getItem('kdex-theme')||'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}
+var f=document.getElementById('fatal');window.__stage='html';
+function show(t){if(window.__stage==='ready')return;var dk=document.documentElement.getAttribute('data-theme')==='dark';f.style.background=dk?'#121212':'#fff';f.style.color=dk?'#ff8a80':'#b00020';f.style.display='block';f.textContent+=t+'\n\n';if(!document.getElementById('fatalBtn')){var b=document.createElement('button');b.id='fatalBtn';b.textContent='Reload';b.style.cssText='display:block;margin-top:16px;padding:10px 18px;font:600 14px sans-serif;border:1px solid currentColor;background:none;color:inherit;border-radius:10px';b.onclick=function(){location.reload();};f.parentNode.insertBefore(b,f.nextSibling);b.style.position='fixed';b.style.zIndex=10000;b.style.bottom='24px';b.style.left='16px';}}
+window.addEventListener('error',function(e){var t=e.target;if(t&&(t.src||t.href)){show('Failed to load: '+(t.src||t.href));}else{show('Error: '+(e.message||'')+' ('+(e.filename||'')+':'+(e.lineno||'')+')\nstage='+window.__stage);}},true);
+window.addEventListener('unhandledrejection',function(e){show('Promise error: '+(e.reason&&(e.reason.stack||e.reason.message)||e.reason)+'\nstage='+window.__stage);});
+setTimeout(function(){document.documentElement.classList.add('ready');},3500);
+setTimeout(function(){if(window.__stage!=='ready')show('Startup is taking too long. stage='+window.__stage);},6000);
+})();
+</script>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24"><path d="M4 6l6 6-6 6M12 18h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3.5h6.5l5.5 5.5v9.5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2Z M13.5 3.5V8a1 1 0 0 0 1 1H19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="M10 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M8 10l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V6M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-dots" viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="18.5" r="1.7" fill="currentColor"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6ZM12 13v7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17.5a2 2 0 0 1-3-3l7-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-plan" viewBox="0 0 24 24"><path d="M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17M11 6h10M11 12h10M11 18h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11 12l8-8M16 7l3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M10 4l1.8 4.7L16.5 10.5l-4.7 1.8L10 17l-1.8-4.7L3.5 10.5l4.7-1.8L10 4zM18 14l.9 2.1L21 17l-2.1.9L18 20l-.9-2.1L15 17l2.1-.9L18 14z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+<symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 4l16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.8 12.2l2.2 2.2 4.2-4.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 7V4h4v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V6a2 2 0 0 1 2-2h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-server" viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M5 13h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2Z M7 7.5h.01 M7 16.5h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 19V6M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-reload" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9L20 8.5M20 4v4.5h-4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 8a7.5 7.5 0 0 0-13.4-1.5M5 4v3.5h3.5M5 16a7.5 7.5 0 0 0 13.4 1.5M19 20v-3.5h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-code" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z M13 7l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="6" cy="18.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="9" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6 7.7v8.6M18 11.2c0 3-3 3.6-8 4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v13M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-fetch" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10.5 3.75 3.75 0 0 1 17.25 18M12 12v8M9 17l3 3 3-3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5v5.5M12 16.2v.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 11v5.5M12 7.8v.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M10.36 3.59L2.26 17.12a1.91 1.91 0 0 0 1.64 2.87h16.21a1.91 1.91 0 0 0 1.64-2.87L13.64 3.59a1.91 1.91 0 0 0-3.28 0z"/><path d="M12 16.5h.01"/></g></symbol>
+<symbol id="i-bug" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9V8a3 3 0 0 1 6 0v1"/><path d="M8 9h8a6 6 0 0 1 1 3v3a5 5 0 0 1-10 0v-3a6 6 0 0 1 1-3"/><path d="M3 13h4M17 13h4M12 20v-6M4 19l3.35-2M20 19l-3.35-2M8 4l1.5 1.5M16 4l-1.5 1.5"/></g></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 21V4M6 5h11l-2 4 2 4H6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</defs></svg>
+
+<div id="app" class="app">
+  <div id="scrim" class="scrim hidden"></div>
+
+  <aside id="drawer" class="drawer">
+    <div class="drawer-head">
+      <img class="logo-sm" src="img/logo.png" alt="" width="28" height="28"><span class="brand">KDex Agent</span>
+    </div>
+    <div class="drawer-actions">
+      <button id="dNew" class="btn wide" type="button"><svg class="ic"><use href="#i-plus"/></svg><span class="lbl">New chat</span></button>
+      <button id="dProjects" class="btn wide" type="button"><svg class="ic"><use href="#i-folder"/></svg><span class="lbl">Projects</span></button>
+    </div>
+    <div class="search"><svg class="ic"><use href="#i-search"/></svg><input id="chatSearch" type="search" placeholder="Search chats" autocomplete="off"></div>
+    <div id="chatList" class="chat-list"></div>
+    <div class="drawer-foot"><button id="dSettings" class="btn wide" type="button"><svg class="ic"><use href="#i-gear"/></svg><span class="lbl">Settings</span></button></div>
+  </aside>
+
+  <main id="main" class="main">
+    <header class="top">
+      <button id="menuBtn" class="icon-btn" type="button" aria-label="Menu"><svg class="ic"><use href="#i-menu"/></svg></button>
+      <select id="modelSelect" aria-label="Model"></select>
+      <span class="spacer"></span>
+      <button id="topFolderBtn" class="icon-btn" type="button" aria-label="Projects"><svg class="ic"><use href="#i-folder"/></svg></button>
+    </header>
+
+    <div id="ctxBar" class="ctxbar">
+      <button id="chipFolder" class="chip" type="button"><svg class="ic"><use href="#i-folder"/></svg><span id="chipFolderName" class="lbl">Add folder</span></button>
+      <button id="chipScratch" class="chip hidden" type="button"><svg class="ic"><use href="#i-file"/></svg><span id="chipScratchLbl" class="lbl">Scratch</span></button>
+      <button id="chipFiles" class="chip nf" type="button"><svg class="ic"><use href="#i-file"/></svg><span class="lbl">Files</span></button>
+      <button id="chipGit" class="chip nf" type="button"><svg class="ic"><use href="#i-branch"/></svg><span id="chipGitLbl" class="lbl">Git</span></button>
+      <button id="chipAuto" class="chip nf" type="button"><svg class="ic"><use href="#i-shield"/></svg><span id="chipAutoLbl" class="lbl">Auto</span></button>
+      <button id="chipTerm" class="chip nf" type="button"><svg class="ic"><use href="#i-terminal"/></svg><span id="chipTermLbl" class="lbl">Terminal</span></button>
+      <button id="chipChanges" class="chip nf" type="button"><svg class="ic"><use href="#i-edit"/></svg><span id="chipChangesLbl" class="lbl">Changes</span></button>
+    </div>
+
+    <div id="messages" class="messages"></div>
+    <div id="approveBar" class="approve-bar hidden"><span id="approveText" class="lbl"></span><button id="approveAll" class="btn primary sm" type="button"><span class="lbl">Allow all</span></button></div>
+
+    <div id="netLine" class="netline hidden" role="status"></div>
+    <div id="runStrip" class="runstrip hidden" role="status"></div>
+    <div id="exitHint" class="exithint" role="status">Press Back again to exit</div>
+    <div id="thinkMenu" class="menu hidden" role="menu">
+      <div class="hd">Thinking (this chat)</div>
+      <button type="button" class="it" data-think="off"><b>Off</b><small>Fastest and cheapest</small></button>
+      <button type="button" class="it" data-think="low"><b>Low</b><small>Short thinking, small extra cost</small></button>
+      <button type="button" class="it" data-think="medium"><b>Medium</b><small>Balanced thinking for most tasks</small></button>
+      <button type="button" class="it" data-think="high"><b>High</b><small>Deep thinking, costs more</small></button>
+    </div>
+
+    <form id="composer" class="composer">
+      <div id="queueBar" class="queuebar hidden"></div>
+      <div id="planHint" class="planhint hidden"><svg class="ic"><use href="#i-lock"/></svg><span>Plan mode: read only, nothing is changed</span></div>
+      <div class="box">
+        <div id="chips" class="chips"></div>
+        <textarea id="input" rows="1" placeholder="Message KDex Agent" enterkeyhint="send"></textarea>
+        <div class="row">
+          <button id="attachBtn" class="icon-btn" type="button" aria-label="Attach"><svg class="ic"><use href="#i-clip"/></svg></button>
+          <input id="fileInput" type="file" multiple hidden accept="image/*,.txt,.md,.json,.csv,.py,.js,.ts,.jsx,.tsx,.html,.css,.xml,.yml,.yaml,.log,.sh,.java,.kt,.go,.rs,.c,.cpp,.h,.php,.rb,.sql,.ini,.toml,.env,.docx,.xlsx,.pptx,.odt,.ods,.odp,.pdf,application/pdf">
+          <button id="thinkBtn" class="icon-btn tbtn" type="button" aria-haspopup="menu" aria-label="Thinking: Off"><svg class="ic"><use href="#i-bulb"/></svg></button>
+          <button id="planBtn" class="icon-btn pbtn" type="button" aria-label="Plan mode: off"><svg class="ic"><use href="#i-plan"/></svg></button>
+          <button id="ctxBtn" class="icon-btn hidden" type="button" aria-label="Context"></button>
+          <span class="spacer"></span>
+          <button id="stopBtn" class="send stop hidden" type="button" aria-label="Stop"><svg class="ic"><use href="#i-stop"/></svg></button>
+          <button id="sendBtn" class="send" type="submit" aria-label="Send"><svg class="ic"><use href="#i-up"/></svg></button>
+        </div>
+      </div>
+    </form>
+  </main>
+
+  <!-- Sheets -->
+  <section id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
+    <div class="sheet-card">
+      <div id="sheetGrip" class="sheet-grip" aria-hidden="true"><i></i></div>
+      <div class="sheet-head">
+        <button id="sheetBack" class="icon-btn hidden" type="button" aria-label="Back"><svg class="ic"><use href="#i-back"/></svg></button>
+        <div id="sheetTitle" class="sheet-title"></div>
+        <button id="sheetClose" class="icon-btn" type="button" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+      <div id="sheetTabs" class="tabs hidden"></div>
+      <div id="sheetBody" class="sheet-body"></div>
+      <div id="sheetFoot" class="sheet-foot hidden"></div>
+    </div>
+  </section>
+
+  <section id="setup" class="setup hidden"></section>
+  <div id="dialog" class="dialog hidden"><div class="dialog-card"><div id="dlgTitle" class="dlg-title"></div><div id="dlgText" class="dlg-text"></div><div class="dlg-actions"><button id="dlgNo" class="btn" type="button"><span class="lbl">Cancel</span></button><button id="dlgAlt" class="btn hidden" type="button"><span class="lbl"></span></button><button id="dlgYes" class="btn primary" type="button"><span class="lbl">OK</span></button></div></div></div>
+  <div id="toast" class="toast hidden"></div>
+</div>
+<script src="vendor/capacitor.js"></script>
+<script src="vendor/buffer.min.js"></script>
+<script src="vendor/lightning-fs.min.js"></script>
+<script src="vendor/isomorphic-git.min.js"></script>
+<script src="vendor/fflate.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "appId": "com.kamildex.agent",
+  "appName": "KDex Agent",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "backgroundColor": "#D6334F",
+      "androidScaleType": "CENTER_INSIDE",
+      "showSpinner": false
+    }
+  }
+}
