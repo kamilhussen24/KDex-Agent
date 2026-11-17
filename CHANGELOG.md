@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.5]
+
+### Changed
+- README rewritten to be shorter and cleaner. Architecture, repository layout and release steps moved to CONTRIBUTING.md.
+
 ## [1.54.4]
 
 ### Changed

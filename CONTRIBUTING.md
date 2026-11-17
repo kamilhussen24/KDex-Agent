@@ -58,7 +58,61 @@ Native features (Keystore, real folders, Git on real repositories, notifications
 Anything that needs a new Android permission, a new foreground service type, installing or updating APKs, or sending a new kind of user data off the phone must be said in the pull request and in `PRIVACY.md`. Check the current Android documentation first, because the rules change.
 
 ## Where things are
-See "Repository layout" in the [README](README.md#how-it-works). Good starting points: `www/js/agent.js` (the tool loop), `www/js/tools.js` (file tools), `www/js/providers.js` (add a provider), `www/js/main.js` (UI).
+See "Repository layout" below. Good starting points: `www/js/agent.js` (the tool loop), `www/js/tools.js` (file tools), `www/js/providers.js` (add a provider), `www/js/main.js` (UI).
+
+## Architecture
+
+KDex Agent is a hybrid app: the interface is plain HTML, CSS and JavaScript inside a Capacitor WebView, and a small Java plugin does what a web page cannot do.
+
+```
+        Android phone
+ ┌───────────────────────────────────────────────┐
+ │  WebView (www/)                               │
+ │   main.js ── UI, chats, sheets                │
+ │   agent.js ─ context, streaming, tool loop    │
+ │   tools.js, git.js, termux.js ─ what the AI   │
+ │   can do, each guarded by approval            │
+ │            │ Capacitor bridge (native.js)     │
+ │  Java plugin (native/)                        │
+ │   Keystore · streaming HTTP · folder access   │
+ │   JGit · Termux bridge · background service   │
+ └───────────────┬───────────────────────────────┘
+                 │ HTTPS, with your own key
+          AI provider · Git host · GitHub (updates)
+```
+
+Chats, settings and file backups live in IndexedDB on the phone. API keys and Git tokens live in the Android Keystore. There is no KDex server.
+
+### Repository layout
+| Path | What it holds |
+| --- | --- |
+| `www/index.html`, `www/css/app.css` | Screens and styling (light and dark) |
+| `www/js/main.js` | UI layer: chat, drawer, sheets, settings, dialogs |
+| `www/js/agent.js` | Builds context, streams replies, runs the tool loop, approvals |
+| `www/js/providers.js` | Adapters for each AI provider |
+| `www/js/tools.js`, `archive.js` | File tools and ZIP tools offered to the model |
+| `www/js/git.js`, `gittools.js` | Git engine and the Git tools offered to the model |
+| `www/js/termux.js` | Optional terminal through Termux |
+| `www/js/secrets.js` | Secret-file protection and masking |
+| `www/js/native.js` | Bridge to the Java plugin, with a browser fallback for development |
+| `www/js/db.js`, `diag.js`, `update.js`, `util.js` | Storage, diagnostics log, update check, helpers |
+| `www/vendor/`, `www/fonts/`, `www/img/` | Bundled libraries, Inter font, logo (no build step) |
+| `native/` | Java: `KdexNativePlugin` (main plugin), `KdexGit` (JGit), `KdexWorkService` (background work) |
+| `scripts/prepare-android.mjs` | Patches the generated Android project (plugin, manifest, icons, version, signing) |
+| `.github/workflows/android.yml` | CI: builds the APK and publishes releases |
+| `assets/` | Source icons and splash |
+
+The `android/` folder is generated in CI and is not committed.
+
+## Releasing (maintainers)
+1. Add the entry to `CHANGELOG.md` (move the lines from `[Unreleased]` under a new `## [X.Y.Z]` heading) and raise the version in all four places: `package.json` (line 3), `package-lock.json` (lines 3 and 9) and `www/js/config.js` (`APP_VERSION`). Keep them identical.
+2. Push to `main`. GitHub Actions builds the signed APK, creates the tag `vX.Y.Z` and the GitHub Release (notes come from `CHANGELOG.md`) and attaches `KDex-Agent-release.apk`. If the tag already exists nothing happens.
+
+Signing needs four repository secrets (Settings > Secrets and variables > Actions): `KEYSTORE_BASE64` (the keystore file as base64), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. Create the keystore once and keep a backup; updates install over an older version only when signed with the same key.
+```
+keytool -genkeypair -v -keystore kdex.keystore -alias kdex -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 kdex.keystore
+```
 
 ## Code of conduct
 Be respectful and constructive. Harassment or personal attacks are not accepted and may lead to a ban from the project.
