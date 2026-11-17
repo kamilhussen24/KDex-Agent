@@ -1,0 +1,45 @@
+SH = '/tmp/kt/shots/'
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 360, 'height': 740}, device_scale_factor=2, has_touch=True, is_mobile=True)
+    pg = ctx.new_page(); errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))
+    pg.goto('http://127.0.0.1:4011/'); pg.wait_for_timeout(500)
+    pg.click('[data-p=custom]'); pg.fill('#sUrl', 'http://127.0.0.1:4010'); pg.fill('#sKey', 'k'); pg.fill('#mpMan', 'mock-a'); pg.click('#mpAdd'); pg.click('#sGo'); pg.wait_for_selector('#modelSelect option', state='attached'); pg.wait_for_timeout(300)
+    idle = "document.querySelector('#stopBtn').classList.contains('hidden')"
+    print('chip before any file hidden:', pg.locator('#chipScratch.hidden').count() == 1)
+    pg.fill('#input', 'v147page'); pg.click('#sendBtn'); pg.wait_for_function(idle); pg.wait_for_timeout(400)
+    print('chip after make_file:', pg.locator('#chipScratch:not(.hidden)').count(), repr(pg.inner_text('#chipScratchLbl')))
+    pg.fill('#input', 'v145multi'); pg.click('#sendBtn'); pg.wait_for_timeout(1200)
+    print('tools in no-folder chat: approval cards', pg.locator('[data-tool=apply]').count())
+    for _ in range(4):
+        if pg.locator('[data-tool=apply]').count(): pg.locator('[data-tool=apply]').first.click(); pg.wait_for_timeout(500)
+    pg.wait_for_function(idle); pg.wait_for_timeout(400)
+    print('chip now:', repr(pg.inner_text('#chipScratchLbl')))
+    pg.screenshot(path=SH + 'v148-chat.png')
+    pg.tap('#chipScratch'); pg.wait_for_selector('#scMove'); pg.wait_for_timeout(400)
+    print('rows:', pg.evaluate("[...document.querySelectorAll('#sheetBody .row-item')].map(r=>r.innerText.replace(/\\n/g,' | '))"))
+    pg.screenshot(path=SH + 'v148-sheet.png')
+    pg.locator('#sheetBody .row-item').first.tap(); pg.wait_for_selector('#rowMenu'); pg.wait_for_timeout(300)
+    print('menu:', pg.evaluate("[...document.querySelectorAll('#rowMenu button')].map(b=>b.innerText)"))
+    pg.screenshot(path=SH + 'v148-menu.png')
+    pg.tap('#rowMenu [data-a=view]'); pg.wait_for_selector('.fv'); pg.wait_for_timeout(300); print('view shows text:', len(pg.inner_text('.fv')) > 0)
+    pg.tap('#sheetBack'); pg.wait_for_selector('#scMove'); pg.wait_for_timeout(300)
+    # zip: capture the download in browser mode
+    with pg.expect_download() as dl: pg.tap('#scZip')
+    print('zip name:', dl.value.suggested_filename)
+    # delete one file
+    n0 = pg.locator('#sheetBody .row-item').count()
+    pg.locator('#sheetBody .row-item').last.tap(); pg.wait_for_selector('#rowMenu'); pg.tap('#rowMenu [data-a=del]'); pg.wait_for_selector('#dialog:not(.hidden)'); pg.screenshot(path=SH + 'v148-del.png'); pg.click('#dlgYes'); pg.wait_for_timeout(500)
+    print('rows before/after delete:', n0, pg.locator('#sheetBody .row-item').count())
+    # move to a folder (mem demo)
+    pg.tap('#scMove'); pg.wait_for_selector('#dialog:not(.hidden)'); print('move dialog:', pg.inner_text('#dlgTitle'), '|', pg.inner_text('#dlgYes'), '|', pg.inner_text('#dlgAlt')); pg.screenshot(path=SH + 'v148-move.png')
+    pg.click('#dlgYes'); pg.wait_for_selector('#chipGit', state='visible'); pg.wait_for_timeout(600)
+    print('after move: folder chip', pg.inner_text('#chipFolderName'), '| scratch chip hidden:', pg.locator('#chipScratch.hidden').count() == 1, '| toast:', pg.inner_text('#toast').replace('\n', ' ')[:80])
+    print('files in new folder:', pg.evaluate("(async()=>{const {fs}=await import('./js/native.js');const D=await import('./js/db.js');const fo=await D.kvGet('folders',[]);return (await fs.list(fo[fo.length-1].uri,'')).map(e=>e.name)})()"))
+    print('scratch left:', pg.evaluate("(async()=>{const S=await import('./js/scratch.js');return (await S.scratchUsage()).length})()"))
+    # new chat, clear flow
+    pg.evaluate("document.querySelector('#dNew').click()"); pg.wait_for_timeout(400)
+    pg.fill('#input', 'v147page'); pg.click('#sendBtn'); pg.wait_for_function(idle); pg.wait_for_timeout(400)
+    pg.tap('#chipScratch'); pg.wait_for_selector('#scClear'); pg.tap('#scClear'); pg.wait_for_selector('#dialog:not(.hidden)'); print('clear dialog:', pg.inner_text('#dlgText')); pg.click('#dlgYes'); pg.wait_for_timeout(500)
+    print('chip hidden after clear:', pg.locator('#chipScratch.hidden').count() == 1)
+    print('errors:', errs); b.close()

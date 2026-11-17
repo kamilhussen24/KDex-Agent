@@ -1,0 +1,612 @@
+# Changelog
+
+All notable changes to KDex Agent are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[Semantic Versioning](https://semver.org/). Each GitHub Release shows the entry
+for its version.
+
+## [Unreleased]
+
+## [1.54.2]
+
+### Changed
+- Editor: the line-number column has its own background and a thin line on its right, so code scrolled sideways (wrap off) slides under it instead of mixing with the numbers. Light and dark.
+
+## [1.54.1]
+
+### Changed
+- Editor: the "Go to line" box now has its close button in its own place on the right, so it no longer covers the Go button.
+- Editor: Suggestions start off (turn them on in the ⋮ menu). Extra keys stay on. This is set once for everyone, including phones that had already changed the menu.
+- Editor: the extra-keys row sits 2 px above the keyboard. The keyboard is now detected by the screen getting shorter, not only by focus, so the gap does not come back when focus moves.
+- New file: tapping a type chip fills in the usual name (index.html, style.css, script.js, data.json, main.py, README.md, notes.txt, data.xml, run.sh, config.yaml). If you typed your own name, only its ending changes. A name that already exists still shows a warning and cannot be created. "Add a starter page" is now "Add basic HTML template".
+- Folder menu (press and hold): "New folder here" is removed, because a folder can be made from inside the folder with + New.
+
+## [1.54.0]
+
+### Added
+- Editor: a **⋮ menu** replaces "Aa". It holds Font size, Indent (Auto, 2, 4, Tab), Wrap long lines, Line numbers, Show spaces, **Suggestions** (on or off), **Extra keys** (show or hide the Tab and symbol row) and **Go to line**. Choices are remembered for every file. Indent guides, auto-closing brackets and active-line highlight are always on.
+- Editor: a new find and replace panel. Match case (Aa), whole word (ab) and regex (.*) are switches inside the search box and always start off. Up and down buttons, a small close button, Replace and Replace all of equal width, Enter for the next match, and long search text scrolls so its end stays visible.
+- **New file** and **New folder** in the file list: a "+ New" button in the title bar, two buttons in an empty folder, and "New file" in Scratch. The new-file dialog has extension chips, a path preview, a starter page for HTML, and refuses names that exist or are not allowed. It never overwrites, and opens the editor on the new file.
+- Press and hold a folder for its menu: New file here, New folder here, Rename, Copy path and Delete (with the number of files inside). The project root and `.git` are protected.
+- The app opens in the last place you worked: a chat, or a folder you used with Files or Git even without a chat. A folder without a chat opens its latest chat, or a new chat linked to it.
+
+### Changed
+- While the keyboard is open the editor no longer keeps the empty strip under the extra keys, so the code area is taller.
+- Repository and token messages name the real service and the scope it needs: GitHub "repo" (or fine-grained Administration and Contents), GitLab "api" to create projects and "write_repository" to push, and the host name for other servers. Creating a repository no longer mentions GitHub when the service is GitLab.
+
+### Notes
+- Renaming a folder on the phone copies it (up to 400 files or 30 MB) and removes the old one; a server renames in one step. Empty folders made with New folder may not show on the phone until a file is put in them, depending on the Android storage provider.
+
+## [1.53.1]
+
+### Fixed
+- Pushing the project to GitHub was blocked ("GitHub blocked the push") because some files in `tests/` held made-up keys and tokens that look real. The fake values are now written in pieces, so neither GitHub nor the app's own "Possible secret found" check flags them. The tests behave the same.
+
+## [1.53.0]
+
+### Added
+- Built-in code editor. Tap a text or code file in the phone folder, Scratch or a server and choose **Edit** (or the Edit button in the file viewer). It handles HTML, XML, JavaScript, TypeScript, Python, CSS, JSON and plain text up to 1 MB, and saves back to the same path. Pictures, binary files, files over 1 MB, Git internals and protected secret files cannot be edited.
+- The editor has syntax colours that match the viewer in light and dark, line numbers, code folding, indent guides, bracket matching and auto-closing, auto-indent, simple suggestions, find and replace (with match case, whole word and regex), go to line, undo and redo, and a row of extra keys (Tab and common symbols) above the keyboard.
+- The **Aa** menu sets font size, indent (Auto, 2, 4 or Tab; Auto follows the file), wrapping, line numbers, show spaces and indent guides. Your choices are remembered.
+- Saving never replaces a file that changed after you opened it without asking. Line endings (LF or CRLF) and a leading BOM are kept. Leaving with unsaved changes asks Save, Discard or Cancel on every way out (X, Back, the phone's Back button and the swipe down).
+- Saving on a server writes straight to it and cannot be undone from the app; the editor says so.
+
+### Notes
+- The editor is bundled once into `www/vendor/codemirror.min.js` (about 0.6 MB, MIT licensed) and loads only the first time you tap Edit. The build recipe is in `tools/editor/`.
+- Unsaved edits are kept only while the editor is open. If the app is closed by the system before you save, they are lost.
+
+## [1.52.22]
+
+### Changed
+- Settings > Images: the Image model box and its long explanation now appear only after you pick an image provider. With the provider off you see a one-line hint, and the model name you typed is kept for when you switch it on again.
+
+## [1.52.21]
+
+### Changed
+- Tapping Commit with an empty message now only fills in the suggested message. The keyboard no longer opens and the text is no longer selected; tap the box if you want to edit it.
+
+## [1.52.20]
+
+### Fixed
+- Long jobs no longer stop half way. When a model reaches its reply limit mid-answer, or sends no answer text after thinking, the app now asks it to carry on by itself (up to three times) instead of ending with "The steps above are finished".
+- When it still cannot finish, the message says why and a Continue button picks the work up again.
+- A model that allows shorter replies than the app asks for no longer causes an error: the app reads the real limit and sends the request again.
+- A reply cut off in the middle of a big file write now tells the model to write the file in smaller pieces instead of repeating the same call.
+- The Git error card names the server it could not reach, for example "No connection to gitlab.com".
+
+### Changed
+- The default reply length is raised from 8,000 to 32,000 tokens. You still pay only for the tokens a model actually writes.
+- Max steps per message can now go up to 150.
+
+### Added
+- Settings > Chat > Max reply length.
+- Notes for long jobs: the agent saves what it finds after each part of a big review or build inside the chat (not in your project), so it is not lost when older messages are summarised, and writes one final report from them.
+
+## [1.52.19]
+
+### Fixed
+- With no network, Git could show "Could not connect to <host>. Check the address" instead of "No connection". The no-network check now comes first, so a missing connection is reported as "No connection" again.
+
+## [1.52.18]
+
+### Changed
+- Git > Changes: the Commit button is pale while the message box is empty and turns bright once there is a message. Tapping it with an empty box fills in a plain starting message from the staged files and puts the cursor there instead of showing an error. Suggest works as before.
+- A short Git notice such as "Write a commit message." no longer sits under the heading "Git could not finish".
+- "Failed to connect" and "connection refused" are no longer reported as "No internet connection". They now say the server could not be reached and to check the address (providers, web requests and Git).
+
+### Fixed
+- Cancelled Git actions are no longer written to Diagnostics.
+- A Git error that only contained the word "network" was shown as "No connection". Only real network failures are now.
+
+## [1.52.17]
+
+### Fixed
+- A refused push to GitLab (no write permission on the token, or a protected branch) was shown as "No connection". Git errors from the built-in Git engine now keep their real reason, so you see "Access denied" or "The token was rejected" instead.
+- Genuine internet failures are still recognised and shown as "No connection".
+
+### Changed
+- When Git cannot finish for an unknown reason, the message now includes a short technical reason, and the same text is kept in Diagnostics.
+- Token hints now mention the GitLab scope (write_repository).
+
+## [1.52.16]
+
+### Added
+- Clone form: an optional Branch field under the repository URL. Empty clones the repository's default branch; a name that does not exist shows a clear "Branch not found" message.
+- A commit author for each repository. Git > Identity shows the default author (edited in Settings) and an author for the open repository, with Save for this repo and Use default. Leaving both fields empty follows the default again.
+- Git > Remote > Account shows who the next commit is made as, with a tag for this repo or the default.
+
+### Changed
+- Commits, pulls, merges and Termux git commands use the repository's own author first, then the default.
+- root@localhost is treated as not set, so a missing name is asked for instead of committing as root.
+
+## [1.52.15]
+
+### Added
+- Drafts: what you type in the message box is kept for each chat (and for a new chat), so leaving the chat, closing the app or a phone shutdown no longer loses it. Sending, or emptying the box, removes the draft. A draft that looks like a key or token is not kept. Deleting a chat deletes its draft.
+
+## [1.52.14]
+
+### Changed
+- Long chats keep more of their history: the automatic summary of older messages may now be up to 650 words (was 450).
+- The project instructions file KDEX.md is read up to 6,000 characters (was 4,000).
+
+## [1.52.13]
+
+### Changed
+- Terminal settings: the "One-time setup" steps are shown until the Termux connection has worked once. After a successful test (or any successful Termux command) they are hidden behind a "Show setup steps" link. A failed test brings them back.
+
+## [1.52.12]
+
+### Fixed
+- The secret check before a commit and the secret hiding for the model no longer treat a hint such as `-----BEGIN ... PRIVATE KEY-----` inside source code as a real key. Only a header followed by key text counts, so projects that merely mention the format are no longer flagged or partly hidden.
+
+## [1.52.11]
+
+### Added
+- Adding a provider with the same address and the same key as one you already have is refused with a clear message. The same address with a different key is allowed and gets a numbered name.
+- When a saved API key cannot be read back from the phone's secure storage, the error says so and asks you to add it again, instead of claiming no key was saved.
+- Copying a chat that contains something that looks like a key or token now asks first.
+
+### Changed
+- The diagnostics log hides secrets with the same, wider rules used for files and commands.
+
+## [1.52.10]
+
+### Changed
+- With no internet, Git, servers, providers, the web tool and GitHub now say "No internet connection. Connect and try again." (Git names the host) instead of raw Java and network errors.
+- The ongoing notification reads "Waiting for connection" while the agent waits for the network, and "Working on your request" again once it is back.
+- A server that cannot be reached (no route, or the connection fails) now has its own plain message.
+
+## [1.52.9]
+
+### Changed
+- The menu of a chat (Pin, Rename, Delete) opens below the chat row, or above it when there is no room, like the file menu. Before, pressing and holding put it under your finger, over the row's own text.
+
+## [1.52.8]
+
+### Changed
+- The eye button in the secret box shows an eye when the value is hidden and a crossed-out eye when it is shown.
+- Boxes with a text field (rename, access token, name, secret value) have the same space above and below the field, so the buttons sit closer.
+- The file icon is a little wider and shorter, with soft corners like the folder and copy icons. It changes everywhere at once.
+
+## [1.52.7]
+
+### Added
+- Android 8, 9 and 10 now get fast file access too. The app asks once for the ordinary storage permission (when you open a folder or clone a repository), and files and Git then use direct paths, like on Android 11 and newer. Before, these phones always used the slow folder access, so Git was slow.
+- Copy in the file menu for files on a server (text files up to 1 MB).
+- Copy for protected secret files (such as `.env`) in phone folders and Scratch. It asks first, because the text goes to the clipboard where other apps can read it.
+
+### Changed
+- Settings shows "Storage access" (On or Off) with a button on Android 8 to 10, instead of "All files access: Not needed".
+- The start screen logo has the same size on every screen, so it is no longer huge on small phones.
+
+## [1.52.6]
+
+### Added
+- One file menu in all three file lists (your phone's folders and cloned repositories, Scratch, and servers). Tap a file for: Open (only for files the app can show: text and code up to 1 MB, pictures up to 8 MB), Preview (HTML files), Rename, Copy (text files), Download (servers) and Delete. The file name shows above the menu.
+- Rename for files in all three lists. It keeps the file in its folder, refuses a name that already exists, and is not offered for protected secret files.
+- Delete for files in your phone's folders, with a confirmation. It cannot be undone from the app.
+
+### Changed
+- Tapping a file in a phone folder now opens this menu instead of opening the file at once. Choose Open to see it.
+- The "Possible secret found" dialog shows its three buttons as equal full-width rows: Leave them out, Commit anyway, Cancel.
+- A line in this changelog no longer looks like a password to the secret scan, so committing it gives no false warning.
+
+## [1.52.5]
+
+### Changed
+- Small internal cleanup in the folder sheet. No change in how the app looks or works.
+
+## [1.52.4]
+
+### Changed
+- The app id (package name) is now `com.kamildex.agent`, matching kamildex.com. Android treats it as a new app: install it next to the old KDex Agent, enter your keys again, grant the Termux permission again, then remove the old one.
+- KDex Agent is shipped only as an APK from GitHub Releases.
+
+### Added
+- Reports of AI replies now open an email draft to support@kamildex.com.
+
+## [1.51.3]
+
+### Fixed
+- Settings > About now checks for a new version when the last check is over 5 minutes old (was 1 hour), so a fresh release shows up without a long wait.
+
+## [1.51.2]
+
+### Added
+- A Continue button appears under the agent's "I stopped" message (step limit reached, or going in circles). One tap sends "continue" so you no longer type it. It shows only under the newest message.
+
+## [1.51.1]
+
+### Fixed
+- The check card after an edit now shows the real file names (for example python3 -m py_compile test_check.py) instead of the {files} placeholder, and the agent sees the same line.
+
+## [1.51.0]
+
+### Added
+- Send a new instruction while the agent is working. The message waits as a small line above the box (tap the cross to remove it) and the agent reads it before its next step. A Stop button now sits next to Send. If you press Stop first, your waiting message goes back into the box.
+- Plan mode: a new button next to the thinking button. While it is on, the agent can only read, search and look at Git; it cannot change anything or run commands. It ends with a plan, and the chat shows Build this plan (turns Plan mode off and starts the work) and Revise.
+- Checks after edits: in Folders, each folder has a new button. Set a command (for example npm run lint) and the files it applies to. After the agent changes a matching file the app runs it; a pass shows one line, a failure shows the errors and the agent fixes them at once. Works in Termux and on servers.
+- find_symbol tool: shows where a function, class or variable is defined and every place it is used, in one call. It saves several searches and many tokens when renaming or changing code.
+
+### Changed
+- The Send button no longer turns into Stop while a task runs; Stop is its own button.
+
+## [1.50.10]
+
+### Security
+- Keys and tokens written directly into ordinary code files (a Telegram bot token, an API key, a wallet private key, a seed phrase, a password inside a database URL) are now hidden from the AI. Before, only files such as .env and key files were hidden. The same check now covers file reads, search, Git diffs and logs, change reviews, project checks and Git command results. Terminal output uses the wider check too.
+- The agent cannot write the hidden "***" back into a file, so a secret is never overwritten by stars.
+- Notes the agent or the auto-learner saves to memory are never saved if they look like a secret.
+- Turning off Settings > Protect secrets also turns this check off.
+
+## [1.50.9]
+
+### Added
+- New file tools for the agent: move_file (move or rename), copy_file and make_folder. They need approval, and a move can be undone from Changes.
+- edit_file can make several changes to one file in a single call and a single approval.
+- search can filter files (glob), show lines around each match (context) and return more results (max_results). find_files accepts patterns such as *.js or src/**/*.css.
+- New Git tools: git_merge, git_undo_commit (keeps the changes) and git_discard (always asks, even in Auto mode).
+- ask_user: the agent can ask a short question with 2 to 4 answer buttons, or you can tap Skip.
+- The agent now knows the limits of phone shared storage (no symlinks or executable files, npm needs --no-bin-links, heavy builds belong in the Termux home folder).
+
+### Fixed
+- search no longer stops after 150 files; it now looks at up to 500 files and says when it stopped early.
+
+## [1.50.8]
+
+### Fixed
+- Deleting a binary file (for example an .apk) now works with approval. Before, the agent was refused four times and stopped. The approval card says Undo cannot restore a binary file.
+- Error messages for binary files and folders now tell the agent to use the terminal (run_command) for moving, copying or removing them, so it picks the right way the first time.
+
+## [1.50.7]
+
+### Changed
+- File menus (Scratch and server files) always show the file name as a small title at the top, shortened in the middle when long.
+- The "Press Back again to exit" hint now uses the same card colours and border as the other toasts in light and dark themes.
+
+## [1.50.6]
+
+### Changed
+- The line that says a task is running in another chat now sits just above the message box, with the other status lines, instead of between the top bar and the folder chip.
+- The small name above a file's long-press menu now appears only when the row itself cuts the name, the same in Scratch and in server and project file lists. A name that fits in full no longer shows it twice.
+- Changing the folder of a chat whose task is running now asks first ("Changing the folder stops it"), and deleting such a chat says its running task stops too. Before, both stopped the task without saying so.
+
+## [1.50.5]
+
+### Changed
+- A running task is no longer stopped when you open another chat, start a new chat or look something up in an old one. It keeps going in its own chat. While you are in another chat, a line under the top bar says "Working in <chat>" (or "Waiting for your approval in <chat>") with a View button, and a short message appears when the task finishes there. Coming back shows everything that happened meanwhile.
+- One task still runs at a time. Sending a message in another chat while a task runs asks: Wait, or Stop it.
+- The phone's Back button no longer stops a task. While a task runs it asks "A task is running. Leaving now may stop it." (Stay or Leave). With nothing running, the first press shows "Press Back again to exit" and the second press leaves. Only the Stop button stops a task.
+- Deleting a chat or changing its folder stops only that chat's own task.
+
+## [1.50.4]
+
+### Changed
+- Settings > About > Licenses now lists pdf.js, fflate, isomorphic-git, LightningFS and buffer.
+- README: the release steps now include `package-lock.json` and explain the CHANGELOG entry; CONTRIBUTING explains how to check a change and how to handle the bundled libraries.
+
+## [1.50.3]
+
+### Changed
+- A saved command now shows its result as one short line ("Failed: git status · exit 128" or "Done: Say hello") with a "Show output" button. The output is closed at first and, when opened, wraps inside the screen instead of running off the right edge.
+- Git commands in Termux no longer stop with "dubious ownership" on the phone's shared storage. Before the first git command in a project after the app starts, the app adds exactly that project folder to git's safe list (never every folder). Servers are not touched.
+
+## [1.50.2]
+
+### Changed
+- Update checks are more reliable and still gentle on GitHub. Settings > About now refreshes the result by itself when it is over an hour old (it shows "Checking..." for a moment), instead of showing an old "Up to date" until you press the button. Opening it again within the hour sends nothing.
+- The quiet check at app start now runs every 6 hours (was 24), and also when the app comes back to the screen after being in the background.
+- Rate limits are respected: an unchanged answer (304) is reused and does not count against GitHub's limit, and after a failed or limited check the app waits 15 minutes before trying quietly again. The "Check for updates" button always asks, and says so plainly when GitHub is busy.
+
+## [1.50.1]
+
+### Added
+- PDF files with text can be attached to a chat. The text is read on the phone (with pdf.js, loaded only when a PDF is attached) and sent to the model with the page count. Up to 15 MB and the first 150 pages. A scanned PDF has no text, so the app says so and suggests attaching photos of the pages.
+
+### Changed
+- Settings > Memory shows one "Saved notes" button with the number of notes instead of the whole list. It opens a sheet with a search box, the notes (each with a delete button) and "Add a note", so Settings stays short however many notes there are.
+
+## [1.50.0]
+
+### Changed
+- Tool cards show plain names instead of code names: "Read file", "Compare changes", "Commit", "Push to GitHub", "Open page" and so on, for all 48 tools. The line under a card uses the same names ("Push to GitHub · risky", "Runs in Termux").
+- A tool added later that has no name yet still looks fine ("git_stash" shows as "Git stash"). A test fails if a tool has no name.
+
+## [1.49.10]
+
+### Changed
+- After a push, the "Waiting for the build to start..." bar is shown only when the project has a GitHub Actions workflow (`.github/workflows`). Projects without one no longer show a bar that waits for a build that will never start.
+
+## [1.49.9]
+
+### Fixed
+- Hiding secrets in command output no longer masks harmless words. Text such as "author", "passport", "password-validator" or "bypass" in package.json-style output was replaced by `***`; only real secret names and values are hidden now.
+
+## [1.49.8]
+
+### Changed
+- Command cards that wait because they go outside the start folder no longer show "Always allow ... in this chat" either, since that command asks again anyway.
+
+## [1.49.7]
+
+### Changed
+- The three choices of "Commands outside the start folder" are now Servers, Always and Off, so they fit on one line and have the same size.
+- Command cards marked "risky" no longer show "Always allow ... in this chat". A risky command always asks, so the button did nothing.
+
+## [1.49.6]
+
+### Security
+- Terminal and server commands that can print secrets now always ask, even in Auto mode and even after "Always allow". This covers any command that mentions a secret file (`.env`, keys, `~/.ssh`, `~/.aws`, `~/.docker`, shell history, `/etc/shadow`, `/proc/*/environ`, and so on), whatever the program is, and commands that dump the environment (`printenv`, `env`, `pm2 env/show/jlist`, `docker inspect`, `systemctl show`, `history`, `kubectl get secret`).
+- Command output now hides private key blocks, well-known token shapes (OpenAI, Anthropic, GitHub, AWS, Slack, Google, JWT, Bearer) and values of secret-named variables (`TOKEN=`, `PASSWORD=`, JSON `"apiKey": ...`), even when the secret is not in the start folder. This follows the "Protect secret files" setting.
+- New setting "Commands outside the start folder": a command that touches a path outside the start folder asks first, even in Auto mode. Choices: Ask on servers (default), Ask always, Off. Commands inside the folder are not affected.
+
+### Changed
+- The secret warning on command cards now reads "this command may print secrets".
+
+## [1.49.5]
+
+### Changed
+- The yellow "Outside the start folder" note on command cards now lines up with the other lines. The path sits on its own line, so it no longer breaks in the middle of a word, and a very long path is shortened in the middle.
+
+## [1.49.4]
+
+### Added
+- The text size of expanded command output now shows between `A−` and `A+`. Tap the number to go back to the normal size (11). It is outlined when the size is changed.
+
+## [1.49.3]
+
+### Added
+- Expanded command output has `A−` and `A+` buttons that make the text smaller or larger (8 to 16 px). The size is kept between visits and applies to every output box.
+
+## [1.49.2]
+
+### Added
+- Command approval cards show a yellow "Outside the start folder" line, and "outside folder" in the footer, when a command touches a path outside the start folder (servers and Termux). It is only a note: it does not make the command risky.
+- When a menu opens on a chat, a server file or a scratch file, the other rows fade and the pressed row stays clear.
+
+### Changed
+- The model selector now fills the whole space between the menu button and the folder button.
+
+## [1.49.1]
+
+### Added
+- A long file name now shows a short form at the top of the file menu, with the start and the extension kept. Short names show nothing extra.
+- Command output can be expanded when it is long, and a long table scrolls sideways instead of breaking.
+- A command that prints a secret file (`.env`, private keys, `.netrc`) now shows a warning and always asks, because its output goes to your AI provider.
+
+### Changed
+- Command output uses a smaller font, so more fits on screen.
+- The Terminal chip keeps one fixed width when you turn the terminal on or off, with no extra empty space.
+- The model name has more room at the top. The new chat button at the top is gone; use New chat in the menu.
+- The note in the server form now says that commands run with the permissions of the user and each one asks first.
+
+### Fixed
+- Harmless commands that end with `2>/dev/null` no longer show the red "can delete data" warning.
+- Command output from a server no longer starts with the login banner of the server.
+- After you send a message, the same text no longer comes back into the message box when the keyboard was still composing the last word. Sending the same text twice within four seconds is ignored.
+
+## [1.49.0]
+
+### Added
+- **Connect a server** (SSH/SFTP). Add a server from the Projects sheet, test the connection, and use it like a folder.
+- Browse, view, upload, download and delete files on the server, with progress and Cancel for large files.
+- The agent can read and edit files on the server and run commands there. Every command asks first, and risky ones (stopping services, deleting databases, changing users or the firewall) get a warning.
+- Password or private key sign-in. Passwords and keys are stored encrypted on the phone. The server's key is checked on every connection.
+- Edit or remove a server from the Projects sheet.
+
+### Changed
+- Auto is off for servers, and the Git and Terminal chips are hidden there. The agent can still run commands on the server.
+
+### Notes
+- Ed25519 keys are not supported yet. Use a password, or an RSA or ECDSA key.
+- FTP and FTPS are planned for a later release.
+
+## [1.48.1]
+
+### Added
+- The Auto chip now shows next to the Scratch chip in a chat without a folder, so approvals can be set there too.
+- Adding a folder to a chat that has Scratch files asks "Move N Scratch files?" with "Not now" and "Move".
+
+### Changed
+- The Move dialog is simpler: Cancel or Move. The files are copied, then Scratch is emptied. A file whose name already exists is kept as a copy with "-scratch" in its name, and a warning says so.
+- Notifications: Quiet shows only errors, warnings and results you cannot see (Git, clone, restore, updates). All shows everything. Short confirmations (Auto on/off, Moved, Freed, Saved and similar) are now All only.
+- While a notification is visible, the first touch anywhere only dismisses it. The next touch works normally.
+- The reload button in the HTML preview bar uses a simpler single-arc icon.
+
+### Fixed
+- The chat long-press menu now closes with one tap instead of two.
+
+## [1.48.0]
+
+### Added
+- Scratch: a chat without a folder now has a private file desk. It appears the first time a file is made (the "Scratch · N" chip next to Add folder) and is kept only inside the app, out of the file manager and away from other apps. The agent can now list, read, write, edit, delete, search, zip and unzip files there, with the same approvals and backups as a project. Files from make_file are saved there too, and the Download button still works as before. There is no Git or terminal in Scratch.
+- Scratch sheet: tap a file for View, Copy, Preview (HTML) or Delete. Move to a folder copies the files into a folder you pick and continues the chat there (you choose to clear or keep the Scratch copy; files with the same name are kept). Download all (zip) goes through the phone's share sheet like other downloads. Clear this scratch empties it; the chat stays. Each chat's Scratch is limited to 50 MB and is deleted with the chat.
+- Settings > Cleanup: shows what the app uses and what is safe to clear. Free up space removes undo backups older than 30 days, the diagnostics log and Scratch files of chats not used for 30 days. Remove pictures from chats deletes the pictures but keeps every message. Chats, keys and settings are never touched, and both buttons ask first.
+
+### Changed
+- The local database is now version 2 (adds the Scratch store). Existing chats and settings are untouched.
+
+## [1.47.3]
+
+### Changed
+- Chat bar: the approval chip now always reads "Auto". Off is a plain outline with a shield; on is a red tint with a shield and a check. The chip never changes size, so nothing shifts when you switch. Tapping it explains the new state (shown in Quiet mode too).
+- Git sheet: the Changes, Branches, History and Remote tabs are four equal outline pills across the full width, the same style as the other buttons in the app. Long labels such as "Changes (12)" still fit.
+
+### Fixed
+- The Pin, Rename and Delete menu now closes on the first touch outside it, also after opening it with a long press. The touch no longer reaches the chat underneath.
+
+## [1.47.2]
+
+### Changed
+- Git sheet: the Changes, Branches, History and Remote tabs are now one rounded bar that fills the full width, matching the card below.
+- Notifications follow one rule. Quiet (the default) shows only errors, warnings and results of long tasks such as push, pull, clone, backup and update. Short confirmations (Pinned, Copied, Saving, Committed, branch changes, saved keys and the like) appear only in All. The old hide-list is gone, so a new message can no longer slip into Quiet mode by accident.
+- The "Pictures may not work" warning shows once per model instead of on every attached picture.
+- Blocked actions (task still running, terminal off, file too large, backup problems) and model notices are now warnings, so Quiet mode never hides the reason something did not happen.
+- Settings: the Notifications note now says what Quiet and All show.
+
+## [1.47.1]
+
+### Fixed
+- Pressing and holding a chat in the drawer now opens the Pin, Rename and Delete menu on a real phone. It uses Android's own long press, ignores the system cancel signal, and no longer closes when you lift your finger.
+- Changes screen: Delete, Restore and Undo buttons are now the same width.
+- Chat bar: the Auto and Ask first chip keeps its icon in the same place when you switch.
+
+### Changed
+- Git sheet: Stage all, Unstage all and Discard all are now same-size chips. The safe actions are grey and Discard all is red with a trash icon.
+- The assistant no longer mentions a website when it introduces itself.
+
+## [1.47.0]
+
+### Added
+- HTML preview. Pages the agent creates in chat get an eye button next to Copy and Download, and `.html` files in the Files screen have one too (plus a Preview button in the file viewer). The page opens full screen in a closed box inside the app: scripts run, but it cannot reach the network, the app's data or your keys. Local CSS, scripts and pictures next to the page are loaded from the project folder. Reload and Save a copy are in the top bar.
+- Press and hold a chat in the drawer to open the same Pin, Rename and Delete menu next to your finger. The three-dot button still works. Moving your finger (scrolling) cancels it, and releasing does not open the chat.
+
+### Changed
+- Git sheet footer: Commit is now one full-width button. Suggest moved into the commit message box as a small sparkles pill.
+
+## [1.46.0]
+
+### Added
+- **Build status after a push:** a bar above the message box follows the GitHub Actions build of the commit you pushed (waiting, running, passed, failed). When it fails, **Fix it** makes the agent read the build log, fix the cause with small edits and commit. It asks before pushing again and stops after 3 tries in a row.
+- **Pre-push check:** before every push the app checks package.json (valid JSON, valid dependency versions), that the version is the same in package.json, package-lock.json and the app's version constant, that package-lock.json matches package.json (the usual reason for a failed `npm ci`), and that the changes hold no merge-conflict marks or keys. If something is wrong the push card shows it with **Fix it** and **Push anyway**. The agent can also run it on its own (`pre_push_check`).
+- **Safe version bump** (`bump_version`): raises the version in package.json, package-lock.json and APP_VERSION with exact, verified edits, so version numbers are never changed with a search-and-replace again.
+- **One-tap release** (`release`): raises the version, writes the changelog entry from the notes, runs the pre-push check, commits "Release vX.Y.Z" and pushes, after one approval card. It always asks, even in Auto mode. It reads your workflow file first and stops with a clear message when the project publishes from a tag.
+- **Saved commands** in the Terminal sheet: your own shortcuts per project. Run shows the command, asks first, runs it in Termux and shows the result, without using the model or tokens. Commands that contain a key or password are refused.
+- **Review my changes:** a button in the Git sheet (and `review_changes` / `report_findings` for the agent) lists risks, leftovers and notes in your uncommitted changes with file and line and a **Fix** button on each. When nothing is wrong it says "No problems found".
+
+### Fixed
+- package-lock.json had the wrong version inside it (1.5.1); the version bump corrected it.
+- "Allow all" no longer approves a push that the pre-push check held back.
+
+## [1.45.1]
+
+### Fixed
+- Build failed at `npm ci`: the isomorphic-git version in package.json had been mangled (`^1.45.02`) by a version-bump script. Restored to `^1.44.12`. This also affected 1.44.2.
+
+## [1.45.0]
+
+### Added
+- **Project instructions:** a `KDEX.md` file in the project folder is read at the start of every message (up to 4000 characters).
+- **Project map** tool: every file with its functions, classes and routes in one call.
+- **Project checks** tool: finds the project's lint, test and build commands so the agent can run the lightest one and fix errors.
+- **Loop guard:** the agent stops and asks when it repeats the same step with the same result, or fails four times in a row.
+- **Undo all** bar after a task that changed two or more files, with a Review shortcut.
+- **GitHub tools:** read Actions runs, explain why a build failed from the log, list issues and pull requests (read-only; uses the saved Git token without exposing it).
+- **Termux setup checker:** shows which programs are installed and how much space is free, with install commands.
+- **Everyday tools:** calculator, unit converter, `remember` (saves a note), clipboard read and write, alarm and timer in the phone's Clock app.
+- **Image generation** (Settings > Images): creates a picture with your own image-model key and saves it in the project folder, after your approval.
+- Screenshot-to-fix and file-conversion guidance for the agent.
+
+### Changed
+- Redirects are now followed by the app itself in `web_fetch` and the GitHub tools, so each hop is checked and tokens are never sent to another host.
+- Added the `SET_ALARM` permission for the Clock app.
+
+## [1.44.2]
+
+### Fixed
+- Tapping a chat row while its ⋮ menu is open now only closes the menu on touch screens; it no longer also opens the chat underneath.
+
+## [1.44.1]
+
+### Fixed
+- Light mode: the status bar and the bottom bar showed black because the light background colour was sent to Android in a short form it rejects. They are now white with dark icons.
+- Chat menu: while it is open, the first tap outside only closes it. It no longer opens the chat underneath.
+- Rename chat starts with the current name, cursor at the end, so you can edit it.
+- The splash logo has rounded corners, like the logo on the welcome screen.
+
+## [1.44.0]
+
+### Added
+- Splash screen with the app logo on white or near-black, following the phone's light or dark mode.
+- After two approvals in one chat, a web page request offers "Allow every website" so it stops asking.
+
+### Changed
+- Reading a web page has its own card: "Read web page", the site and page, a short status (Waiting, Done, Skipped, Couldn't read) and the reason when it fails.
+- The approval bar says "1 waiting for your approval" with an "Allow all" button.
+- The context dialog is shorter.
+
+## [1.43.0]
+
+### Added
+- Chats: a menu button on every chat with Pin, Rename and Delete. Pinned chats stay on top under "Pinned" and survive "Delete all conversations".
+- Folders: the folder list is sorted by last use and shows "Opened ... ago"; a search box appears once there are six or more folders.
+
+### Changed
+- The trash button in the chat list moved into the chat menu, so a chat can no longer be deleted by one stray tap.
+
+## [1.42.1]
+
+### Fixed
+- Pull: the merge commit Git makes when both sides changed now uses your Git name and email (it used the phone's system user before).
+- Push and pull on a detached HEAD now say clearly to switch to a branch first.
+
+## [1.42.0]
+
+### Security
+- The `.git` folder is hidden from the AI's read, search and file-find tools; it can hold access tokens. Git tools remain available.
+- Passwords written inside web addresses are masked in tool output.
+- Terminal commands that send data out (curl/wget uploads, POST, auth headers, nc/scp/rsync, reads of Git credential files) always ask first, even in Auto mode. Plain downloads are unaffected.
+- The update check only accepts APK links from this project's GitHub repository.
+
+### Fixed
+- Backup and restore are safer: backups leave pictures out (with a note in the message), a damaged file is rejected before anything is changed, and a failed restore rolls back to the previous data.
+- After a reinstall, folders Android no longer lets the app open are listed so you can add them again.
+
+### Changed
+- Android versionCode is derived from the version number, and a release tag must match the version in package.json.
+
+## [1.41.0]
+
+### Added
+- **Read web pages:** the assistant can read one public web page (`web_fetch`) when the answer needs fresh information such as news, new versions, prices or documentation, or when you give it a link. It needs no key and no third-party service: the phone downloads the page, removes menus, scripts and ads, and returns about 6,000 characters at a time to save tokens. You approve each new site (with "Always allow this site in this chat"), and addresses on this phone or a private network are blocked.
+- **Look at pictures in a project folder:** the assistant can view a png, jpg, webp or gif file from the folder (`view_image`) when seeing it matters.
+- **Direct answers to "what is it today?" questions:** exchange rates, crypto prices, weather and similar live facts are fetched at once from one simple source (a single terminal command when Termux is on, otherwise `web_fetch`), and the answer gives the value first, then the source and how fresh it is. Money rates are labelled as reference rates.
+- **Context ring:** a small ring next to the attach and thinking icons shows how full the chat history is for your token-saving mode (green, yellow, red). Tap it for details or to start a new chat.
+- A short warning when you attach a picture to a model that is probably text-only, and a clear message if a provider refuses pictures.
+
+### Fixed
+- If a model refuses a request because its own context limit is smaller than the chosen budget, the app now retries with less history instead of stopping with an error.
+- Long unbroken terminal output (such as JSON) is wrapped instead of being cut off at the right edge.
+- Pictures and screenshots sometimes arrived black. Small pictures are now sent exactly as they are; larger ones are resized on a white background, and if the result looks blank the original is sent instead.
+
+## [1.40.0]
+
+### Added
+- Attach Word (.docx), Excel (.xlsx), PowerPoint (.pptx) and OpenDocument files to a chat; their text is read on the phone. PDF is not supported.
+- The assistant knows what to install in Termux for common project types, with rough download sizes, and avoids heavy tools.
+
+### Changed
+- Shorter answers: "who are you" gets a one-line introduction and a few short bullets in the language of the question; greetings get one short line. Replies follow the language of the latest message.
+- Long chats: the running summary keeps the current state and the next step (up to 450 words), and the assistant re-reads files that may have changed since an earlier session.
+- Switching model in the middle of a chat is safer: provider-specific thinking data is only sent back to the model that wrote it.
+- The assistant only explains app settings when asked or when something goes wrong.
+
+## [1.39.0]
+
+### Added
+- Project documentation: new README, `CONTRIBUTING.md`, `SECURITY.md`, issue and pull request templates.
+- This changelog. Release notes on GitHub now come from it.
+
+### Changed
+- License: KDex Agent is now source-available under the KDex Agent License (see `LICENSE`). Versions 1.38.0 and earlier stay under the MIT License.
+- Privacy policy updated to match the app (update check, Git storage, Termux, backups).
+- Settings > About now has a "Licenses" screen that lists the app license and third-party licenses.
+
+### Removed
+- Development-only files from the repository (tests, screenshots, store checklist, helper script).
+
+## [1.38.0]
+
+First public release.
+
+### Added
+- Chat with your own AI provider key (Anthropic, OpenAI, Gemini, DeepSeek, xAI, OpenRouter or any OpenAI-compatible endpoint), thinking levels, memory notes, chat history and usage estimates.
+- Project folders: the agent lists, searches, reads, creates, edits and deletes files only inside the folder you choose. Every change is shown as a diff and needs your approval; a backup is saved first and Undo is one tap.
+- Git built in: clone, status, diff, commit, push, pull, fetch, branches, history and discard, with access tokens kept in the Android Keystore.
+- Optional Termux terminal for commands, with approval for each command.
+- Protection for secret files (`.env`, keys): hidden from the agent and the chat.
+- Background work with notifications, approval notifications, and Share into the app.
+- Backup and restore (API keys are never included), light and dark themes, diagnostics log.
+- Settings > About: developer, source code, update check against GitHub Releases.
+- Automatic tag and GitHub Release when `version` in `package.json` is raised on `main`.

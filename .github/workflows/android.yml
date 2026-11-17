@@ -1,0 +1,136 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "debug = test APK, release = signed APK (share directly)"
+        type: choice
+        options: [debug, release]
+        default: debug
+  push:
+    tags: ["v*"]
+    # Raising "version" in package.json on main builds and publishes a release automatically (tag vX.Y.Z).
+    branches: [main]
+    paths: [package.json]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.rel.outputs.skip }}
+      release: ${{ steps.rel.outputs.release }}
+      tag: ${{ steps.rel.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decide whether to publish a release
+        id: rel
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          SKIP=false; RELEASE=false; TAG="v$VER"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            if [ "${{ github.ref_name }}" != "v$VER" ]; then echo "::error::Tag ${{ github.ref_name }} does not match package.json version $VER."; exit 1; fi
+            RELEASE=true; TAG="${{ github.ref_name }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
+              echo "Tag v$VER already exists, nothing to release."; SKIP=true
+            else
+              RELEASE=true
+            fi
+          fi
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"; echo "release=$RELEASE" >> "$GITHUB_OUTPUT"; echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version $VER, release=$RELEASE, skip=$SKIP, tag=$TAG"
+
+  build:
+    needs: check
+    if: needs.check.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+      KDEX_JGIT: ${{ vars.KDEX_JGIT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync web assets
+        run: npx cap sync android
+
+      - name: Prepare signing (release only)
+        if: env.BUILD_TYPE != 'debug'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "::error::Missing GitHub secret $v. Add the 4 signing secrets (see README) or run with build_type=debug."; exit 1; fi
+          done
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/kdex.keystore"
+          echo "KDEX_KEYSTORE=$RUNNER_TEMP/kdex.keystore" >> "$GITHUB_ENV"
+          echo "KDEX_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "KDEX_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "KDEX_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Patch Android project
+        run: node scripts/prepare-android.mjs
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          case "$BUILD_TYPE" in
+            release) ./gradlew assembleRelease --no-daemon ;;
+            *) ./gradlew assembleDebug --no-daemon ;;
+          esac
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          f=$(find android/app/build/outputs/apk -name "*.apk" | head -n1)
+          cp "$f" "out/KDex-Agent-${BUILD_TYPE}.apk"
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KDex-Agent-${{ env.BUILD_TYPE }}
+          path: out/*
+          if-no-files-found: error
+
+      - name: Write release notes
+        if: needs.check.outputs.release == 'true'
+        run: |
+          TAG="${{ needs.check.outputs.tag }}"; VER="${TAG#v}"
+          awk -v h="## [$VER]" 'index($0,h)==1{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "KDex Agent $TAG" > notes.md
+          echo "" >> notes.md
+          echo "Install: download KDex-Agent-release.apk below and open it. Your chats and settings stay. See CHANGELOG.md for all changes." >> notes.md
+
+      - name: Create tag and release
+        if: needs.check.outputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: KDex Agent ${{ needs.check.outputs.tag }}
+          body_path: notes.md
+          files: out/*
