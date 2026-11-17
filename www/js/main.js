@@ -2356,14 +2356,19 @@ function bindGit(folder, st, body) {
   };
   if ($('#gCommit')) {
     syncCommit(st);
+    ['#gSuggest', '#gCommit', '#gReview'].forEach((q) => { const el = $(q); if (el) el.addEventListener('pointerdown', (e) => e.preventDefault()); }); // keep the keyboard open so the first tap is not lost to the layout change
     const ta = $('#gMessage'); ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 96) + 'px'; syncCommit(st); };
     $('#gReview').onclick = () => { if (!S.models.length) { noModelNotice(); return; } closeSheet(); quickSend('Review my uncommitted changes before I commit: call review_changes, check what it spotted, then report_findings.'); };
     $('#gSuggest').onclick = async () => {
       const hint = (m) => { const h = $('#gHint'); if (!h) return; h.textContent = m; clearTimeout(h._t); h._t = setTimeout(() => { h.textContent = ''; }, 5000); };
       if (!S.models.length) { hint('Connect a model first: Settings > Add provider.'); return; }
       const b = $('#gSuggest'); b.disabled = true; const l = b.querySelector('.lbl'); l.textContent = 'Thinking...';
-      try { ta.value = await A.suggestCommitMessage(currentModelId(), folder); ta.oninput(); } catch (e) { hint(e.message || 'Could not suggest a message.'); }
-      b.disabled = false; l.textContent = 'Suggest';
+      let text = '', fail = '';
+      try { text = await A.suggestCommitMessage(currentModelId(), folder); } catch (e) { fail = e.message || 'Could not suggest a message.'; }
+      // The sheet may have been redrawn while the model was working, so find the live box and button again.
+      const box = $('#gMessage'); if (box && text) { box.value = text; box.oninput && box.oninput(); }
+      if (fail) hint(fail);
+      const b2 = $('#gSuggest'); if (b2) { b2.disabled = false; const l2 = b2.querySelector('.lbl'); if (l2) l2.textContent = 'Suggest'; }
     };
     if ($('#gProtGo')) $('#gProtGo').onclick = async () => {
       const held = (st.blocked || []).filter((p) => GS.sel.has(p));

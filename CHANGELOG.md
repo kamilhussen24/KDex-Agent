@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.8]
+
+### Fixed
+- Git: Suggest and Commit sometimes needed two taps. The first tap no longer closes the keyboard and shifts the buttons, and a suggested message is no longer lost if the sheet redraws while the model is working.
+
 ## [1.54.7]
 
 ### Added
