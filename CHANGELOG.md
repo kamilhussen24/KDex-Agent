@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.6]
+
+### Fixed
+- Model picker closed right after opening on a phone. The tap that opened it no longer closes it.
+
 ## [1.54.5]
 
 ### Changed
