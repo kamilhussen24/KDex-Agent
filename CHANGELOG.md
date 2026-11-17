@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.3]
+
+### Added
+- Git > Danger zone: **Start fresh history** replaces all old commits with one new commit of the current files, then force pushes the branch.
+
 ## [1.54.2]
 
 ### Changed

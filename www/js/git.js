@@ -311,9 +311,9 @@ export async function cloneInto(parent, url, opts = {}) {
   catch (e) { try { await safFs.remove(parent.uri, name); } catch (x) { /* ignore */ } throw e; }
   return folder;
 }
-export async function init(folder, url) {
+export async function init(folder, url, branch = 'main') {
   modes.set(folder.id, 'native');
-  await git().init({ ...ctx(folder), defaultBranch: 'main' });
+  await git().init({ ...ctx(folder), defaultBranch: branch });
   if (url) await git().addRemote({ ...ctx(folder), remote: 'origin', url, force: true });
 }
 export async function setRemote(folder, url) { await git().addRemote({ ...ctx(folder), remote: 'origin', url, force: true }); }
@@ -577,6 +577,23 @@ export async function undoLastCommit(folder) {
   if (!commit.parent.length) throw new Error('This is the first commit, there is nothing before it.');
   await git().writeRef({ ...c, ref: 'refs/heads/' + b, value: commit.parent[0], force: true });
   return oid;
+}
+// Replace the whole history with one commit of the current files, then force push it.
+export async function freshHistory(folder, message, { onProgress, signal, step = () => {} } = {}) {
+  const url = await remoteUrl(folder);
+  if (!url) throw new Error('No remote set. Add a remote URL in Git > Remote first.');
+  const { token } = await needToken(url);
+  if (!token) throw new Error('No token for ' + hostOf(url) + '. Add one in Identity and tokens first.');
+  let branch = await currentBranch(folder);
+  if (!branch || /detached/.test(branch)) branch = 'main';
+  step('Removing old history');
+  await remove(folder); resetGitCache(folder);
+  step('Saving files');
+  await init(folder, url, branch);
+  resetGitCache(folder);
+  await commit(folder, message || 'Initial commit');
+  step('Uploading');
+  return push(folder, { force: true, onProgress, signal });
 }
 export async function discardAll(folder) {
   const ch = await status(folder);

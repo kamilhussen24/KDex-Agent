@@ -2279,6 +2279,7 @@ function renderGitTab(folder, st, head, body) {
     if (!st.remote) h += '<div class="h3">Create a new repository</div><div class="card"><p>Create a repository on GitHub or GitLab for these files and upload them.</p><button id="gPublish" class="btn primary" style="width:100%"><span class="lbl">Create and push</span></button></div>';
     h += '<div class="h3">Account</div><div class="card"><div class="kv" style="border:0;padding-bottom:2px"><span>Author</span><span id="gTag" class="badge cur" style="display:none"></span></div><div id="gAuthor" style="line-height:1.5;margin:0 0 12px;word-break:normal;overflow-wrap:anywhere"></div><button id="gIdent" class="btn sm"><span class="lbl">Identity and tokens</span></button></div>' +
       '<div class="h3">Danger zone</div><div class="card danger-zone"><p>Force push replaces the remote branch with yours. Commits only on the remote are lost.</p><button id="gForce" class="btn sm danger"' + (st.remote ? '' : ' disabled') + '><span class="lbl">Force push</span></button>' +
+      '<p style="margin-top:14px">Replace all old commits with one new commit of your current files, then force push. Files stay the same.</p><button id="gFresh" class="btn sm danger"' + (st.remote ? '' : ' disabled') + '><span class="lbl">Start fresh history</span></button>' +
       '<p style="margin-top:14px">Remove Git data for this folder from the app. Your files stay untouched.</p><button id="gWipe" class="btn sm danger"><span class="lbl">Remove Git from this folder</span></button></div>';
   }
   body.innerHTML = h;
@@ -2381,6 +2382,12 @@ function bindGit(folder, st, body) {
   if ($('#gForce')) $('#gForce').onclick = async () => {
     if (!await confirmBox('Force push?', 'This overwrites "' + st.branch + '" on the remote with your local version. Anyone else\'s commits there will be lost.', 'Force push')) return;
     run('Force pushing', (pr, sg) => G.push(folder, { force: true, onProgress: pr, signal: sg }), true);
+  };
+  if ($('#gFresh')) $('#gFresh').onclick = async () => {
+    const m = await askText('Start fresh history?', 'Commit message', 'Initial commit');
+    if (!m) return;
+    if (!await confirmBox('Delete all old commits?', 'All old commits are deleted and replaced by one commit. Then "' + st.branch + '" is force pushed to the remote. Other remote branches and tags are not touched.', 'Start fresh')) return;
+    run('Starting fresh', (pr, sg) => G.freshHistory(folder, m, { onProgress: pr, signal: sg }), true);
   };
   if ($('#gWipe')) $('#gWipe').onclick = async () => {
     if (!await confirmBox('Remove Git from this folder?', 'The commit history of this project is deleted. Your files are not touched.', 'Remove')) return;
