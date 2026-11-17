@@ -131,11 +131,12 @@ function toast(t, opts = {}) {
 window.__toast = toast;
 window.__errLine = errLine;
 window.__errTest = (t) => { const d = explainGitError(t); return d; };
-function confirmBox(title, text, yes = 'OK') {
+function confirmBox(title, text, yes = 'OK', html) {
   return new Promise((res) => {
-    $('#dlgTitle').textContent = title; $('#dlgText').textContent = text; $('#dlgYes').firstElementChild.textContent = yes;
+    $('#dlgTitle').textContent = title; if (html) $('#dlgText').innerHTML = html; else $('#dlgText').textContent = text;
+    $('#dlgText').classList.toggle('pf-host', !!html); $('#dlgYes').firstElementChild.textContent = yes;
     $('#dialog').classList.remove('hidden');
-    const done = (v) => { $('#dialog').classList.add('hidden'); $('#dlgYes').onclick = $('#dlgNo').onclick = null; res(v); };
+    const done = (v) => { $('#dialog').classList.add('hidden'); $('#dlgText').classList.remove('pf-host'); $('#dlgYes').onclick = $('#dlgNo').onclick = null; res(v); };
     $('#dlgYes').onclick = () => done(true); $('#dlgNo').onclick = () => done(false);
   });
 }
@@ -2372,7 +2373,10 @@ function bindGit(folder, st, body) {
     };
     if ($('#gProtGo')) $('#gProtGo').onclick = async () => {
       const held = (st.blocked || []).filter((p) => GS.sel.has(p));
-      if (!await confirmBox('Commit protected files?', held.join('\n') + '\n\nThese look like secret files. If your repository is public, anyone can read them.', 'Commit anyway')) return;
+      const n = held.length; const shown = held.slice(0, 3);
+      const list = '<div class="pf-list">' + shown.map((f) => '<div class="pf-row">' + esc(f) + '</div>').join('') + (n > 3 ? '<div class="pf-more">+' + (n - 3) + ' more</div>' : '') + '</div>';
+      const note = '<div class="pf-note">' + (n > 1 ? 'Look like secrets. On a public repository anyone can read them.' : 'Looks like a secret. On a public repository anyone can read it.') + '</div>';
+      if (!await confirmBox(n > 1 ? 'Commit ' + n + ' protected files?' : 'Commit protected file?', '', 'Commit anyway', list + note)) return;
       await G.allowSecrets(folder, held); toast(held.length > 1 ? 'Files allowed' : 'File allowed'); openGit(GS.tab);
     };
     $('#gCommit').onclick = async () => {

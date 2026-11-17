@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.9]
+
+### Changed
+- The "Commit protected files?" dialog is more compact: file names in a small list (first three, then "+N more") and a one-line note.
+
 ## [1.54.8]
 
 ### Fixed

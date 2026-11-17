@@ -695,3 +695,11 @@ html[data-theme=dark] .exithint{box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .gprot .ic{width:16px;height:16px;flex:none;color:var(--mut)}
 .gprot .gpt{flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gprot .btn{flex:none;height:32px;padding:0 12px}
+
+/* protected files dialog */
+.dlg-text.pf-host{white-space:normal;margin-bottom:12px}
+.pf-list{background:var(--bg2);border-radius:10px;padding:2px 12px;margin-bottom:8px}
+.pf-row,.pf-more{padding:7px 0;font-size:14px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid var(--line)}
+.pf-row:last-child,.pf-more{border-bottom:0}
+.pf-more{color:var(--mut);font-size:13px}
+.pf-note{font-size:13px;line-height:1.45;color:var(--mut)}
