@@ -1091,8 +1091,39 @@ async function closeSheetAsk() { if (S.edGuard && !(await S.edGuard())) return; 
 
 /** Use `f` (or no folder) in the current chat. Messages stay; the model is told about the change. */
 async function touchFolder(f) { if (!f) return; const x = S.folders.find((y) => y.id === f.id); if (x) { x.used = Date.now(); f.used = x.used; await A.saveFolders(S.folders); } }
+/** True when a folder on this phone no longer exists (deleted, moved, or access removed). Servers and the scratch desk are never "missing". */
+async function folderMissing(f) {
+  if (!f || f.remote || !f.uri) return false;
+  try { const st = await fs.stat(f.uri, ''); return !(st && st.exists); } catch (e) { return true; }
+}
+/** Replaces the red "Not found" error: says what happened and offers a way out. `again` runs after a new folder is chosen. */
+function showFolderGone(f, again) {
+  const body = sheet(f.name);
+  body.innerHTML = '<div class="gone"><div class="gone-ic">' + ICON('folder') + '</div><div class="t">This folder was deleted or moved</div>' +
+    '<p class="note" style="margin:6px 0 18px">KDex Agent can\'t find "' + esc(f.name) + '" on this phone. Your chats are still saved.</p>' +
+    '<button id="goneNew" class="btn primary" type="button" style="width:100%">' + ICON('folder') + '<span class="lbl">Choose another folder</span></button>' +
+    '<button id="goneRm" class="btn" type="button" style="width:100%;margin-top:10px;color:var(--text-danger)">' + ICON('trash') + '<span class="lbl">Remove from app</span></button></div>';
+  $('#goneNew').onclick = async () => {
+    let r; try { r = await fs.pickFolder(); } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast(e.message || 'Could not open the folder', { kind: 'err' }); return; }
+    if (!r || !r.uri) return;
+    const old = f.uri; f.uri = r.uri;
+    const x = S.folders.find((y) => y.id === f.id); if (x) x.uri = r.uri;
+    await A.saveFolders(S.folders);
+    try { if (old && old !== r.uri) await fs.releaseFolder(old); } catch (e) { /* ignore */ }
+    closeSheet(); toast('Now using ' + (r.name || f.name));
+    if (again) again();
+  };
+  $('#goneRm').onclick = async () => {
+    if (!await confirmBox('Remove folder?', 'This only removes "' + f.name + '" from the list. Your chats are not deleted.', 'Remove')) return;
+    try { await fs.releaseFolder(f.uri); } catch (e) { /* ignore */ }
+    S.folders = S.folders.filter((x) => x.id !== f.id); await A.saveFolders(S.folders);
+    if (S.folder && S.folder.id === f.id) { S.folder = null; if (S.chat) { S.chat.folderId = null; await persistChat().catch(() => {}); } drawCtx(); }
+    closeSheet();
+  };
+}
 async function applyFolder(f) {
   const c = S.chat; if (!c) return;
+  if (f && await folderMissing(f)) { showFolderGone(f, () => applyFolder(f)); return; }
   rememberServer(f);
   touchFolder(f); markFolder(f);
   const cur = S.folder;
@@ -1257,7 +1288,7 @@ async function openServerForm(edit) {
   body.innerHTML =
     '<div class="field"><span>Name</span><input id="svName" placeholder="My VPS" autocomplete="off" value="' + esc(edit ? edit.name : '') + '"></div>' +
     '<div class="field"><span>Host and port</span><div style="display:flex;gap:8px"><input id="svHost" style="flex:1" type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="vps.example.com" value="' + esc(edit ? edit.host : '') + '"><input id="svPort" style="width:84px" inputmode="numeric" autocomplete="off" value="' + esc(edit ? edit.port : 22) + '"></div></div>' +
-    '<div class="field"><span>User</span><input id="svUser" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="deploy" value="' + esc(edit ? edit.user : '') + '"></div>' +
+    '<div class="field"><span>User</span><input id="svUser" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="root" value="' + esc(edit ? edit.user : '') + '"></div>' +
     '<div class="field"><span>Sign in with</span><div class="seg" id="svAuth"><button type="button" class="btn sm" data-v="password"><span class="lbl">Password</span></button><button type="button" class="btn sm" data-v="key"><span class="lbl">Key</span></button></div></div>' +
     '<div class="field" id="svPassBox"><span>Password</span><input id="svPass" type="password" autocomplete="off" placeholder="' + (edit && old.password ? 'Saved. Leave empty to keep it.' : '') + '"></div>' +
     '<div class="field" id="svKeyBox"><span>Private key (RSA or ECDSA)</span><textarea id="svKey" class="keybox" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="' + (edit && old.key ? 'Saved. Leave empty to keep it.' : '-----BEGIN OPENSSH PRIVATE KEY-----') + '"></textarea>' +
@@ -1705,6 +1736,7 @@ function folderLongPress(body, reopen) {
 }
 async function openFiles(path = '') {
   if (!S.folder) return;
+  if (await folderMissing(S.folder)) { const g = S.folder; showFolderGone(g, () => openFiles(path)); return; }
   markFolder(S.folder);
   const body = sheet(S.folder.name + (path ? ' / ' + path : ''), { back: path ? () => openFiles(path.split('/').slice(0, -1).join('/')) : null });
   body.innerHTML = '<div class="note">Loading...</div>';
@@ -2211,6 +2243,7 @@ const skeleton = () => '<div class="skel"><i style="width:60%"></i><i style="wid
 let gitLoadId = 0;
 async function openGit(tab, keepMsg) {
   if (!S.folder) { toast('Open a folder first.'); return; }
+  if (await folderMissing(S.folder)) { const g = S.folder; showFolderGone(g, () => openGit(tab, keepMsg)); return; }
   const folder = S.folder; G.resetGitCache(folder); markFolder(folder);
   if (!(await G.isRepo(folder))) return openGitStart(folder);
   if (tab) GS.tab = tab;
@@ -2292,7 +2325,7 @@ function renderGitTab(folder, st, head, body) {
       (st.history.length >= GS.hist && GS.hist < 30 ? '<button id="gMore" class="btn" style="width:100%;margin-top:10px"><span class="lbl">Show 10 more</span></button>' : st.history.length ? '<div class="note">' + (st.history.length >= 30 ? 'Showing the latest 30. See older ones on GitHub.' : 'End of history') + '</div>' : '');
   } else {
     h += repoCard(st);
-    h += '<div class="h3">Remote</div><div class="card"><div class="t" style="word-break:break-all">' + (st.remote ? esc(st.remote.url) : 'No remote set') + '</div><div style="margin-top:10px"><button id="gRemote" class="btn sm"><span class="lbl">' + (st.remote ? 'Change URL' : 'Set remote URL') + '</span></button></div></div>';
+    h += '<div class="h3">Remote</div><div class="card"><div class="t" style="word-break:break-all">' + (st.remote ? esc(st.remote.url) : 'No remote set') + '</div><div style="margin-top:10px;display:flex;gap:8px"><button id="gRemote" class="btn sm"><span class="lbl">' + (st.remote ? 'Change URL' : 'Set remote URL') + '</span></button>' + (st.remote ? '<button id="gCopyUrl" class="btn sm" type="button"><span class="lbl">Copy</span></button>' : '') + '</div></div>';
     if (!st.remote) h += '<div class="h3">Create a new repository</div><div class="card"><p>Create a repository on GitHub or GitLab for these files and upload them.</p><button id="gPublish" class="btn primary" style="width:100%"><span class="lbl">Create and push</span></button></div>';
     h += '<div class="h3">Account</div><div class="card"><div class="kv" style="border:0;padding-bottom:2px"><span>Author</span><span id="gTag" class="badge cur" style="display:none"></span></div><div id="gAuthor" style="line-height:1.5;margin:0 0 12px;word-break:normal;overflow-wrap:anywhere"></div><button id="gIdent" class="btn sm"><span class="lbl">Identity and tokens</span></button></div>' +
       '<div class="h3">Danger zone</div><div class="card danger-zone"><p>Force push replaces the remote branch with yours. Commits only on the remote are lost.</p><button id="gForce" class="btn sm danger"' + (st.remote ? '' : ' disabled') + '><span class="lbl">Force push</span></button>' +
@@ -2406,6 +2439,7 @@ function bindGit(folder, st, body) {
   $$('[data-db]', body).forEach((b) => b.onclick = async () => { if (await confirmBox('Delete branch?', 'Delete "' + b.dataset.db + '" from this phone. The remote copy is not touched.', 'Delete')) run('Deleting branch', () => G.deleteBranch(folder, b.dataset.db)); });
   if ($('#gMore')) $('#gMore').onclick = () => { GS.hist = Math.min(GS.hist + 10, 30); openGit('history'); };
   if ($('#gUndo')) $('#gUndo').onclick = async () => { if (await confirmBox('Undo last commit?', 'The commit is removed from this branch. Its changes come back as uncommitted changes. Nothing is lost.', 'Undo commit')) run('Undoing commit', () => G.undoLastCommit(folder)); };
+  if ($('#gCopyUrl')) $('#gCopyUrl').onclick = async (e) => { flashCopied(e.currentTarget, await copyText(st.remote.url)); };
   if ($('#gRemote')) $('#gRemote').onclick = async () => { const u = await askText(st.remote ? 'Change remote URL' : 'Set remote URL', 'https://github.com/user/repo.git', st.remote ? st.remote.url : ''); if (u) run('Saving remote', () => G.setRemote(folder, u), true); };
   if ($('#gPublish')) $('#gPublish').onclick = () => openGitStart(folder, 'new');
   if ($('#gIdent')) { G.effectiveAuthor(folder).then((a) => { const el = $('#gAuthor'); if (!el) return; if (a.source === 'none') { el.innerHTML = '<b style="font-weight:600">Not set</b><br><span style="color:var(--muted,#666)">Add your name and email</span>'; return; } const t = $('#gTag'); t.style.display = ''; t.textContent = a.source === 'repo' ? 'this repo' : 'default'; el.innerHTML = '<b style="font-weight:600">' + esc(a.name) + '</b><br><span style="color:var(--muted,#666)">' + esc(a.email).replace('@', '<wbr>@') + '</span>'; }); $('#gIdent').onclick = () => openGitIdentity(() => openGit('remote'), { repo: folder }); }

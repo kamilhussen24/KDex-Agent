@@ -7,6 +7,15 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.12]
+
+### Added
+- A **Copy** button next to Change URL in Git > Remote.
+
+### Changed
+- When a project folder was deleted or moved, the app now says so and offers **Choose another folder** or **Remove from app**, instead of a red "Not found" error. Chats are kept.
+- The server form's User example now shows `root`.
+
 ## [1.54.11]
 
 ### Security
