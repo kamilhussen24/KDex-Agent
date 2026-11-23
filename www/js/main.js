@@ -1106,11 +1106,11 @@ function showFolderGone(f, again) {
   $('#goneNew').onclick = async () => {
     let r; try { r = await fs.pickFolder(); } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast(e.message || 'Could not open the folder', { kind: 'err' }); return; }
     if (!r || !r.uri) return;
-    const old = f.uri; f.uri = r.uri;
-    const x = S.folders.find((y) => y.id === f.id); if (x) x.uri = r.uri;
+    const old = f.uri; f.uri = r.uri; if (r.name) f.name = r.name;
+    const x = S.folders.find((y) => y.id === f.id); if (x) { x.uri = r.uri; if (r.name) x.name = r.name; }
     await A.saveFolders(S.folders);
     try { if (old && old !== r.uri) await fs.releaseFolder(old); } catch (e) { /* ignore */ }
-    closeSheet(); toast('Now using ' + (r.name || f.name));
+    drawCtx(); drawChatList(); closeSheet(); toast('Now using ' + (r.name || f.name));
     if (again) again();
   };
   $('#goneRm').onclick = async () => {

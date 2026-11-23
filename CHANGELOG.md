@@ -7,6 +7,21 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.15]
+
+### Fixed
+- The chat list updates the folder name right after **Choose another folder**.
+
+## [1.54.14]
+
+### Fixed
+- The folder name in the top bar updates right away after **Choose another folder**.
+
+## [1.54.13]
+
+### Fixed
+- After **Choose another folder**, the project now takes the new folder's name instead of keeping the old one.
+
 ## [1.54.12]
 
 ### Added
