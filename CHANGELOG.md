@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.17]
+
+### Fixed
+- File tools no longer fail with `Not found: ""` when a model sends the path wrapped in quotes (for example `""` for the project root).
+
 ## [1.54.16]
 
 ### Fixed

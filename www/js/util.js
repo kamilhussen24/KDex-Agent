@@ -57,10 +57,10 @@ export function estimateTokens(s) {
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Clean a relative path inside the chosen folder. Throws on anything that could escape. */
+/** Clean a relative path inside the chosen folder. Models sometimes send the path wrapped in quotes ("" for the root), so one pair is removed. Throws on anything that could escape. */
 export function cleanRel(p) {
   const parts = [];
-  String(p || '').replace(/\\/g, '/').split('/').forEach((seg) => {
+  String(p || '').trim().replace(/^(["'`])(.*)\1$/, '$2').replace(/\\/g, '/').split('/').forEach((seg) => {
     if (!seg || seg === '.') return;
     if (seg === '..') throw new Error('Path must stay inside the chosen folder');
     parts.push(seg);
