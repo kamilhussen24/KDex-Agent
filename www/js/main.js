@@ -2193,7 +2193,8 @@ function errLine(text, opts = {}) {
   const x = explainGitError(text);
   const fixBtn = x.fix === 'pull' ? '<button class="btn sm" data-fx="pull">' + ICON('down') + '<span class="lbl">Pull now</span></button>'
     : x.fix === 'retry' && opts.retry ? '<button class="btn sm" data-fx="retry">' + ICON('refresh') + '<span class="lbl">Retry</span></button>' : '';
-  el.innerHTML = '<div class="gerr"><span class="gic">' + ICON('alert') + '</span><div class="gtx"><div class="gt1">' + esc(x.title) + '</div>' + (x.body ? '<div class="gt2">' + esc(midCut(x.body)).replace(/\n/g, '<br>') + '</div>' : '') +
+  const hasBody = !!(x.body && String(x.body).trim());
+  el.innerHTML = '<div class="gerr' + (hasBody || fixBtn ? '' : ' one') + '"><span class="gic">' + ICON('alert') + '</span><div class="gtx"><div class="gt1">' + esc(x.title) + '</div>' + (hasBody ? '<div class="gt2">' + esc(midCut(x.body)).replace(/\n/g, '<br>') + '</div>' : '') +
     (fixBtn ? '<div class="erract">' + fixBtn + '</div>' : '') + '</div></div>';
   $$('[data-fx]', el).forEach((b) => b.onclick = () => {
     const f = S.folder; const k = b.dataset.fx;

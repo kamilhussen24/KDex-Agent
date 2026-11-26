@@ -708,3 +708,5 @@ html[data-theme=dark] .exithint{box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .gone-ic { width: 48px; height: 48px; border-radius: 50%; background: var(--bg-warning, #fdf3d8); color: var(--text-warning, #8a5a00); display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; }
 .gone-ic svg { width: 24px; height: 24px; }
 .gone .btn:not(.primary), .gone .btn:not(.primary) .lbl { color: var(--text-danger, #c0392b); }
+.gerr.one{align-items:center}
+.gerr.one .gt1{line-height:30px}

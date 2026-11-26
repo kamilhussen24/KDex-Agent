@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.16]
+
+### Fixed
+- A one-line Git error (for example `HTTP Error: 422 422`) is now centred next to its icon instead of sitting at the top of the box.
+
 ## [1.54.15]
 
 ### Fixed
