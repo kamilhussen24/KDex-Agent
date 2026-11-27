@@ -321,7 +321,7 @@ export async function planWrite(name, args, folder) {
   }
   const rel = cleanRel(args.path);
   if (!rel) throw new Error('path is required');
-  if (rel === '.git' || rel.startsWith('.git/')) throw new Error('The .git folder is managed by Git; use the git tools instead.');
+  if (isGitInternal(rel)) throw new Error('The .git folder is managed by Git; use the git tools instead.');
   if (BINARY_EXT.test(rel) && name !== 'delete_file') throw new Error('Binary files cannot be edited or written here. To move, copy or rename one, use run_command (mv, cp).');
   if (isSecretPath(rel) && await protectionOn()) throw new Error('"' + rel + '" is a protected secret file, so I cannot change or delete it (that would show its contents). To add a missing variable use request_env_var. ' + PROTECTED_MSG);
 

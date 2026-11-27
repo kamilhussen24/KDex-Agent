@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.20]
+- write_file and edit_file refuse any .git folder, also nested ones.
+- A Claude model that rejects thinking is not asked again in the same session.
+- shots/ added to .gitignore.
+
 ## [1.54.19]
 - A failed summary is no longer retried on every step of a turn.
 - "Cannot open git-receive-pack" counts as offline only when the text does not point to a certificate or login problem.

@@ -15,6 +15,7 @@
 //   { role:'tool', callId, name, content }
 import { httpStream } from './native.js';
 
+const NO_THINK = new Set(); // model ids that rejected extended thinking in this session
 const BUDGET = { low: 2048, medium: 6000, high: 16000 };
 const EFFORT = { low: 'low', medium: 'medium', high: 'high' };
 
@@ -231,7 +232,7 @@ async function* anthropicStream(o) {
   const { provider, apiKey, apiModel, system, messages, tools, think, signal } = o;
   let maxTokens = o.maxTokens;
   const base = trimBase(provider.baseUrl);
-  let thinkOn = !!BUDGET[think];
+  let thinkOn = !!BUDGET[think] && !NO_THINK.has(apiModel); // a model that refused thinking once is not asked again
 
   let res = null;
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -263,7 +264,7 @@ async function* anthropicStream(o) {
     if (res.status < 400) break;
     const text = await readAll(res.body);
     if (thinkOn && (res.status === 400 || res.status === 422) && /thinking|budget/i.test(text)) {
-      thinkOn = false;
+      thinkOn = false; NO_THINK.add(apiModel);
       yield { t: 'notice', text: 'This model does not support thinking. Answering without it.' };
       continue;
     }

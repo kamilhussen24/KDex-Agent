@@ -3,3 +3,4 @@ android/
 *.keystore
 *.jks
 __pycache__/
+shots/
