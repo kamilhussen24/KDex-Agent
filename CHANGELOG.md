@@ -7,6 +7,10 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.23]
+- The changed-file check now reads files up to 1 MB, the same limit as editing.
+- Claude thinking blocks from earlier turns are always sent back unchanged, also when Thinking is Off.
+
 ## [1.54.22]
 - Claude thinking: sends adaptive thinking with an effort level first; falls back to a token budget for older models, then to none. The result is remembered per model.
 - An approved edit is not applied if the file changed after it was proposed.

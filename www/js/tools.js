@@ -394,7 +394,7 @@ export async function applyWrite(plan, folder) {
     return 'Deleted ' + plan.path;
   }
   if (plan.before !== null && plan.before !== undefined) { // the file must still be what the change was made from
-    let now = null; try { const r = await fs.readText(folder.uri, plan.path, 200000); if (r && !r.binary && !r.truncated) now = r.text; } catch (e) { /* unreadable: let the write go on */ }
+    let now = null; try { const r = await fs.readText(folder.uri, plan.path, 1048576); if (r && !r.binary && !r.truncated) now = r.text; } catch (e) { /* unreadable: let the write go on */ }
     if (now !== null && now !== plan.before) throw new Error(plan.path + ' changed after this edit was proposed, so it was not applied. Read the file again and redo the edit.');
   }
   await fs.writeText(folder.uri, plan.path, plan.after);

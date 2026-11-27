@@ -207,7 +207,7 @@ function anthropicMessages(messages, withThinking) {
       push('user', blocks);
     } else if (m.role === 'assistant') {
       const blocks = [];
-      if (withThinking && m.raw && m.raw.length) m.raw.forEach((b) => blocks.push(b));
+      if (m.raw && m.raw.length) m.raw.forEach((b) => blocks.push(b)); // same-model thinking blocks go back unchanged, even with thinking off (new models think by themselves)
       if (m.text) blocks.push({ type: 'text', text: m.text });
       (m.calls || []).forEach((c) => blocks.push({ type: 'tool_use', id: c.id, name: c.name, input: c.args || {} }));
       push('assistant', blocks);
