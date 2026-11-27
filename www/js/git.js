@@ -374,9 +374,9 @@ export async function diffTexts(folder, path) {
   return { before: blob ? new TextDecoder().decode(blob) : '', after, binary: false, size, beforeSize, isNew, deleted };
 }
 export async function discard(folder, path) {
-  const before = await headText(folder, path);
-  if (before === null) { await safFs.remove(folder.uri, path); return; }
-  await safFs.writeText(folder.uri, path, before);
+  const before = await headBlob(folder, path);
+  if (!before) { await safFs.remove(folder.uri, path); return; }
+  await safFs.writeBytes(folder.uri, path, before); // exact bytes, so images and archives are restored intact
 }
 
 /** Remember which files are executable in HEAD so editing them does not silently drop the executable bit. */

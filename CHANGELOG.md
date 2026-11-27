@@ -7,6 +7,15 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.18]
+
+### Fixed
+- Long chats: an empty or failed summary no longer replaces the old one or silently drops older messages.
+- Helper requests (summary, notes, commit message) get a larger reply limit, so models that think first still answer.
+- Discard restores binary files (images, archives) byte for byte instead of corrupting them.
+- Unzip refuses to write inside any `.git` folder.
+- A "cannot open git-receive-pack" error is now reported as a connection problem.
+
 ## [1.54.17]
 
 ### Fixed

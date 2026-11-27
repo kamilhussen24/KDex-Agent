@@ -332,7 +332,7 @@ export async function repairHistory(chatId) {
 
 async function summarize(chat, rt, dropped) {
   const fresh = dropped.filter((m) => m.id > (chat.summarizedUpto || 0));
-  if (!fresh.length) return chat;
+  if (!fresh.length) return true;
   const block = fresh.map((m) => {
     if (m.role === 'user') return 'User: ' + (m.fileData && m.fileData.length ? '[attached ' + m.fileData.map((f) => f.name).join(', ') + '] ' : '') + (m.text || '').slice(0, 1200);
     if (m.role === 'assistant') return 'Assistant: ' + (m.text || '').slice(0, 1200) + (m.calls && m.calls.length ? ' [' + m.calls.map((c) => c.name + ' ' + ((c.args && c.args.path) || '')).join(', ') + ']' : '');
@@ -345,14 +345,15 @@ async function summarize(chat, rt, dropped) {
         'Write an UPDATED summary that keeps what is needed to continue: goals, decisions, important facts, names, file names, code identifiers, constraints and open tasks. ' +
         'Also record the current state of the work and the exact next step. Dense and factual, at most 650 words, same language as the user. Reply with the summary text only.',
       messages: [{ role: 'user', text: 'Previous summary:\n' + (chat.summary || '(none)') + '\n\nOlder messages:\n' + block }],
-      maxTokens: 1300,
+      maxTokens: 4000,
     });
     await recordUsage('summary', rt, usage);
+    if (!String(text || '').trim()) return false; // an empty reply must never replace the old summary
     chat.summary = text.trim();
     chat.summarizedUpto = fresh[fresh.length - 1].id;
     await db.put('chats', chat);
-  } catch (e) { /* keep going without a new summary */ }
-  return chat;
+  } catch (e) { return false; }
+  return true;
 }
 
 async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
@@ -380,7 +381,11 @@ async function buildContext(chat, rt, folder, settings, memory, scale = 1) {
   while (start < all.length && start < lastUser && all[start].role !== 'user') start++;
   if (start > lastUser) start = lastUser < 0 ? 0 : lastUser;
 
-  if (start > 0) await summarize(chat, rt, all.slice(0, start));
+  // If the summary could not be written, keep some of the older messages instead of silently forgetting them.
+  if (start > 0 && !(await summarize(chat, rt, all.slice(0, start)))) {
+    start = Math.max(0, start - 30);
+    while (start < lastUser && start > 0 && all[start].role !== 'user') start--;
+  }
 
   const userIdx = all.map((m, i) => (m.role === 'user' ? i : -1)).filter((i) => i >= 0);
   const keepImgFrom = userIdx.length >= 2 ? userIdx[userIdx.length - 2] : 0;
@@ -443,7 +448,7 @@ async function learn(text, rt, settings) {
   const known = (await getMemory()).slice(-40).map((m) => '- ' + m.text).join('\n') || '(none)';
   const { text: out, usage } = await complete({
     provider: rt.provider, apiKey: rt.apiKey, apiModel: rt.apiModel, system: LEARN_SYSTEM,
-    messages: [{ role: 'user', text: 'Known notes:\n' + known + '\n\nUser message:\n' + t }], maxTokens: 150,
+    messages: [{ role: 'user', text: 'Known notes:\n' + known + '\n\nUser message:\n' + t }], maxTokens: 600,
   });
   await recordUsage('memory', rt, usage);
   const saved = [];
@@ -986,7 +991,7 @@ export async function suggestCommitMessage(modelId, folder) {
   const { text, usage } = await complete({
     provider: rt.provider, apiKey: rt.apiKey, apiModel: rt.apiModel,
     system: 'Write one Git commit message: a short imperative subject line (max 60 characters), nothing else. No quotes, no prefixes, no explanation.',
-    messages: [{ role: 'user', text: 'Files changed: ' + ch.map((c) => c.kind + ' ' + c.path).join(', ') + '\n' + sample.slice(0, 6000) }], maxTokens: 60,
+    messages: [{ role: 'user', text: 'Files changed: ' + ch.map((c) => c.kind + ' ' + c.path).join(', ') + '\n' + sample.slice(0, 6000) }], maxTokens: 400,
   });
   await recordUsage('commit', rt, usage);
   return String(text || '').split('\n')[0].replace(/^["'`]+|["'`]+$/g, '').trim().slice(0, 100);

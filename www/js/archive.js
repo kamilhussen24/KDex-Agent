@@ -30,7 +30,9 @@ async function readZip(folder, rel) {
 function target(dest, name) {
   const parts = String(name).replace(/\\/g, '/').split('/').filter((s) => s && s !== '.');
   if (parts.includes('..') || /^[a-zA-Z]:/.test(parts[0] || '')) throw new Error('Unsafe path in zip: ' + name);
-  return cleanRel(dest + '/' + parts.join('/'));
+  const out = cleanRel(dest + '/' + parts.join('/'));
+  if (/(^|\/)\.git(\/|$)/.test(out)) throw new Error('A zip cannot write into a .git folder: ' + name);
+  return out;
 }
 function destFor(args, rel, names) {
   if (args.dest != null) return cleanRel(args.dest);

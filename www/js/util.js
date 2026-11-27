@@ -81,7 +81,7 @@ export async function copyText(text) {
 
 /** Phone has no internet or the host cannot be reached: one plain sentence, or '' when the error is something else. */
 export const NO_NET = 'No internet connection. Connect and try again.';
-const NET_ERR = /ENETUNREACH|network is unreachable|unable to resolve host|UnknownHost|unknown host|No address associated|nodename nor servname|ENOTFOUND|EAI_AGAIN|Failed to fetch|NetworkError|Load failed|Software caused connection abort|No route to host|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK/i;
+const NET_ERR = /ENETUNREACH|network is unreachable|unable to resolve host|UnknownHost|unknown host|No address associated|nodename nor servname|ENOTFOUND|EAI_AGAIN|Failed to fetch|NetworkError|Load failed|Software caused connection abort|No route to host|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK|cannot open git-(receive|upload)-pack/i;
 /** The server was reached by name but would not take the connection (wrong address or port, server down). */
 export function connText(e, url) {
   const m = String((e && e.message) || e || '');
