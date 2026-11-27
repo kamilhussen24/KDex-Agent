@@ -596,6 +596,9 @@ export async function freshHistory(folder, message, { onProgress, signal, step =
   if (!token) throw new Error('No token for ' + hostOf(url) + '. Add one in Identity and tokens first.');
   let branch = await currentBranch(folder);
   if (!branch || /detached/.test(branch)) branch = 'main';
+  step('Checking the remote');
+  try { await fetchRemote(folder, { signal }); } // proves the network and the token work before anything is deleted
+  catch (e) { if (netText(e) || /auth|token|401|403|permission|denied/i.test(String((e && e.message) || e))) throw new Error('Could not reach the remote, so nothing was changed. ' + ((e && e.message) || e)); }
   step('Removing old history');
   await remove(folder); resetGitCache(folder);
   step('Saving files');
@@ -603,7 +606,8 @@ export async function freshHistory(folder, message, { onProgress, signal, step =
   resetGitCache(folder);
   await commit(folder, message || 'Initial commit');
   step('Uploading');
-  return push(folder, { force: true, onProgress, signal });
+  try { return await push(folder, { force: true, onProgress, signal }); }
+  catch (e) { throw new Error(((e && e.message) || String(e)) + ' The remote still has its old history. Local commits that were never pushed are gone; Try Start fresh history again, or clone the remote to get its old history.'); }
 }
 export async function discardAll(folder) {
   const ch = await status(folder);

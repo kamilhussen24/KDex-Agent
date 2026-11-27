@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.24]
+- SSH upload of a file over 512 KB goes to a temp file first and replaces the real file only when complete (permissions kept).
+- The Git token is visible only to git in Termux commands, not to other commands in the same chain.
+- Start fresh history checks the remote before deleting anything, and explains clearly if the push fails.
+
 ## [1.54.23]
 - The changed-file check now reads files up to 1 MB, the same limit as editing.
 - Claude thinking blocks from earlier turns are always sent back unchanged, also when Thinking is Off.

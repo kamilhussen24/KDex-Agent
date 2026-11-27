@@ -226,6 +226,17 @@ public class KdexRemote {
                 f.rename(inRoot(a, path), to);
                 return new HashMap<String, Object>();
             }
+            case "replace": { // move a fully uploaded temp file over the real one, keeping its permissions
+                String tmp = inRoot(a, path); String to = inRoot(a, a.getOrDefault("to", ""));
+                String old = to + ".kdex-old";
+                boolean had = false;
+                try { SftpATTRS at = f.stat(to); had = true; f.chmod(at.getPermissions() & 07777, tmp); } catch (SftpException e) { had = false; }
+                if (had) f.rename(to, old);
+                try { f.rename(tmp, to); }
+                catch (Exception e) { if (had) { try { f.rename(old, to); } catch (Exception ignore) { /* keep going */ } } throw e; }
+                if (had) { try { f.rm(old); } catch (Exception ignore) { /* a leftover .kdex-old is harmless */ } }
+                return new HashMap<String, Object>();
+            }
             default: throw new Exception("Unknown operation: " + op);
         }
     }

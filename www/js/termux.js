@@ -192,7 +192,9 @@ async function withGitToken(command, folder) {
   if (!token) return { command: (env.length ? 'export ' + env.join(' ') + '; ' : '') + command, secret: null, host };
   const user = /gitlab/.test(host) ? 'oauth2' : /bitbucket/.test(host) ? 'x-token-auth' : 'git';
   const pre = 'mkdir -p "$HOME/.kdex" && printf \'%s\\n\' \'#!/bin/sh\' \'case "$1" in Username*) echo "$KDEX_GIT_USER";; *) echo "$KDEX_GIT_TOKEN";; esac\' > "$HOME/.kdex/askpass" && chmod 700 "$HOME/.kdex/askpass"; ' +
-    'export GIT_ASKPASS="$HOME/.kdex/askpass" GIT_TERMINAL_PROMPT=0 KDEX_GIT_USER=' + shq(user) + ' KDEX_GIT_TOKEN=' + shq(token) + (env.length ? ' ' + env.join(' ') : '') + '; ';
+    // the token lives only inside this git wrapper, so no other command in the chain can read it
+    (env.length ? 'export ' + env.join(' ') + '; ' : '') +
+    'git() { GIT_ASKPASS="$HOME/.kdex/askpass" GIT_TERMINAL_PROMPT=0 KDEX_GIT_USER=' + shq(user) + ' KDEX_GIT_TOKEN=' + shq(token) + ' command git "$@"; }; ';
   return { command: pre + command, secret: token, host };
 }
 

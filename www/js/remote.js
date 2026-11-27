@@ -87,13 +87,22 @@ export async function remoteRead(uri, path, { onProgress, signal } = {}) {
 }
 /** Uploads a file in pieces. The first piece replaces any old file, the rest are appended. */
 export async function remoteWrite(uri, path, data, { onProgress, signal } = {}) {
+  // A big upload goes to a temp file first and replaces the real file only when it is complete, so a lost connection never leaves a half-written file.
+  const safe = data.length > CHUNK;
+  const target = safe ? path + '.kdex-part' : path;
   let sent = 0;
-  do {
-    if (signal && signal.aborted) throw new Error('Cancelled.');
-    const part = data.subarray(sent, sent + CHUNK);
-    await call(uri, 'write', { path, b64: bytesToB64(part), append: sent ? '1' : '0' });
-    sent += part.length; if (onProgress) onProgress(sent, data.length);
-  } while (sent < data.length);
+  try {
+    do {
+      if (signal && signal.aborted) throw new Error('Cancelled.');
+      const part = data.subarray(sent, sent + CHUNK);
+      await call(uri, 'write', { path: target, b64: bytesToB64(part), append: sent ? '1' : '0' });
+      sent += part.length; if (onProgress) onProgress(sent, data.length);
+    } while (sent < data.length);
+    if (safe) await call(uri, 'replace', { path: target, to: path });
+  } catch (e) {
+    if (safe) { try { await call(uri, 'remove', { path: target }); } catch (x) { /* best effort */ } }
+    throw e;
+  }
 }
 
 /** Runs one command on the server, in a folder inside the start folder. Resolves { stdout, stderr, exitCode, errmsg }. */
