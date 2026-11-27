@@ -2451,7 +2451,8 @@ function bindGit(folder, st, body) {
   if ($('#gFresh')) $('#gFresh').onclick = async () => {
     const m = await askText('Start fresh history?', 'Commit message', 'Initial commit');
     if (!m) return;
-    if (!await confirmBox('Delete all old commits?', 'All old commits are deleted and replaced by one commit. Then "' + st.branch + '" is force pushed to the remote. Other remote branches and tags are not touched.', 'Start fresh')) return;
+    let lost = ''; try { const ab = await G.aheadBehind(folder); if (ab && ab.ahead > 0) lost = ' ' + ab.ahead + ' commit' + (ab.ahead === 1 ? '' : 's') + ' not yet pushed will be lost too.'; } catch (e) { /* unknown */ }
+    if (!await confirmBox('Delete all old commits?', 'All old commits are deleted and replaced by one commit. Then "' + st.branch + '" is force pushed to the remote. Other remote branches and tags are not touched.' + lost, 'Start fresh')) return;
     run('Starting fresh', (pr, sg) => G.freshHistory(folder, m, { onProgress: pr, signal: sg }), true);
   };
   if ($('#gWipe')) $('#gWipe').onclick = async () => {

@@ -7,6 +7,12 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.19]
+- A failed summary is no longer retried on every step of a turn.
+- "Cannot open git-receive-pack" counts as offline only when the text does not point to a certificate or login problem.
+- Start fresh history warns when local commits are not pushed yet.
+- list_dir refuses .git paths.
+
 ## [1.54.18]
 
 ### Fixed

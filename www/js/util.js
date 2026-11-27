@@ -81,7 +81,8 @@ export async function copyText(text) {
 
 /** Phone has no internet or the host cannot be reached: one plain sentence, or '' when the error is something else. */
 export const NO_NET = 'No internet connection. Connect and try again.';
-const NET_ERR = /ENETUNREACH|network is unreachable|unable to resolve host|UnknownHost|unknown host|No address associated|nodename nor servname|ENOTFOUND|EAI_AGAIN|Failed to fetch|NetworkError|Load failed|Software caused connection abort|No route to host|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK|cannot open git-(receive|upload)-pack/i;
+const NET_ERR = /ENETUNREACH|network is unreachable|unable to resolve host|UnknownHost|unknown host|No address associated|nodename nor servname|ENOTFOUND|EAI_AGAIN|Failed to fetch|NetworkError|Load failed|Software caused connection abort|No route to host|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK/i;
+const GIT_OPEN_FAIL = /cannot open git-(receive|upload)-pack/i, NOT_NET = /ssl|certificate|certpath|handshake|not authorized|authentication|401|403/i;
 /** The server was reached by name but would not take the connection (wrong address or port, server down). */
 export function connText(e, url) {
   const m = String((e && e.message) || e || '');
@@ -91,5 +92,6 @@ export function connText(e, url) {
 }
 export function netText(e) {
   const m = String((e && e.message) || e || '');
+  if (GIT_OPEN_FAIL.test(m) && !NOT_NET.test(m)) return NO_NET; // JGit's generic message: a connection problem unless the text names a certificate or login problem
   return NET_ERR.test(m) ? NO_NET : '';
 }

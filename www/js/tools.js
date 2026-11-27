@@ -111,6 +111,7 @@ export async function runRead(name, args, folder) {
   args = args || {};
   if (name === 'list_dir') {
     const rel = cleanRel(args.path || '');
+    if (rel && isGitInternal(rel)) throw new Error('The .git folder is managed by Git; use the git tools instead.');
     const entries = (await fs.list(folder.uri, rel)).filter((e) => e.name !== '.git');
     entries.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
     if (!entries.length) return '(empty folder)';

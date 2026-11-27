@@ -330,7 +330,9 @@ export async function repairHistory(chatId) {
   }
 }
 
+const sumFailed = new Set(); // chats whose summary failed during the current turn: not tried again on every step
 async function summarize(chat, rt, dropped) {
+  if (sumFailed.has(chat.id)) return false;
   const fresh = dropped.filter((m) => m.id > (chat.summarizedUpto || 0));
   if (!fresh.length) return true;
   const block = fresh.map((m) => {
@@ -348,11 +350,11 @@ async function summarize(chat, rt, dropped) {
       maxTokens: 4000,
     });
     await recordUsage('summary', rt, usage);
-    if (!String(text || '').trim()) return false; // an empty reply must never replace the old summary
+    if (!String(text || '').trim()) { sumFailed.add(chat.id); return false; } // an empty reply must never replace the old summary
     chat.summary = text.trim();
     chat.summarizedUpto = fresh[fresh.length - 1].id;
     await db.put('chats', chat);
-  } catch (e) { return false; }
+  } catch (e) { sumFailed.add(chat.id); return false; }
   return true;
 }
 
@@ -498,6 +500,7 @@ export async function runTurn(ctx) {
   const toolsRun = planMode ? tools.filter((t) => PLAN_OK.has(t.name)) : tools;
   const maxTokens = Math.max(512, Math.min(settings.maxOut || 8000, 64000));
   let steps = 0;
+  sumFailed.delete(chat.id); // a new turn may try to summarise again
 
   const readSeen = new Set(); let ranTools = false; let scale = 1; let autoCont = 0; let nudged = 0;
   const seenSigs = new Map(); let errRun = 0; let stuck = '';
