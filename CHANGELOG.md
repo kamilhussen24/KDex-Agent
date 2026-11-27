@@ -7,6 +7,11 @@ for its version.
 
 ## [Unreleased]
 
+## [1.54.22]
+- Claude thinking: sends adaptive thinking with an effort level first; falls back to a token budget for older models, then to none. The result is remembered per model.
+- An approved edit is not applied if the file changed after it was proposed.
+- Android 15: the background service stops cleanly when the system time limit is reached.
+
 ## [1.54.20]
 - write_file and edit_file refuse any .git folder, also nested ones.
 - A Claude model that rejects thinking is not asked again in the same session.

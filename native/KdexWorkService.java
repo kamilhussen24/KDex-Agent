@@ -45,6 +45,11 @@ public class KdexWorkService extends Service {
         return START_NOT_STICKY;
     }
 
+    // Android 15 stops a data-sync service after about six hours a day and calls this; stop cleanly instead of crashing.
+    public void onTimeout(int startId, int fgsType) {
+        stopSelf();
+    }
+
     @Override
     public void onDestroy() {
         if (lock != null && lock.isHeld()) lock.release();

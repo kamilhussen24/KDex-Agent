@@ -15,7 +15,7 @@
 //   { role:'tool', callId, name, content }
 import { httpStream } from './native.js';
 
-const NO_THINK = new Set(); // model ids that rejected extended thinking in this session
+const THINK_MODE = new Map(); // model id -> 'adaptive' | 'budget' | 'off', learned in this session
 const BUDGET = { low: 2048, medium: 6000, high: 16000 };
 const EFFORT = { low: 'low', medium: 'medium', high: 'high' };
 
@@ -232,10 +232,12 @@ async function* anthropicStream(o) {
   const { provider, apiKey, apiModel, system, messages, tools, think, signal } = o;
   let maxTokens = o.maxTokens;
   const base = trimBase(provider.baseUrl);
-  let thinkOn = !!BUDGET[think] && !NO_THINK.has(apiModel); // a model that refused thinking once is not asked again
+  // Newer Claude models accept only adaptive thinking; older ones only a token budget. Try adaptive first, then the budget, then none.
+  let mode = BUDGET[think] ? (THINK_MODE.get(apiModel) || 'adaptive') : 'off';
+  let thinkOn = mode !== 'off';
 
   let res = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     const msgs = anthropicMessages(messages, thinkOn);
     // cache the stable prefix: everything before the newest turn
     if (msgs.length >= 2) {
@@ -252,7 +254,10 @@ async function* anthropicStream(o) {
         return x;
       });
     }
-    if (thinkOn) {
+    if (mode === 'adaptive') {
+      body.thinking = { type: 'adaptive' };
+      body.output_config = { effort: EFFORT[think] };
+    } else if (mode === 'budget') {
       body.thinking = { type: 'enabled', budget_tokens: BUDGET[think] };
       body.max_tokens = Math.max(body.max_tokens, BUDGET[think] + 2048);
     }
@@ -261,10 +266,11 @@ async function* anthropicStream(o) {
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (res.status < 400) break;
+    if (res.status < 400) { if (BUDGET[think]) THINK_MODE.set(apiModel, mode); break; }
     const text = await readAll(res.body);
+    if (mode === 'adaptive' && (res.status === 400 || res.status === 422) && /thinking|adaptive|effort|output_config/i.test(text)) { mode = 'budget'; continue; } // an older model: use a token budget
     if (thinkOn && (res.status === 400 || res.status === 422) && /thinking|budget/i.test(text)) {
-      thinkOn = false; NO_THINK.add(apiModel);
+      thinkOn = false; mode = 'off'; THINK_MODE.set(apiModel, 'off');
       yield { t: 'notice', text: 'This model does not support thinking. Answering without it.' };
       continue;
     }
